@@ -1,3 +1,26 @@
+# Build stage for sao (Tryton web client)
+FROM node:18-slim AS sao-builder
+
+WORKDIR /sao
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy sao source
+COPY sao/package.json sao/bower.json ./
+COPY sao/ ./
+
+# Install dependencies and build
+# Use --allow-root for bower and disable SSL verification for git
+RUN git config --global http.sslVerify false && \
+    npm install --legacy-peer-deps && \
+    npx bower install --allow-root && \
+    npx grunt
+
+# Main stage
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -28,6 +51,15 @@ RUN pip install --no-cache-dir \
     "pwdlib[argon2]>=0.2" \
     && pip install --no-cache-dir /app/trytond \
     && pip install --no-cache-dir /app/proteus
+
+# Copy built sao web client from builder stage
+# Include all necessary files: index.html, dist, bower_components, images, locale, sounds
+COPY --from=sao-builder /sao/index.html /app/www/index.html
+COPY --from=sao-builder /sao/dist /app/www/dist
+COPY --from=sao-builder /sao/bower_components /app/www/bower_components
+COPY --from=sao-builder /sao/images /app/www/images
+COPY --from=sao-builder /sao/locale /app/www/locale
+COPY --from=sao-builder /sao/sounds /app/www/sounds
 
 COPY trytond.conf /app/trytond.conf
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
