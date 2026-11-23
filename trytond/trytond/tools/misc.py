@@ -5,6 +5,7 @@
 Miscelleanous tools used by tryton
 """
 import importlib
+import importlib.resources
 import io
 import math
 import os
@@ -12,21 +13,15 @@ import re
 import types
 import unicodedata
 import warnings
-from array import array
 from collections.abc import Iterable, Sized
 from functools import cache, wraps
+from importlib.metadata import entry_points as _entry_points
 from itertools import chain, islice, tee, zip_longest
 
-from sql import As, Literal, Select
+from sql import As, Cast, Select
 from sql.conditionals import Case
-from sql.operators import Or
 
 from trytond.const import MODULES_GROUP, OPERATORS
-
-try:
-    from backports.entry_points_selectable import entry_points as _entry_points
-except ImportError:
-    from importlib.metadata import entry_points as _entry_points
 
 
 @cache
@@ -34,6 +29,7 @@ def entry_points():
     return _entry_points()
 
 
+@cache
 def import_module(name):
     try:
         ep, = entry_points().select(group=MODULES_GROUP, name=name)
@@ -73,13 +69,27 @@ def find_path(name, subdir='modules', _test=os.path.isfile):
                 path = secure_join(_root_path, module_name, module_path)
             else:
                 try:
-                    module = import_module(module_name)
+                    ep, = entry_points().select(
+                        group=MODULES_GROUP, name=module_name)
+                except ValueError:
+                    ep = None
+                try:
+                    if ep is None:
+                        spec = importlib.util.find_spec(
+                            f'{MODULES_GROUP}.{module_name}')
+                    else:
+                        spec = importlib.util.find_spec(ep.module)
                 except ModuleNotFoundError:
-                    path = secure_join(_root_path, subdir, name)
+                    raise FileNotFoundError(
+                        f"No such file or directory: {name!r}")
                 else:
-                    path = os.path.dirname(module.__file__)
-                    if module_path:
-                        path = secure_join(path, module_path)
+                    if spec and spec.has_location:
+                        path = os.path.dirname(spec.origin)
+                        if module_path:
+                            path = secure_join(path, module_path)
+                    else:
+                        raise FileNotFoundError(
+                            f"No such file or directory: {name!r}")
         else:
             path = secure_join(_root_path, subdir, name)
     else:
@@ -111,45 +121,11 @@ def get_smtp_server():
 
 
 def reduce_ids(field, ids):
-    '''
-    Return a small SQL expression for the list of ids and the sql column
-    '''
-    if __debug__:
-        def strict_int(value):
-            assert not isinstance(value, float) or value.is_integer(), \
-                "ids must be integer"
-            return int(value)
-    else:
-        strict_int = int
-    ids = list(map(strict_int, ids))
-    if not ids:
-        return Literal(False)
-    ids.sort()
-    prev = ids.pop(0)
-    continue_list = [prev, prev]
-    discontinue_list = array('l')
-    sql = Or()
-    for i in ids:
-        if i == prev:
-            continue
-        if i != prev + 1:
-            if continue_list[-1] - continue_list[0] < 5:
-                discontinue_list.extend([continue_list[0] + x for x in
-                    range(continue_list[-1] - continue_list[0] + 1)])
-            else:
-                sql.append((field >= continue_list[0])
-                    & (field <= continue_list[-1]))
-            continue_list = []
-        continue_list.append(i)
-        prev = i
-    if continue_list[-1] - continue_list[0] < 5:
-        discontinue_list.extend([continue_list[0] + x for x in
-            range(continue_list[-1] - continue_list[0] + 1)])
-    else:
-        sql.append((field >= continue_list[0]) & (field <= continue_list[-1]))
-    if discontinue_list:
-        sql.append(field.in_(discontinue_list))
-    return sql
+    from trytond.model.fields import SQL_OPERATORS
+    warnings.warn(
+        "reduce_ids is deprecated use trytond.fields.SQL_OPERATORS['in']",
+        DeprecationWarning)
+    return SQL_OPERATORS['in'](field, ids)
 
 
 def reduce_domain(domain):
@@ -185,9 +161,11 @@ def reduce_domain(domain):
 
 def grouped_slice(records, count=None):
     'Grouped slice'
-    from trytond.transaction import Transaction
     if count is None:
-        count = Transaction().database.IN_MAX
+        warnings.warn(
+            "grouped_slice without size is deprecated",
+            DeprecationWarning)
+        count = 1
     count = max(1, count)
     if not isinstance(records, Sized):
         records = list(records)
@@ -211,8 +189,15 @@ def is_instance_method(cls, method):
 def resolve(name):
     "Resolve a dotted name to a global object."
     name = name.split('.')
-    used = name.pop(0)
-    found = importlib.import_module(used)
+    if name[:2] == ['trytond', 'modules']:
+        # import the Tryton module using entry point
+        name = name[2:]
+        used = name.pop(0)
+        found = import_module(used)
+        used = found.__name__
+    else:
+        used = name.pop(0)
+        found = importlib.import_module(used)
     for n in name:
         used = used + '.' + n
         try:
@@ -257,6 +242,8 @@ def unescape_wildcard(string, wildcards='%_', escape='\\'):
 
 
 def is_full_text(value, escape='\\'):
+    if not value:
+        return False
     escaped = strip_wildcard(value, escape=escape)
     escaped = escaped.replace(escape + '%', '').replace(escape + '_', '')
     if '%' in escaped or '_' in escaped:
@@ -302,9 +289,11 @@ def sortable_values(func):
 def sql_pairing(x, y):
     """Return SQL expression to pair x and y
     Pairing function from http://szudzik.com/ElegantPairing.pdf"""
-    return Case(
-        (x < y, (y * y) + x),
-        else_=(x * x) + x + y)
+    x = Cast(x, 'BIGINT')
+    y = Cast(y, 'BIGINT')
+    return Cast(Case(
+            (x < y, (y * y) + x),
+            else_=(x * x) + x + y), 'BIGINT')
 
 
 def pair(x, y):

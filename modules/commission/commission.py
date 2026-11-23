@@ -1,6 +1,7 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
 
+from collections import defaultdict
 from decimal import Decimal
 from itertools import groupby
 
@@ -21,8 +22,7 @@ from trytond.modules.currency.fields import Monetary
 from trytond.modules.product import price_digits, round_price
 from trytond.pool import Pool
 from trytond.pyson import Bool, Eval, Id, If
-from trytond.tools import (
-    decistmt, grouped_slice, reduce_ids, sqlite_apply_types)
+from trytond.tools import decistmt, sqlite_apply_types
 from trytond.transaction import Transaction, check_access
 from trytond.wizard import Button, StateAction, StateView, Wizard
 
@@ -126,19 +126,17 @@ class Agent(DeactivableMixin, ModelSQL, ModelView):
         commission = Commission.__table__()
         cursor = Transaction().connection.cursor()
 
-        ids = [a.id for a in agents]
-        amounts = dict.fromkeys(ids, None)
-        for sub_ids in grouped_slice(ids):
-            where = reduce_ids(commission.agent, sub_ids)
-            where &= commission.invoice_line == Null
-            query = commission.select(
-                commission.agent, Sum(commission.amount).as_('pending_amount'),
-                where=where,
-                group_by=commission.agent)
-            if backend.name == 'sqlite':
-                sqlite_apply_types(query, [None, 'NUMERIC'])
-            cursor.execute(*query)
-            amounts.update(dict(cursor))
+        amounts = defaultdict(lambda: None)
+        query = commission.select(
+            commission.agent, Sum(commission.amount).as_('pending_amount'),
+            where=fields.SQL_OPERATORS['in'](
+                commission.agent, map(int, agents))
+            & (commission.invoice_line == Null),
+            group_by=commission.agent)
+        if backend.name == 'sqlite':
+            sqlite_apply_types(query, [None, 'NUMERIC'])
+        cursor.execute(*query)
+        amounts.update(dict(cursor))
         if backend.name == 'sqlite':
             for agent_id, amount in amounts.items():
                 if amount is not None:
@@ -475,28 +473,26 @@ class Commission(ModelSQL, ModelView, ChatMixin):
         def line_key(c):
             return c._group_to_invoice_line_key()
         commissions.sort(key=invoice_key)
-        invoices = []
-        invoice_lines = []
-        to_save = []
-        for key, commissions in groupby(commissions, key=invoice_key):
-            commissions = list(commissions)
-            key = dict(key)
-            invoice = cls._get_invoice(key)
-            invoices.append(invoice)
+        with cls.bulk_save(auto=False) as save:
+            with InvoiceLine.bulk_save(auto=False) as invoice_line_save, \
+                    Invoice.bulk_save(auto=False) as invoice_save:
+                for key, commissions in groupby(commissions, key=invoice_key):
+                    commissions = list(commissions)
+                    key = dict(key)
+                    invoice = cls._get_invoice(key)
+                    invoice_save.push(invoice)
 
-            commissions.sort(key=line_key)
-            for key, commissions in groupby(commissions, key=line_key):
-                commissions = [c for c in commissions if not c.invoice_line]
-                key = dict(key)
-                invoice_line = cls._get_invoice_line(key, invoice, commissions)
-                invoice_lines.append(invoice_line)
-                for commission in commissions:
-                    commission.invoice_line = invoice_line
-                    to_save.append(commission)
-        Invoice.save(invoices)
-        InvoiceLine.save(invoice_lines)
-        Invoice.update_taxes(invoices)
-        cls.save(to_save)
+                    commissions.sort(key=line_key)
+                    for key, commissions in groupby(commissions, key=line_key):
+                        commissions = [
+                            c for c in commissions if not c.invoice_line]
+                        key = dict(key)
+                        invoice_line = cls._get_invoice_line(
+                            key, invoice, commissions)
+                        invoice_line_save.push(invoice_line)
+                        for commission in commissions:
+                            commission.invoice_line = invoice_line
+                            save.push(commission)
 
         if Move and hasattr(Move, 'update_unit_price'):
             moves = list(set().union(*(c.stock_moves for c in commissions)))

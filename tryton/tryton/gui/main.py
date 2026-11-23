@@ -477,10 +477,16 @@ class Main(Gtk.Application):
                 process_exception=False)
         except RPCException:
             return False
-        for id_, name, icon in favorites:
-            menuitem = Gtk.MenuItem(label=name)
-            menuitem.connect('activate', _action_favorite, id_)
+        if not favorites:
+            menuitem = Gtk.MenuItem(
+                label=_("Check menu entries to add favorites"))
+            menuitem.set_sensitive(False)
             self.menu_favorite.add(menuitem)
+        else:
+            for id_, name, icon in favorites:
+                menuitem = Gtk.MenuItem(label=name)
+                menuitem.connect('activate', _action_favorite, id_)
+                self.menu_favorite.add(menuitem)
         self.menu_favorite.show_all()
 
     def favorite_unset(self):
@@ -1007,10 +1013,13 @@ class Main(Gtk.Application):
                 attributes['view_ids'] = loads(params.get('views', '[]'))
                 if 'limit' in params:
                     attributes['limit'] = loads(params.get('limit', 'null'))
-                attributes['name'] = loads(params.get('name', '""'))
+                attributes['name'] = (loads(n)
+                    if (n := params.get('name'))
+                    else common.MODELNAME.get(model))
                 attributes['search_value'] = loads(
                     params.get('search_value', '[]'))
                 attributes['domain'] = loads(params.get('domain', '[]'))
+                attributes['context_domain'] = params.get('context_domain')
                 attributes['context'] = loads(params.get('context', '{}'))
                 attributes['context_model'] = params.get('context_model')
                 attributes['tab_domain'] = loads(

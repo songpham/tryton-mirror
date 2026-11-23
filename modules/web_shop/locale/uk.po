@@ -58,6 +58,11 @@ msgctxt "field:sale.sale,web_status_url:"
 msgid "Web Status URL"
 msgstr ""
 
+#, fuzzy
+msgctxt "field:sale.sale,web_url:"
+msgid "Web URL"
+msgstr "Веб-магазини"
+
 msgctxt "field:web.shop,attributes:"
 msgid "Attributes"
 msgstr "Атрибути"
@@ -110,6 +115,10 @@ msgstr "Товари"
 msgctxt "field:web.shop,products_removed:"
 msgid "Products Removed"
 msgstr "Товари видалено"
+
+msgctxt "field:web.shop,sale_draft_abandon_delay:"
+msgid "Sale Draft Abandon Delay"
+msgstr ""
 
 msgctxt "field:web.shop,sale_price_list:"
 msgid "Sale Price List"
@@ -188,6 +197,11 @@ msgctxt "help:sale.sale,web_status_url:"
 msgid "The URL where the customer can check the order's current status."
 msgstr ""
 
+#, fuzzy
+msgctxt "help:sale.sale,web_url:"
+msgid "The URL of the order on the web shop."
+msgstr "Інтерфейс, який використовується для веб-магазину."
+
 msgctxt "help:web.shop,attributes:"
 msgid "The list of attributes to publish."
 msgstr "Список атрибутів для публікації."
@@ -216,6 +230,12 @@ msgstr "Список товарів для публікації."
 msgctxt "help:web.shop,products_removed:"
 msgid "The list of products to unpublish."
 msgstr "Список товарів, публікацію яких потрібно скасувати."
+
+msgctxt "help:web.shop,sale_draft_abandon_delay:"
+msgid ""
+"The time period after which a sale made via the web shop without modification is cancelled.\n"
+"Leave empty to never cancel any draft sales."
+msgstr ""
 
 msgctxt "help:web.shop,sale_price_list:"
 msgid "The price list to compute sale price of products."
@@ -292,6 +312,10 @@ msgstr "Веб-магазин - Товар"
 msgctxt "model:web.shop-stock.location,string:"
 msgid "Web Shop - Stock Location"
 msgstr "Веб-магазин – Категорія товару"
+
+msgctxt "selection:ir.cron,method:"
+msgid "Cancel Abandoned Sales from Web Shop"
+msgstr ""
 
 msgctxt "view:product.template:"
 msgid "Edit"

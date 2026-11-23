@@ -2,8 +2,8 @@
 # this repository contains the full copyright notices and license terms.
 import datetime as dt
 import logging
-import urllib.parse
 import uuid
+import warnings
 from decimal import Decimal
 from itertools import groupby
 from operator import attrgetter
@@ -29,7 +29,6 @@ from trytond.sendmail import send_message_transactional
 from trytond.tools import sql_pairing
 from trytond.tools.email_ import set_from_header
 from trytond.transaction import Transaction
-from trytond.url import http_host
 from trytond.wizard import Button, StateTransition, StateView, Wizard
 
 from .common import StripeCustomerMethodMixin
@@ -40,7 +39,11 @@ stripe.max_network_retries = config.getint(
     'account_payment_stripe', 'max_network_retries', default=3)
 
 RETRY_CODES = {'lock_timeout', 'token_in_use'}
-STRIPE_VERSION = '2023-08-16'
+STRIPE_VERSION = '2026-10-28.endive'
+if STRIPE_VERSION != stripe.api_version:
+    warnings.warn(
+        f"A new Stripe API version {stripe.api_version!r} is available",
+        DeprecationWarning)
 
 
 class Journal(metaclass=PoolMeta):
@@ -98,16 +101,11 @@ class CheckoutMixin:
     @property
     def stripe_checkout_url(self):
         pool = Pool()
-        database = Transaction().database.name
-        ModelData = pool.get('ir.model.data')
-        URL = pool.get('ir.action.url')
-        action = URL(ModelData.get_id('account_payment_stripe.url_checkout'))
-        return action.url % {
-            'http_host': http_host(),
-            'database': database,
-            'model': self.__class__.__name__,
-            'id': self.stripe_checkout_id,
-            }
+        StripeRouter = pool.get('account_payment_stripe', type='router')
+        return StripeRouter.url_for(
+            'checkout',
+            model=self.__class__.__name__,
+            id=self.stripe_checkout_id)
 
 
 class Payment(StripeCustomerMethodMixin, CheckoutMixin, metaclass=PoolMeta):
@@ -164,8 +162,9 @@ class Payment(StripeCustomerMethodMixin, CheckoutMixin, metaclass=PoolMeta):
                 | ~Eval('stripe_capture_needed')),
             })
     stripe_idempotency_key = fields.Char(
-        "Stripe Idempotency Key", readonly=True, strip=False,
+        "Stripe Idempotency Key", strip=False,
         states={
+            'readonly': Eval('id', -1) >= 0,
             'invisible': Eval('process_method') != 'stripe',
             })
     stripe_error_message = fields.Char("Stripe Error Message", readonly=True,
@@ -283,10 +282,6 @@ class Payment(StripeCustomerMethodMixin, CheckoutMixin, metaclass=PoolMeta):
     def default_stripe_capturable(cls):
         return False
 
-    @classmethod
-    def default_stripe_idempotency_key(cls):
-        return uuid.uuid4().hex
-
     @fields.depends('process_method',
         'stripe_token', 'stripe_payment_intent_id',
         'stripe_customer_source', 'stripe_customer_source_selection',
@@ -350,9 +345,7 @@ class Payment(StripeCustomerMethodMixin, CheckoutMixin, metaclass=PoolMeta):
         if mode == 'create':
             if 'stripe_idempotency_key' not in values:
                 # Ensure to get a different key for each record
-                # default methods are called only once
-                values['stripe_idempotency_key'] = (
-                    cls.default_stripe_idempotency_key())
+                values['stripe_idempotency_key'] = uuid.uuid4().hex
         return values
 
     @classmethod
@@ -710,7 +703,7 @@ class Payment(StripeCustomerMethodMixin, CheckoutMixin, metaclass=PoolMeta):
         assert (
             (charge.id == self.stripe_charge_id)
             or (charge.payment_intent == self.stripe_payment_intent_id))
-        amount = charge.amount - charge.amount_refunded
+        amount = charge.amount_captured - charge.amount_refunded
         if (self.state not in {'succeeded', 'failed'}
                 or self.stripe_amount != amount
                 or (not amount and self.state != 'failed')):
@@ -835,7 +828,7 @@ class Refund(Workflow, ModelSQL, ModelView):
                     'depends': ['state'],
                     },
                 'approve': {
-                    'invisible': Eval('state') != 'draft',
+                    'invisible': Eval('state') != 'submitted',
                     'icon': 'tryton-forward',
                     'depends': ['state'],
                     },
@@ -843,10 +836,6 @@ class Refund(Workflow, ModelSQL, ModelView):
 
     def get_stripe_amount(self, name):
         return int(self.amount * 10 ** self.currency.digits)
-
-    @classmethod
-    def default_stripe_idempotency_key(cls):
-        return uuid.uuid4().hex
 
     @fields.depends('payment', '_parent_payment.currency')
     def on_change_with_currency(self, name=None):
@@ -866,9 +855,7 @@ class Refund(Workflow, ModelSQL, ModelView):
         if mode == 'create':
             if 'stripe_idempotency_key' not in values:
                 # Ensure to get a different key for each record
-                # default methods are called only once
-                values['stripe_idempotency_key'] = (
-                    cls.default_stripe_idempotency_key())
+                values['stripe_idempotency_key'] = uuid.uuid4().hex
         return values
 
     @classmethod
@@ -1027,18 +1014,14 @@ class Account(ModelSQL, ModelView):
 
     @fields.depends('webhook_identifier')
     def on_change_with_webhook_endpoint(self, name=None):
+        pool = Pool()
+        StripeRouter = pool.get('account_payment_stripe', type='router')
+
         if not self.webhook_identifier:
             return ''
-        # TODO add basic authentication support
-        url_part = {
-            'identifier': self.webhook_identifier,
-            'database_name': Transaction().database.name,
-            }
-        return http_host() + (
-            urllib.parse.quote(
-                '/%(database_name)s/account_payment_stripe'
-                '/webhook/%(identifier)s'
-                % url_part))
+        return StripeRouter.url_for(
+            'webhooks_endpoint', account=self.webhook_identifier,
+            _method='POST')
 
     @classmethod
     def default_setup_intent_delay(cls):
@@ -1068,16 +1051,16 @@ class Account(ModelSQL, ModelView):
                     account.save()
                     Transaction().commit()
 
-    def webhook(self, payload):
+    def webhook(self, event):
         """This method handles stripe webhook callbacks
 
         The return values are:
-            - None if the method could not handle payload['type']
-            - True if the payload has been handled
+            - None if the method could not handle event.type
+            - True if the event has been handled
             - False if the webhook should be retried by Stripe
         """
-        data = payload['data']
-        type_ = payload['type']
+        data = event.data
+        type_ = event.type
         if type_ == 'charge.succeeded':
             return self.webhook_charge_succeeded(data)
         if type_ == 'charge.captured':
@@ -1121,7 +1104,7 @@ class Account(ModelSQL, ModelView):
                 ('stripe_charge_id', '=', charge['id']),
                 ])
         if not payments:
-            payment_intent_id = charge.get('payment_intent')
+            payment_intent_id = getattr(charge, 'payment_intent', None)
             if payment_intent_id:
                 found = Payment.search([
                         ('stripe_payment_intent_id', '=', payment_intent_id),
@@ -1139,7 +1122,7 @@ class Account(ModelSQL, ModelView):
                 Payment.proceed([payment])
             payment.stripe_captured = charge['captured']
             payment.stripe_amount = (
-                charge['amount'] - charge['amount_refunded'])
+                charge['amount_captured'] - charge['amount_refunded'])
             payment.stripe_error_code = charge['failure_code']
             payment.stripe_error_message = charge['failure_message']
             payment.stripe_error_param = None
@@ -1176,7 +1159,7 @@ class Account(ModelSQL, ModelView):
         if not refunds:
             logger.error("charge.refund.updated: No refund '%s'", rf['id'])
         for refund in refunds:
-            refund.stripe_error_code = rf.get('failure_reason')
+            refund.stripe_error_code = getattr(rf, 'failure_reason', None)
             if rf['status'] == 'pending':
                 Refund.process([refund])
             elif rf['status'] == 'succeeded':
@@ -1197,7 +1180,7 @@ class Account(ModelSQL, ModelView):
                 ('stripe_charge_id', '=', charge['id']),
                 ])
         if not payments:
-            payment_intent_id = charge.get('payment_intent')
+            payment_intent_id = getattr(charge, 'payment_intent', None)
             if payment_intent_id:
                 found = Payment.search([
                         ('stripe_payment_intent_id', '=', payment_intent_id),

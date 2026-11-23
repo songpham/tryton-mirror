@@ -11,8 +11,8 @@ from trytond.modules.currency.currency import CronFetchError
 from trytond.pool import PoolMeta
 from trytond.pyson import Eval, If
 
-URL_10DAYS = 'https://bnr.ro/nbrfxrates10days.xml'
-URL_YEAR = 'https://bnr.ro/files/xml/years/nbrfxrates%s.xml'
+URL_10DAYS = 'https://curs.bnr.ro/nbrfxrates10days.xml'
+URL_YEAR = 'https://curs.bnr.ro/files/xml/years/nbrfxrates%s.xml'
 
 
 class Cron(metaclass=PoolMeta):
@@ -44,12 +44,12 @@ class Cron(metaclass=PoolMeta):
 
         origin, = tree.xpath(
             '//x:Body/x:OrigCurrency',
-            namespaces={'x': 'http://www.bnr.ro/xsd'})
+            namespaces={'x': 'https://www.bnr.ro/xsd'})
         assert origin.text == self.currency.code
 
         cubes = tree.xpath(
             '//x:Body/x:Cube[@date="%s"]' % date.isoformat(),
-            namespaces={'x': 'http://www.bnr.ro/xsd'})
+            namespaces={'x': 'https://www.bnr.ro/xsd'})
         if cubes:
             cube, = cubes
             return {

@@ -3,16 +3,10 @@
 (function() {
     'use strict';
 
-    // https://developer.mozilla.org/en-US/docs/Web/API/WindowOrWorkerGlobalScope/btoa#Unicode_strings
-    function utoa(str) {
-        return window.btoa(unescape(encodeURIComponent(str)));
-    }
-
     Sao.Session = Sao.class_(Object, {
         init: function(database, login) {
             this.login_service = null;
             this.user_id = null;
-            this.session = null;
             this.bus_url_host = null;
             this.cache = new Cache();
             this.prm = jQuery.when();  // renew promise
@@ -24,9 +18,6 @@
             if (!Sao.Session.current_session) {
                 Sao.Session.current_session = this;
             }
-        },
-        get_auth: function() {
-            return utoa(this.login + ':' + this.user_id + ':' + this.session);
         },
         do_login: function(parameters) {
             var dfd = jQuery.Deferred();
@@ -47,14 +38,12 @@
             new Sao.Login(func, this).run().then(result => {
                 this.login = login;
                 this.user_id = result[0];
-                this.session = result[1];
-                this.bus_url_host = result[2];
+                this.bus_url_host = result[1];
                 this.store();
                 this.renew_device_cookie();
                 dfd.resolve();
             }, () => {
                 this.user_id = null;
-                this.session = null;
                 this.bus_url_host = null;
                 this.store();
                 dfd.reject();
@@ -62,29 +51,20 @@
             return dfd.promise();
         },
         do_logout: function() {
-            if (!(this.user_id && this.session)) {
+            if (!this.user_id) {
                 return jQuery.when();
             }
-            var args = {
-                'id': 0,
-                'method': 'common.db.logout',
-                'params': []
-            };
             var prm = jQuery.ajax({
-                'headers': {
-                    'Authorization': 'Session ' + this.get_auth()
-                },
                 'contentType': 'application/json',
-                'data': JSON.stringify(args),
+                'data': JSON.stringify({}),
                 'dataType': 'json',
-                'url': '/' + this.database + '/',
+                'url': `${this.database}/session/logout`,
                 'type': 'post',
             });
             this.unstore();
             this.database = null;
             this.login = null;
             this.user_id = null;
-            this.session = null;
             if (Sao.Session.current_session === this) {
                 Sao.Session.current_session = null;
             }
@@ -103,7 +83,7 @@
                 'contentType': 'application/json',
                 'data': JSON.stringify(args),
                 'dataType': 'json',
-                'url': '/' + this.database + '/',
+                'url': (this.database || '.') + '/rpc/#' + args.method,
                 'type': 'post',
             });
         },
@@ -141,7 +121,7 @@
             sessionStorage.setItem('sao_context_' + this.database, context);
         },
         restore: function() {
-            if (this.database && !this.session) {
+            if (this.database) {
                 var session_data = localStorage.getItem(
                     'sao_session_' + this.database);
                 if (session_data !== null) {
@@ -150,7 +130,6 @@
                         this.login_service = session_data.login_service;
                         this.login = session_data.login;
                         this.user_id = session_data.user_id;
-                        this.session = session_data.session;
                         this.bus_url_host = session_data.bus_url_host;
                     }
                 }
@@ -160,7 +139,6 @@
             var session = {
                 'login': this.login,
                 'user_id': this.user_id,
-                'session': this.session,
                 'bus_url_host': this.bus_url_host,
             };
             session = JSON.stringify(session);
@@ -203,15 +181,16 @@
 
     Sao.Session.server_version = function() {
         var timeoutID = Sao.common.processing.show();
-        return jQuery.ajax({
-            'contentType': 'application/json',
-            'data': JSON.stringify({
+        let args = {
                 'id': 0,
                 'method': 'common.server.version',
                 'params': []
-            }),
+            };
+        return jQuery.ajax({
+            'contentType': 'application/json',
+            'data': JSON.stringify(args),
             'dataType': 'json',
-            'url': '/',
+            'url': 'rpc/#' + args.method,
             'type': 'post',
             'complete': [function() {
                 Sao.common.processing.hide(timeoutID);
@@ -229,12 +208,12 @@
             'class': 'form-control',
             'id': 'database',
             'name': 'database',
-        }).hide();
+        }).sao_hide();
         dialog.database_input = jQuery('<input/>', {
             'class': 'form-control',
             'id': 'database',
             'name': 'database',
-        }).hide();
+        }).sao_hide();
         dialog.login_input = jQuery('<input/>', {
             'class': 'form-control',
             'id': 'login',
@@ -280,7 +259,7 @@
         var database = database_url();
 
         var session = new Sao.Session(database, null);
-        if (session.session) {
+        if (session.user_id) {
             dfd.resolve(session);
             return dfd;
         }
@@ -298,7 +277,7 @@
         };
 
         var login = function() {
-            var login = dialog.login_input.val();
+            var login = dialog.login_input.val().trim();
             var database = database || dialog.database_select.val() ||
                 dialog.database_input.val();
             dialog.modal.find('.has-error').removeClass('has-error');
@@ -311,13 +290,13 @@
             session.database = database;
             session.login = login;
             session.restore();
-            (session.session ? jQuery.when() : session.do_login())
+            (session.user_id ? jQuery.when() : session.do_login())
                 .then(function() {
                     dialog.modal.modal('hide');
                     dfd.resolve(session);
                     dialog.modal.remove();
                     if (database_url() != database) {
-                        window.location = '#' + database;
+                        window.location.hash = database;
                     }
                 }, function() {
                     disable_form(false);
@@ -336,22 +315,24 @@
                 return;
             }
             disable_form();
-            var host = window.location.protocol + '//' + window.location.host;
-            var next = new URL(host + '/');
+            const base = (
+                window.location.protocol + '//' + window.location.host + window.location.pathname);
+            var next = new URL(base);
             next.searchParams.append('login_service', evt.data);
-            var url = new URL(host + '/' + database + evt.data);
+            var url = new URL(base + database + evt.data);
             url.searchParams.append('next', next.href);
             var service_window = window.open(url.href, '_blank', 'popup=1');
             const timer = window.setInterval(() => {
                 if (service_window.closed) {
                     window.clearInterval(timer);
                     session.database = database;
+                    session.login = null;
                     session.restore();
-                    if (session.session) {
+                    if (session.user_id) {
                         dfd.resolve(session);
                         dialog.modal.remove();
                         if (database_url() != database) {
-                            window.location = '#' + database;
+                            window.location.hash = database;
                         }
                     } else {
                         disable_form(false);
@@ -389,14 +370,17 @@
                 }
             }
             el.prop('readonly', databases.length == 1);
-            el.show();
+            el.sao_show();
             el.val(database || '');
         }, function() {
-            dialog.database_input.show();
+            dialog.database_input.sao_show();
         });
 
         jQuery.when(Sao.Authentication.services()).then(function(services) {
             if (services.length) {
+                let localhost = (
+                    (window.location.protocol == 'http:')
+                    && window.location.host.startsWith('localhost:'));
                 var panel_body = jQuery('<div/>', {
                     'class': 'panel-body',
                 }).append(jQuery('<p/>')
@@ -404,11 +388,25 @@
                 dialog.body.append(jQuery('<div/>', {
                     'class': 'panel panel-default',
                 }).append(panel_body));
-                for (const [name, url] of services) {
-                    panel_body.append(jQuery('<button/>', {
+                for (let service of services) {
+                    let button = jQuery('<button/>', {
                         'class': 'btn btn-block btn-default',
                         'type': 'button',
-                    }).text(name).click(url, login_service));
+                        'disabled': localhost,
+                    }).text(service.name).click(service.url, login_service);
+                    if (service.icon) {
+                        let icon = jQuery('<img/>', {
+                            'class': 'icon',
+                            'src': service.icon,
+                        });
+                        icon.prependTo(button);
+                    }
+                    panel_body.append(button);
+                }
+                if (localhost) {
+                    panel_body.append(jQuery('<p/>', {
+                        'class': 'text-warning',
+                    }).text(Sao.i18n.gettext("Disabled on localhost")));
                 }
             }
         });
@@ -420,7 +418,6 @@
             return session.prm;
         }
         var dfd = jQuery.Deferred();
-        session.session = null;
         session.prm = dfd.promise();
         if (!session.login_service) {
             session.do_login().then(dfd.resolve, function() {
@@ -440,7 +437,7 @@
                 if (service_window.closed) {
                     window.clearInterval(timer);
                     session.restore();
-                    if (session.session) {
+                    if (session.user_id) {
                         dfd.resolve();
                     } else {
                         Sao.logout();
@@ -471,17 +468,12 @@
                 'contentType': 'application/json',
                 'data': JSON.stringify(data),
                 'dataType': 'json',
-                'url': '/' + this.session.database + '/',
+                'url': `${this.session.database}/session/login`,
                 'type': 'post',
                 'complete': [function() {
                     Sao.common.processing.hide(timeoutID);
                 }]
             };
-            if (this.session.user_id && this.session.session) {
-                args.headers = {
-                    'Authorization': 'Session ' + this.session.get_auth()
-                };
-            }
             var ajax_prm = jQuery.ajax(args);
 
             var ajax_success = function(data) {
@@ -495,7 +487,7 @@
                     } else if (data.error[0].startsWith('429')) {
                         Sao.common.message.run(
                             Sao.i18n.gettext('Too many requests. Try again later.'),
-                            'tryton-error').always(dfd.resolve);
+                            'tryton-error').always(dfd.reject);
                     } else if (data.error[0].startsWith('404')) {
                         Sao.common.message.run(
                             Sao.i18n.gettext("Not found."),
@@ -525,7 +517,7 @@
                 } else if (query.status == 429) {
                     Sao.common.message.run(
                         Sao.i18n.gettext('Too many requests. Try again later.'),
-                        'tryton-error').always(dfd.resolve);
+                        'tryton-error').always(dfd.reject);
                 } else if (query.status == 404) {
                     Sao.common.message.run(
                         Sao.i18n.gettext("Not found."),
@@ -564,6 +556,9 @@
                         });
                     }).prependTo(dialog.footer);
                     dialog.modal.find('.modal-dialog').removeClass('modal-sm');
+                    prm.fail(() => {
+                        session.login = null;
+                    });
                     return dialog;
                 },
             });
@@ -617,15 +612,16 @@
 
     Sao.DB.list = function() {
         var timeoutID = Sao.common.processing.show();
-        return jQuery.ajax({
-            'contentType': 'application/json',
-            'data': JSON.stringify({
+        let args = {
                 'id': 0,
                 'method': 'common.db.list',
                 'params': []
-            }),
+            };
+        return jQuery.ajax({
+            'contentType': 'application/json',
+            'data': JSON.stringify(args),
             'dataType': 'json',
-            'url': '/',
+            'url': 'rpc/#' + args.method,
             'type': 'post',
             'complete': [function() {
                 Sao.common.processing.hide(timeoutID);
@@ -639,15 +635,16 @@
 
     Sao.Authentication.services = function() {
         var timeoutID = Sao.common.processing.show();
-        return jQuery.ajax({
-            'contentType': 'application/json',
-            'data': JSON.stringify({
+        let args = {
                 'id': 0,
                 'method': 'common.authentication.services',
                 'params': []
-            }),
+            }
+        return jQuery.ajax({
+            'contentType': 'application/json',
+            'data': JSON.stringify(args),
             'dataType': 'json',
-            'url': '/',
+            'url': 'rpc/#' + args.method,
             'type': 'post',
             'complete': [function() {
                 Sao.common.processing.hide(timeoutID);

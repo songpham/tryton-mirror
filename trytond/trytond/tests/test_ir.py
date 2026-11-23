@@ -17,15 +17,15 @@ except ImportError:
 
 from dateutil.relativedelta import relativedelta
 
+from trytond.convert import import_xml
 from trytond.ir.exceptions import SequenceAffixError
 from trytond.ir.lang import _replace
 from trytond.pool import Pool
 from trytond.pyson import Eval, If, PYSONEncoder
-from trytond.tools import timezone
+from trytond.tools import file_open, timezone
 from trytond.transaction import Transaction
 
-from .test_tryton import (
-    ModuleTestCase, TestCase, activate_module, drop_db, with_transaction)
+from .test_tryton import DBTestCase, ModuleTestCase, with_transaction
 
 
 class IrTestCase(ModuleTestCase):
@@ -99,6 +99,9 @@ class IrTestCase(ModuleTestCase):
     @with_transaction()
     def test_sequence_substitutions(self):
         'Test Sequence Substitutions'
+        with file_open('sequence.xml', subdir='tests') as xml:
+            import_xml(xml)
+
         pool = Pool()
         Sequence = pool.get('ir.sequence')
         SequenceType = pool.get('ir.sequence.type')
@@ -214,8 +217,8 @@ class IrTestCase(ModuleTestCase):
 
         model = 'ir.ui.view_tree_width'
         ViewTreeWidth.set_width(model, {
-                'user': 100,
-                'screen_width': 50,
+                'user': [100],
+                'screen_width': [50],
                 }, 1000)
 
         records = ViewTreeWidth.search([
@@ -242,16 +245,10 @@ class IrTestCase(ModuleTestCase):
                     'field': 'user',
                     'screen_width': 992,
                     'width': 200,
-                    }, {
-                    'user': Transaction().user,
-                    'model': model,
-                    'field': 'user',
-                    'screen_width': 992,
-                    'width': 300,
                     }])
         ViewTreeWidth.set_width(model, {
-                'user': 100,
-                'screen_width': 50,
+                'user': [100],
+                'screen_width': [50],
                 }, 1000)
 
         records = ViewTreeWidth.search([
@@ -307,16 +304,16 @@ class IrTestCase(ModuleTestCase):
 
         model = 'ir.ui.view_tree_width'
         ViewTreeWidth.set_width(model, {
-                'user': 100,
-                'screen_width': 50,
+                'user': [100],
+                'screen_width': [50],
                 }, 1000)
 
         widths = ViewTreeWidth.get_width(model, 1000)
 
         self.assertEqual(
             widths, {
-                'user': 100,
-                'screen_width': 50,
+                'user': [100],
+                'screen_width': [50],
                 })
 
     @with_transaction()
@@ -327,16 +324,16 @@ class IrTestCase(ModuleTestCase):
 
         model = 'ir.ui.view_tree_width'
         ViewTreeWidth.set_width(model, {
-                'user': 100,
-                'screen_width': 50,
+                'user': [100],
+                'screen_width': [50],
                 }, 500)
 
         widths = ViewTreeWidth.get_width(model, 1000)
 
         self.assertEqual(
             widths, {
-                'user': 100,
-                'screen_width': 50,
+                'user': [100],
+                'screen_width': [50],
                 })
 
     @with_transaction()
@@ -380,6 +377,79 @@ class IrTestCase(ModuleTestCase):
             self.assertEqual(
                 lang.currency(value, currency, symbol, grouping, digits),
                 result)
+
+    @with_transaction()
+    def test_lang_currency_negative_parentheses(self):
+        "Test Lang.currency with negative parentheses"
+        pool = Pool()
+        Lang = pool.get('ir.lang')
+        lang = Lang.get('en')
+        Lang.write([lang], {
+            'n_sign_posn': 0,
+            })
+        currency = Mock()
+        currency.digits = 2
+        currency.symbol = '$'
+
+        self.assertEqual(
+            lang.currency(Decimal('-10.50'), currency, True, False, None),
+            '($10.50)')
+
+    @with_transaction()
+    def test_lang_currency_negative_empty_sign(self):
+        "Test Lang.currency with empty negative sign"
+        pool = Pool()
+        Lang = pool.get('ir.lang')
+        lang = Lang.get('en')
+        Lang.write([lang], {
+            'negative_sign': '',
+            'positive_sign': '+',
+            })
+        currency = Mock()
+        currency.digits = 2
+        currency.symbol = '$'
+
+        self.assertEqual(
+            lang.currency(Decimal('-10.50'), currency, True, False, None),
+            '$10.50')
+
+    @with_transaction()
+    def test_lang_currency_negative_symbol_after_value(self):
+        "Test Lang.currency with symbol after negative value"
+        pool = Pool()
+        Lang = pool.get('ir.lang')
+        lang = Lang.get('en')
+        Lang.write([lang], {
+            'n_cs_precedes': False,
+            'p_cs_precedes': True,
+            'negative_sign': '',
+            })
+        currency = Mock()
+        currency.digits = 2
+        currency.symbol = '$'
+
+        self.assertEqual(
+            lang.currency(Decimal('-10.50'), currency, True, False, None),
+            '10.50$')
+
+    @with_transaction()
+    def test_lang_currency_negative_without_space(self):
+        "Test Lang.currency without space for negative value"
+        pool = Pool()
+        Lang = pool.get('ir.lang')
+        lang = Lang.get('en')
+        Lang.write([lang], {
+            'n_sep_by_space': False,
+            'p_sep_by_space': True,
+            'negative_sign': '',
+            })
+        currency = Mock()
+        currency.digits = 2
+        currency.symbol = '$'
+
+        self.assertEqual(
+            lang.currency(Decimal('-10.50'), currency, True, False, None),
+            '$10.50')
 
     @with_transaction()
     def test_lang_currency_without_symbol(self):
@@ -503,22 +573,26 @@ class IrTestCase(ModuleTestCase):
         ModelData = pool.get('ir.model.data')
         User = pool.get('res.user')
 
-        admin_id = ModelData.get_id('res', 'user_admin')
-        admin, = User.search([('login', '=', 'admin')])
+        root_id = ModelData.get_id('res', 'user_root')
+        root, = User.search([('login', '=', 'root'), ('active', '=', False)])
 
-        self.assertEqual(admin_id, admin.id)
+        self.assertEqual(root_id, root.id)
 
     @with_transaction()
     def test_model_data_get_id_dot(self):
         "Test ModelData.get_id with dot"
         pool = Pool()
         ModelData = pool.get('ir.model.data')
-        User = pool.get('res.user')
+        Button = pool.get('ir.model.button')
 
-        admin_id = ModelData.get_id('res.user_admin')
-        admin, = User.search([('login', '=', 'admin')])
+        validate_id = ModelData.get_id(
+            'res.user_application_validate_button')
+        button, = Button.search([
+                ('model', '=', 'res.user.application'),
+                ('name', '=', 'validate_'),
+                ])
 
-        self.assertEqual(admin_id, admin.id)
+        self.assertEqual(validate_id, button.id)
 
     @with_transaction()
     def test_email_send(self):
@@ -721,19 +795,9 @@ class IrTestCase(ModuleTestCase):
         self.assertEqual(filename, "Workflow Graph")
 
 
-class IrCronTestCase(TestCase):
+class IrCronTestCase(DBTestCase):
     "Test ir.cron features"
-
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        drop_db()
-        activate_module(['ir'])
-
-    @classmethod
-    def tearDownClass(cls):
-        super().tearDownClass()
-        drop_db()
+    module = 'ir'
 
     def setUp(self):
         server_tz = timezone.SERVER

@@ -43,19 +43,23 @@
                 'params': [this.session.context]
             }, this.session).then(result => {
                 this.session_id = result[0];
-                this.start_state = this.state = result[1];
+                this.start_state = result[1];
                 this.end_state = result[2];
-                return this.process();
+                return this.process(this.start_state);
             }, () => {
                 this.destroy();
             });
             return this.__prm.promise();
         },
-        process: function() {
+        process: function(state) {
             if (this.__processing || this.__waiting_response) {
                 return jQuery.when();
             }
+            this.__processing = true;
+            this.update_buttons();
             var process = function() {
+                let current_state = this.state;
+                this.state = state;
                 if (this.state == this.end_state) {
                     return this.end();
                 }
@@ -74,15 +78,18 @@
                         var view = result.view;
                         this.update(view.fields_view, view.buttons);
 
-                        prms.push(this.screen.new_(false).then(() => {
-                            this.screen.current_record.set_default(
-                                view.defaults || {})
-                                .then(() => {
-                                    this.screen.current_record.set(
-                                        view.values || {});
-                                    this.update_buttons();
-                                    this.screen.set_cursor();
-                                });
+                        prms.push(this.screen.new_(false, null, false)
+                            .then(() => {
+                                return this.screen.current_record.set_default(
+                                    view.defaults || {})
+                                    .then(() => {
+                                        this.screen.current_record.set(
+                                            view.values || {});
+                                        this.update_buttons();
+                                        return this.screen.display().then(() => {
+                                            this.screen.set_cursor();
+                                        });
+                                    });
                         }));
 
                         this.screen_state = view.state;
@@ -113,28 +120,33 @@
                     } else {
                         prms.push(execute_actions());
                     }
-                    this.__processing = false;
-                    return jQuery.when.apply(jQuery, prms);
+                    return jQuery.when.apply(jQuery, prms).then(
+                        () => {
+                            this.__processing = false;
+                            this.update_buttons();
+                        });
                 }, result => {
                     if (!result || !this.screen) {
                         this.state = this.end_state;
                         this.end();
                     }
+                    this.state = current_state;
                     this.__processing = false;
+                    this.update_buttons();
                 });
             };
             return process.call(this);
         },
         destroy: function(action) {
-            // TODO
+            // TODO: screen destroy
+            return jQuery.when();
         },
         end: function() {
             return Sao.rpc({
                 'method': 'wizard.' + this.action + '.delete',
                 'params': [this.session_id, this.session.context]
             }, this.session).then(action => {
-                this.destroy(action);
-                this.__prm.resolve();
+                return this.destroy(action).then(() => this.__prm.resolve());
             })
             .fail(() => {
                 Sao.Logger.warn(
@@ -157,8 +169,7 @@
                 return;
             }
             this.info_bar.clear();
-            this.state = definition.state;
-            this.process();
+            this.process(definition.state);
         },
         _get_button: function(definition) {
             var style = 'btn-default';
@@ -169,6 +180,7 @@
             }
             var button = new Sao.common.Button(
                 definition, undefined, undefined, style);
+            button.set_state(this.screen ? this.screen.current_record : null);
             this.states[definition.state] = button;
             return button;
         },
@@ -177,16 +189,16 @@
             this.info_bar.refresh();
         },
         update_buttons: function() {
-            var record = this.screen.current_record;
+            let record = this.screen ? this.screen.current_record : null;
             for (var state in this.states) {
-                var button = this.states[state];
+                let button = this.states[state];
                 button.set_state(record);
+                if (this.__processing) {
+                    button.el.prop('disabled', true);
+                }
             }
         },
         update: function(view, buttons) {
-            for (const button of buttons) {
-                this._get_button(button);
-            }
             if (this.screen) {
                 this.screen.windows.splice(
                     this.screen.windows.indexOf(this), 1);
@@ -201,6 +213,9 @@
                 'title': this.name,
             }).text(Sao.common.ellipsize(this.name, 80)));
             this.widget.append(this.screen.screen_container.el);
+            for (let button of buttons) {
+                this._get_button(button);
+            }
         }
     });
 
@@ -237,27 +252,32 @@
             this.footer.empty();
         },
         _get_button: function(definition) {
+            let state = this.state;
             var button = Sao.Wizard.Form._super._get_button.call(this,
                 definition);
             this.footer.append(button.el);
             button.el.click(() => {
-                this.response(definition);
+                if (this.state === state) {
+                    this.response(definition);
+                }
             });
             return button;
         },
         destroy: function(action) {
-            Sao.Wizard.Form._super.destroy.call(this, action);
+            let prm = Sao.Wizard.Form._super.destroy.call(this, action);
+            let promesses = [prm];
             switch (action) {
                 case 'reload menu':
-                    Sao.Session.current_session.reload_context()
+                    promesses.push(Sao.Session.current_session.reload_context()
                         .then(function() {
                             Sao.menu();
-                        });
+                        }));
                     break;
                 case 'reload context':
-                    Sao.Session.current_session.reload_context();
+                    promesses.push(Sao.Session.current_session.reload_context());
                     break;
             }
+            return jQuery.when.apply(jQuery, promesses);
         },
         end: function() {
             return Sao.Wizard.Form._super.end.call(this).always(
@@ -289,19 +309,24 @@
             this.footer.empty();
         },
         _get_button: function(definition) {
+            let state = this.state;
             var button = Sao.Wizard.Dialog._super._get_button.call(this,
                     definition);
             this.footer.append(button.el);
             if (definition['default']) {
                 this.content.unbind('submit');
                 this.content.submit(e => {
-                    this.response(definition);
                     e.preventDefault();
+                    if (this.state === state) {
+                        this.response(definition);
+                    }
                 });
                 button.el.attr('type', 'submit');
             } else {
                 button.el.click(() => {
-                    this.response(definition);
+                    if (this.state === state) {
+                        this.response(definition);
+                    }
                 });
             }
             return button;
@@ -312,7 +337,8 @@
             this.show();
         },
         destroy: function(action) {
-            Sao.Wizard.Dialog._super.destroy.call(this, action);
+            let prm = Sao.Wizard.Dialog._super.destroy.call(this, action);
+            let destroy_prm = jQuery.Deferred();
             const destroy = () => {
                 this.dialog.remove();
                 var dialog = jQuery('.wizard-dialog').filter(':visible')[0];
@@ -330,8 +356,8 @@
                 } else {
                     screen = dialog.screen;
                 }
+                let prm = jQuery.when();
                 if (screen) {
-                    var prm = jQuery.when();
                     if (screen.current_record && !is_menu) {
                         var ids;
                         if (screen.model_name == this.model) {
@@ -344,11 +370,14 @@
                         prm = screen.reload(ids, true);
                     }
                     if (action) {
-                        prm.then(function() {
-                            screen.client_action(action);
+                        prm = prm.then(function() {
+                            return screen.client_action(action);
                         });
                     }
                 }
+                prm.then(
+                    () => destroy_prm.resolve(),
+                    () => destroy_prm.reject());
             };
             if ((this.dialog.data('bs.modal') || {}).isShown) {
                 this.dialog.on('hidden.bs.modal', destroy);
@@ -356,6 +385,7 @@
             } else {
                 destroy();
             }
+            return jQuery.when.apply(jQuery, [prm, destroy_prm]);
         },
         show: function() {
             var view = this.screen.current_view;
@@ -392,9 +422,6 @@
         hide: function() {
             this.dialog.modal('hide');
         },
-        state_changed: function() {
-            this.process();
-        }
     });
 
 }());

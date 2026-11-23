@@ -4,7 +4,7 @@ from collections import defaultdict
 from decimal import Decimal
 from functools import wraps
 
-from trytond.model import ModelStorage, ModelView, Workflow, fields
+from trytond.model import ModelStorage, ModelView, Workflow, fields, sort
 from trytond.pool import Pool
 from trytond.pyson import Eval
 
@@ -15,13 +15,15 @@ def get_shipments_returns(model_name):
         def wrapper(self, name):
             pool = Pool()
             Model = pool.get(model_name)
+            field = getattr(self.__class__, name)
+            order = field.order if field.order is not None else Model._order
             shipments = set(func(self, name))
             for line in self.lines:
                 for component in line.components:
                     for move in component.moves:
                         if isinstance(move.shipment, Model):
-                            shipments.add(move.shipment.id)
-            return list(shipments)
+                            shipments.add(move.shipment)
+            return sort(shipments, order)
         return wrapper
     return _get_shipments_returns
 
@@ -94,18 +96,16 @@ def order_mixin(prefix):
         def draft(cls, records):
             pool = Pool()
             Line = pool.get(prefix + '.line')
-            to_delete = []
-            to_save = []
-            for record in records:
-                for line in record.lines:
-                    if line.component_parent:
-                        to_delete.append(line)
-                    elif line.components:
-                        line.components = None
-                        to_save.append(line)
-            Line.save(to_save)
-            super().draft(records)
-            Line.delete(to_delete)
+            with Line.bulk_delete(auto=False) as delete:
+                with Line.bulk_save() as save:
+                    for record in records:
+                        for line in record.lines:
+                            if line.component_parent:
+                                delete.push(line)
+                            elif line.components:
+                                line.components = None
+                                save.push(line)
+                super().draft(records)
 
         @classmethod
         @ModelView.button
@@ -243,7 +243,7 @@ def order_line_mixin(prefix):
 
         def _get_invoice_line_quantity(self):
             quantity = super()._get_invoice_line_quantity()
-            if (getattr(self, prefix).invoice_method == 'shipment'
+            if (getattr(self, prefix).invoice_method == 'fulfillment'
                     and self.components):
                 ratio = min(c.get_moved_ratio() for c in self.components)
                 quantity = self.unit.round(self.quantity * ratio)

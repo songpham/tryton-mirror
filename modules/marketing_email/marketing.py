@@ -11,24 +11,23 @@ from urllib.parse import (
 from genshi.core import END, START, Attrs, QName
 from genshi.template import MarkupTemplate
 from genshi.template import TemplateError as GenshiTemplateError
-from sql import Literal
 from sql.aggregate import Count
 
 import trytond.config as config
 from trytond.i18n import gettext
 from trytond.ir.session import token_hex
 from trytond.model import (
-    DeactivableMixin, Index, ModelSQL, ModelView, Unique, Workflow, fields)
+    DeactivableMixin, Index, ModelAccessProxy, ModelSQL, ModelView, Unique,
+    Workflow, fields)
 from trytond.pool import Pool
 from trytond.pyson import Eval
 from trytond.report import Report, get_email, html_to_text, mjml_to_html
 from trytond.sendmail import SMTPDataManager, send_message_transactional
-from trytond.tools import grouped_slice, reduce_ids
 from trytond.tools.email_ import (
     EmailNotValidError, format_address, normalize_email, set_from_header,
     validate_email)
 from trytond.transaction import Transaction, inactive_records
-from trytond.url import http_host
+from trytond.url import http_base
 from trytond.wizard import Button, StateTransition, StateView, Wizard
 
 from .exceptions import EMailValidationError, TemplateError
@@ -85,23 +84,22 @@ class Email(DeactivableMixin, ModelSQL, ModelView):
         result = {}
         web_user = 'web_user' in names
         if web_user:
-            web_users = dict.fromkeys(list(map(int, records)))
+            web_users = defaultdict(lambda: None)
             result['web_user'] = web_users
         party = 'party' in names
         if party:
-            parties = dict.fromkeys(list(map(int, records)))
+            parties = defaultdict(lambda: None)
             result['party'] = parties
-        for sub_records in grouped_slice(records):
-            email2id = {r.email: r.id for r in sub_records}
-            users = WebUser.search([
-                    ('email', 'in', list(email2id.keys())),
-                    ])
-            if web_user:
-                web_users.update((email2id[u.email], u.id) for u in users)
-            if party:
-                parties.update(
-                    (email2id[u.email], u.party.id)
-                    for u in users if u.party)
+        email2id = {r.email: r.id for r in records}
+        users = WebUser.search([
+                ('email', 'in', list(email2id.keys())),
+                ])
+        if web_user:
+            web_users.update((email2id[u.email], u.id) for u in users)
+        if party:
+            parties.update(
+                (email2id[u.email], u.party.id)
+                for u in users if u.party)
         return result
 
     @classmethod
@@ -257,13 +255,14 @@ class EmailList(DeactivableMixin, ModelSQL, ModelView):
 
         subscribed = defaultdict(int)
         query = email.select(
-            email.list_, Count(Literal('*')), group_by=[email.list_])
-        for sub_lists in grouped_slice(lists):
-            query.where = (
-                reduce_ids(email.list_, sub_lists)
-                & email.active)
-            cursor.execute(*query)
-            subscribed.update(cursor)
+            email.list_, Count(),
+            where=(
+                fields.SQL_OPERATORS['in'](
+                    email.list_, map(int, lists))
+                & email.active),
+            group_by=[email.list_])
+        cursor.execute(*query)
+        subscribed.update(cursor)
         return subscribed
 
     def request_subscribe(self, email, from_=None):
@@ -429,10 +428,11 @@ class Message(Workflow, ModelSQL, ModelView):
     def process(cls, messages=None, emails=None, smtpd_datamanager=None):
         pool = Pool()
         WebShortener = pool.get('web.shortened_url')
+        ModelData = pool.get('ir.model.data')
         spy_pixel = config.getboolean(
             'marketing', 'email_spy_pixel', default=False)
 
-        url_base = config.get('marketing', 'email_base', default=http_host())
+        url_base = config.get('marketing', 'email_base', default=http_base())
         url_open = urljoin(url_base, '/m/empty.gif')
 
         @lru_cache(None)
@@ -482,6 +482,11 @@ class Message(Workflow, ModelSQL, ModelView):
                         message=message.rec_name,
                         exception=exception)) from exception
             for email in (emails or message.list_.emails):
+                email = ModelAccessProxy(
+                    email, {
+                        '_groups': [
+                            ModelData.get_id('marketing.group_marketing')],
+                        })
                 content = (template
                     .generate(
                         email=email,

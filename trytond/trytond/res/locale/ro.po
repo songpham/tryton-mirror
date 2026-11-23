@@ -81,6 +81,11 @@ msgctxt "field:res.user,actions:"
 msgid "Actions"
 msgstr "Acţiuni"
 
+#, fuzzy
+msgctxt "field:res.user,administrator:"
+msgid "Administrator"
+msgstr "Administrare"
+
 msgctxt "field:res.user,applications:"
 msgid "Applications"
 msgstr "Aplicații"
@@ -235,6 +240,10 @@ msgctxt "help:res.user,actions:"
 msgid "Actions that will be run at login."
 msgstr "Acțiuni care vor fi rulate la conectare."
 
+msgctxt "help:res.user,administrator:"
+msgid "When checked the user has the access rights of all groups."
+msgstr ""
+
 msgctxt "help:res.user,notifications:"
 msgid "Notifications to subscribe to."
 msgstr ""
@@ -264,6 +273,14 @@ msgstr "Resetare parola"
 msgctxt "model:ir.message,text:msg_email_invalid"
 msgid "The email address \"%(email)s\" for \"%(user)s\" is not valid."
 msgstr "Adresa de email \"%(email)s\" pentru parte \"%(party)s\" nu este valid."
+
+#, python-format
+msgctxt "model:ir.message,text:msg_notification_silenced"
+msgid "%(number)s notification silenced."
+msgid_plural "%(number)s notifications silenced."
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
 
 msgctxt "model:ir.message,text:msg_password_email"
 msgid "The password cannot be the same as user's email address."
@@ -305,6 +322,10 @@ msgstr "Parola pentru %(login)s"
 msgctxt "model:ir.model.button,help:user_reset_password_button"
 msgid "Send by email a new temporary password to the user"
 msgstr "Trimitere utilizatorului o parola temporara"
+
+msgctxt "model:ir.model.button,string:notification_mark_read_button"
+msgid "Mark as Read"
+msgstr ""
 
 msgctxt "model:ir.model.button,string:user_application_cancel_button"
 msgid "Cancel"
@@ -439,6 +460,10 @@ msgctxt "report:res.user.email_reset_password:"
 msgid "The password will expire in [1:%(datetime)s]."
 msgstr "Parola va expira in [1:%(datetime)s]."
 
+msgctxt "selection:res.user.application,application:"
+msgid "REST API"
+msgstr ""
+
 msgctxt "selection:res.user.application,state:"
 msgid "Cancelled"
 msgstr "Anulat"
@@ -474,10 +499,6 @@ msgstr "Permisiuni de acces"
 msgctxt "view:res.user:"
 msgid "Actions"
 msgstr "Acţiuni"
-
-msgctxt "view:res.user:"
-msgid "Group Membership"
-msgstr "Membru al grupului"
 
 msgctxt "view:res.user:"
 msgid "Preferences"

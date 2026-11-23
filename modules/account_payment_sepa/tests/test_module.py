@@ -154,6 +154,7 @@ class AccountPaymentSepaTestCase(
         PartyCheckReplaceMixin, CompanyTestMixin, ModuleTestCase):
     'Test Account Payment SEPA module'
     module = 'account_payment_sepa'
+    extras = ['account_invoice']
 
     @with_transaction()
     def test_pain001_001_03(self):
@@ -164,6 +165,11 @@ class AccountPaymentSepaTestCase(
     def test_pain001_001_05(self):
         'Test pain001.001.05 xsd validation'
         validate_file('pain.001.001.05', 'payable')
+
+    @with_transaction()
+    def test_pain001_001_09(self):
+        'Test pain001.001.09 xsd validation'
+        validate_file('pain.001.001.09', 'payable')
 
     @with_transaction()
     def test_pain001_003_03(self):
@@ -179,6 +185,11 @@ class AccountPaymentSepaTestCase(
     def test_pain008_001_04(self):
         'Test pain008.001.04 xsd validation'
         validate_file('pain.008.001.04', 'receivable')
+
+    @with_transaction()
+    def test_pain008_001_08(self):
+        'Test pain008.001.08 xsd validation'
+        validate_file('pain.008.001.08', 'receivable')
 
     @with_transaction()
     def test_pain008_003_02(self):
@@ -279,7 +290,7 @@ class AccountPaymentSepaTestCase(
             party = Party(
                 bank_accounts_used=[bank_account])
             payment = Payment(
-                kind='payable', party=party,
+                kind='payable', party=party, line=None,
                 sepa_payable_bank_account_number=None)
 
             self.assertEqual(id(payment.sepa_bank_account_number),

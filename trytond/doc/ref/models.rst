@@ -352,9 +352,21 @@ Static methods:
 
 Class methods:
 
+.. method:: ModelStorage.__json__([usages])
+
+   Returns a :py:class:`list <list>` of the fields to construct the JSON for
+   the REST API.
+   ``usages`` is a :py:class:`set <set>` containing the usage strings.
+
+
 .. classmethod:: ModelStorage.log(records, event[, target[, user[, \**extra]]])
 
    Log event for records.
+
+
+.. classmethod:: ModelStorage.notify_user(records, icon, label[, description[, user[, \**extra]]])
+
+   Notify user about records.
 
 .. classmethod:: ModelStorage.preprocess_values(cls, mode, values)
 
@@ -369,6 +381,10 @@ Class methods:
 
    ``vlist`` is list of dictionaries with fields names as key and created
    values as value and return the list of new instances.
+
+.. classmethod:: ModelStorage.bulk_create([batch_size[, auto]])
+
+   Returns a :class:`BulkBuffer` for the :meth:`~ModelStorage.create` method.
 
 .. classmethod:: ModelStorage.read(ids, fields_names)
 
@@ -386,6 +402,10 @@ Class methods:
    ``fields_names`` can also contain ``<field>:string`` for
    :class:`~fields.Selection` or :class:`~fields.MultiSelection` fields.
    Their human-readable value are returned.
+
+   ``fields_names`` can also contain ``<field>:<language>`` for translatable
+   fields.
+   Their translated values are returned.
 
    The virtual fields ``_write`` and ``_delete`` can be used the read the
    writeable and deleteable state of the records.
@@ -414,10 +434,15 @@ Class methods:
 
    Delete records.
 
+.. classmethod:: ModelStorage.bulk_delete([batch_size[, auto]])
+
+   Returns a :class:`BulkBuffer` for the :meth:`~ModelStorage.delete` method.
+
 .. classmethod:: ModelStorage.check_modification(mode, records[, values[, external]])
 
-   Method called after ``records`` are created and before ``records`` are
-   modified with ``values`` or deleted.
+   Method called after ``records`` are created with ``values`` as a list of
+   created values and before ``records`` are modified with the modified
+   ``values`` or deleted without ``values``.
    ``external`` specifies whether remote access check must be enforced.
 
    .. note::
@@ -527,7 +552,7 @@ Class methods:
 
 .. classmethod:: ModelStorage.browse(ids)
 
-   Return a list of record instance for the ``ids``.
+   Return a :class:`BrowseList` of record instance for the ``ids``.
 
 .. classmethod:: ModelStorage.export_data(records, fields_names[, header])
 
@@ -572,6 +597,14 @@ Class methods:
    Validate the integrity of records after modification of the fields. This
    method must be overridden to add validation for the field names set and must
    raise an exception if validation fails.
+
+.. classmethod:: ModelStorage.bulk_save([batch_size[, auto]])
+
+   Returns a :class:`BulkBuffer` for the :meth:`~ModelStorage.save` method.
+
+.. classmethod:: ModelStorage.bulk_func(name[, batch_size[, auto]])
+
+   Returns a :class:`BulkBuffer` for the named method.
 
 Dual methods:
 
@@ -733,6 +766,8 @@ Class methods:
 
    If ``active_test`` is set to ``False``, no clause against
    :attr:`DeactivableMixin.active` field is added to the domain.
+   If it is set to ``None`` the value of the ``active_test`` key in
+   :attr:`~trytond.transaction.Transaction.context` is used.
 
    .. _ref-tables:
 
@@ -868,6 +903,54 @@ Additional options are available:
 
    * ``begin``: optimize for constant pattern and anchored to the beginning of
      the string
+
+BulkBuffer
+==========
+
+.. class:: BulkBuffer(function[, batch_size[, auto]])
+
+   A `context manager`_ that bufferizes a list of values.
+   When the list is greater than the ``batch_size`` and ``auto`` is ``True`` or
+   the context is exited, the buffer is flushed by calling the function with
+   the values in the list by ``batch_size``.
+
+.. method:: BulkBuffer.push(values)
+
+   Push a values into the buffer.
+
+.. method:: BulkBuffer.extend(vlist)
+
+   Extend the buffer by appending the values from the iterable.
+
+.. method:: BulkBuffer.flush()
+
+   Call the function with the current valuess in the list and clear it.
+
+BrowseList
+==========
+
+.. class:: BrowseList(Model, ids)
+
+   A class inheriting from :py:class:`list <list>` that lazily stores
+   :class:`ModelStorage` instances together.
+   The instances are created and stored when accessed.
+   The mutation methods from the list accept :class:`ModelStorage` instances or
+   :py:class:`integer <int>` and always store a new instance.
+
+Instance attributes:
+
+.. method:: BrowseList.ids
+
+   The list of ids of the instances.
+
+
+ModelAccessProxy
+================
+
+.. class:: ModelAccessProxy(record[, context])
+
+   A class proxying instance of :class:`ModelStorage` with check access using
+   ``context``.
 
 
 convert_from
@@ -1306,3 +1389,4 @@ Instance methods:
 .. _mixin: http://en.wikipedia.org/wiki/Mixin
 .. _JSON: http://en.wikipedia.org/wiki/Json
 .. _UNION: http://en.wikipedia.org/wiki/Union_(SQL)#UNION_operator
+.. _`context manager`: http://docs.python.org/reference/datamodel.html#context-managers

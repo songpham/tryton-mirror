@@ -137,7 +137,7 @@ Sale composed and kit products::
     >>> Sale = Model.get('sale.sale')
     >>> sale = Sale()
     >>> sale.party = customer
-    >>> sale.invoice_method = 'shipment'
+    >>> sale.invoice_method = 'fulfillment'
     >>> line = sale.lines.new()
     >>> line.product = composed_product
     >>> line.quantity = 2
@@ -216,7 +216,7 @@ Ship partially::
 Check new invoice::
 
     >>> sale.reload()
-    >>> _, invoice = sale.invoices
+    >>> invoice, = [i for i in sale.invoices if i != invoice]
     >>> len(invoice.lines)
     3
     >>> product2quantity = {l.product: l.quantity for l in invoice.lines}
@@ -272,7 +272,7 @@ Handle shipment exception::
     ...         [('product', '=', product1.id)]))
     >>> shipment_exception.execute('handle')
 
-    >>> _, _, shipment = sale.shipments
+    >>> shipment, = [s for s in sale.shipments if s.state == 'waiting']
     >>> len(shipment.outgoing_moves)
     1
     >>> backorder.reload()

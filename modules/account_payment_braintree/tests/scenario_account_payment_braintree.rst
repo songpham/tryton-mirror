@@ -85,7 +85,7 @@ Create submitted payment::
     >>> payment.kind = 'receivable'
     >>> payment.party = customer
     >>> # Use random amount to prevent gateway rejection for duplicate
-    >>> payment.amount = amount = Decimal(random.randint(0, 1999))
+    >>> payment.amount = amount = Decimal(random.randint(1, 1999))
     >>> payment.click('submit')
     >>> payment.state
     'submitted'
@@ -98,7 +98,7 @@ Checkout the payment::
 
     >>> Payment.write([payment.id], {
     ...     'braintree_nonce': Nonces.Transactable,
-    ...     }, config.context)
+    ...     }, {**config.context, '_check_access': False})
 
 Process the payment::
 
@@ -132,14 +132,13 @@ Create a customer::
     >>> braintree_customer.save()
     >>> Customer.write([braintree_customer.id], {
     ...     'braintree_nonce': Nonces.Transactable,
-    ...     }, config.context)
+    ...     }, {**config.context, '_check_access': False})
 
 Run cron::
 
     >>> cron_customer_create, = Cron.find([
     ...     ('method', '=', 'account.payment.braintree.customer|braintree_create'),
     ...     ])
-    >>> cron_customer_create.companies.append(Company(company.id))
     >>> cron_customer_create.click('run_once')
 
     >>> braintree_customer.reload()
@@ -161,7 +160,7 @@ Make payment with customer::
 
     >>> payment, = payment.duplicate()
     >>> payment.braintree_customer = braintree_customer
-    >>> payment.amount = amount = Decimal(random.randint(0, 1999))
+    >>> payment.amount = amount = Decimal(random.randint(1, 1999))
     >>> payment.save()
     >>> _, method = Payment.get_braintree_customer_methods(payment.id, config.context)
     >>> method_token, _ = method
@@ -190,7 +189,6 @@ Run cron::
     >>> cron_customer_delete, = Cron.find([
     ...     ('method', '=', 'account.payment.braintree.customer|braintree_delete'),
     ...     ])
-    >>> cron_customer_delete.companies.append(Company(company.id))
     >>> cron_customer_delete.click('run_once')
 
     >>> braintree_customer.reload()
@@ -201,14 +199,14 @@ Create payment to settle::
     >>> payment, = payment.duplicate()
     >>> payment.braintree_customer = None
     >>> payment.braintree_settle_payment = False
-    >>> payment.amount = amount = Decimal(random.randint(0, 1999))
+    >>> payment.amount = amount = Decimal(random.randint(3, 1999))
     >>> payment.click('submit')
     >>> payment.state
     'submitted'
 
     >>> Payment.write([payment.id], {
     ...     'braintree_nonce': Nonces.Transactable,
-    ...     }, config.context)
+    ...     }, {**config.context, '_check_access': False})
 
     >>> process_payment = payment.click('process_wizard')
     >>> payment.state
@@ -246,7 +244,6 @@ Refund some amount::
     >>> cron_refund, = Cron.find([
     ...     ('method', '=', 'account.payment.braintree.refund|braintree_refund'),
     ...     ])
-    >>> cron_refund.companies.append(Company(company.id))
     >>> cron_refund.click('run_once')
 
     >>> refund.reload()
@@ -259,7 +256,6 @@ Refund some amount::
     >>> cron_refund_pull, = Cron.find([
     ...     ('method', '=', 'account.payment.braintree.refund|braintree_pull'),
     ...     ])
-    >>> cron_refund_pull.companies.append(Company(company.id))
     >>> cron_refund_pull.click('run_once')
     >>> refund.reload()
     >>> refund.state

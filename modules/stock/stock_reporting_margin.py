@@ -15,7 +15,7 @@ from trytond.model import ModelSQL, ModelView, fields, sum_tree
 from trytond.modules.currency.fields import Monetary
 from trytond.pool import Pool
 from trytond.pyson import Eval, If
-from trytond.tools import grouped_slice, pairwise_longest, reduce_ids
+from trytond.tools import pairwise_longest
 from trytond.tools.chart import sparkline
 from trytond.transaction import Transaction
 
@@ -254,7 +254,7 @@ class AbstractTimeseries(Abstract):
     @classmethod
     def _group_by(cls, tables, withs):
         return super()._group_by(tables, withs) + [
-            cls._column_date(tables, withs)]
+            cls._column_date(tables, withs).as_('date')]
 
 
 class Context(ModelView):
@@ -431,6 +431,11 @@ class CategoryMixin:
     category = fields.Many2One('product.category', "Category")
 
     @classmethod
+    def __setup__(cls):
+        super().__setup__()
+        cls.id._sql_type = 'BIGINT'
+
+    @classmethod
     def _joins(cls):
         pool = Pool()
         Product = pool.get('product.product')
@@ -468,7 +473,8 @@ class CategoryMixin:
         # by using number one order bigger.
         nb_category = category.select(
             Power(10, (Ceil(Log(Max(category.id))) + Literal(1))))
-        return Min(move.id * nb_category + template_category.id)
+        return cls.id.sql_cast(
+            Min(move.id * nb_category + template_category.id))
 
     @classmethod
     def _group_by(cls, tables, withs):
@@ -592,14 +598,11 @@ class CategoryTree(ModelSQL, ModelView):
         categories = cls.search([
                 ('parent', 'child_of', [c.id for c in categories]),
                 ])
-        ids = [c.id for c in categories]
-        reporting_categories = []
-        for sub_ids in grouped_slice(ids):
-            sub_ids = list(sub_ids)
-            where = reduce_ids(reporting_category.id, sub_ids)
-            cursor.execute(
-                *reporting_category.select(reporting_category.id, where=where))
-            reporting_categories.extend(r for r, in cursor)
+        cursor.execute(*reporting_category.select(
+                reporting_category.id,
+                where=fields.SQL_OPERATORS['in'](
+                    reporting_category.id, map(int, categories))))
+        reporting_categories = [r for r, in cursor]
 
         result = {}
         reporting_categories = ReportingCategory.browse(reporting_categories)

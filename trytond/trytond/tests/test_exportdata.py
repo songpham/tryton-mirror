@@ -7,18 +7,13 @@ from decimal import Decimal
 
 from trytond.model.exceptions import AccessError
 from trytond.pool import Pool
-from trytond.tests.test_tryton import (
-    TestCase, activate_module, with_transaction)
+from trytond.tests.test_tryton import DBTestCase, with_transaction
 from trytond.transaction import Transaction
 
 
-class ExportDataTestCase(TestCase):
+class ExportDataTestCase(DBTestCase):
     'Test export_data'
-
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        activate_module('tests')
+    module = 'tests'
 
     @with_transaction()
     def test_boolean(self):
@@ -549,6 +544,7 @@ class ExportDataTestCase(TestCase):
         pool = Pool()
         ExportData = pool.get('test.export_data')
         ModelAccess = pool.get('ir.model.access')
+        User = pool.get('res.user')
 
         export, = ExportData.create([{
                     'char': "Test",
@@ -558,16 +554,24 @@ class ExportDataTestCase(TestCase):
                     'perm_read': False,
                     }])
 
-        with self.assertRaises(AccessError):
-            ExportData.export_data([export], ['char'])
+        u, = User.create([{
+                    'login': 'user',
+                    'administrator': False,
+                    }])
+        with Transaction().set_user(u.id):
+            with self.assertRaises(AccessError):
+                ExportData.export_data([export], ['char'])
 
     @with_transaction(context={'_check_access': True})
     def test_field_access(self):
         "Test export without field access"
         pool = Pool()
+        User = pool.get('res.user')
         ExportData = pool.get('test.export_data')
         FieldAccess = pool.get('ir.model.field.access')
 
+        user = User(login='user')
+        user.save()
         export, = ExportData.create([{
                     'char': "Test",
                     }])
@@ -577,16 +581,20 @@ class ExportDataTestCase(TestCase):
                     'perm_read': False,
                     }])
 
-        with self.assertRaises(AccessError):
-            ExportData.export_data([export], ['char'])
+        with Transaction().set_user(user.id):
+            with self.assertRaises(AccessError):
+                ExportData.export_data([export], ['char'])
 
     @with_transaction(context={'_check_access': True})
     def test_rule_access(self):
         "Test export with rule access"
         pool = Pool()
+        User = pool.get('res.user')
         ExportData = pool.get('test.export_data')
         RuleGroup = pool.get('ir.rule.group')
 
+        user = User(login='user')
+        user.save()
         export1, export2 = ExportData.create([{
                     'char': "foo",
                     }, {
@@ -603,6 +611,7 @@ class ExportDataTestCase(TestCase):
                                     }])],
                     }])
 
-        ExportData.export_data([export1], ['char'])
-        with self.assertRaises(AccessError):
-            ExportData.export_data([export2], ['char'])
+        with Transaction().set_user(user.id):
+            ExportData.export_data([export1], ['char'])
+            with self.assertRaises(AccessError):
+                ExportData.export_data([export2], ['char'])

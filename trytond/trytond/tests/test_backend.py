@@ -5,25 +5,20 @@ import math
 from decimal import Decimal
 
 from sql import Cast, Literal, Select, Table, functions
-from sql.functions import CurrentTimestamp, DateTrunc, Extract, ToChar
+from sql.functions import Age, CurrentTimestamp, DateTrunc, Extract, ToChar
 
 from trytond import backend
 from trytond.model import fields
 from trytond.sql.functions import NumRange
 from trytond.sql.operators import RangeContain, RangeIn, RangeOverlap
-from trytond.tests.test_tryton import (
-    TestCase, activate_module, with_transaction)
+from trytond.tests.test_tryton import DBTestCase, with_transaction
 from trytond.tools import sqlite_apply_types
 from trytond.transaction import Transaction
 
 
-class BackendTestCase(TestCase):
+class BackendTestCase(DBTestCase):
     "Test the backend"
-
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        activate_module('tests')
+    module = 'tests'
 
     @with_transaction()
     def test_current_timestamp_static_transaction(self):
@@ -110,12 +105,12 @@ class BackendTestCase(TestCase):
             (functions.Pi(), math.pi),
             (functions.Power(9, 3), 729),
             (functions.Radians(45.), math.pi / 4),
-            (functions.Round(42.4), 42),
-            (functions.Round(42.4382, 2), 42.44),
+            (functions.Round(Decimal('42.4')), 42),
+            (functions.Round(Decimal('42.4382'), 2), 42.44),
             (functions.Sign(-8.4), -1),
             (functions.Sqrt(2.), 1.4142135623731),
-            (functions.Trunc(42.8), 42),
-            (functions.Trunc(42.4348, 2), 42.43),
+            (functions.Trunc(Decimal('42.8')), 42),
+            (functions.Trunc(Decimal('42.4348'), 2), 42.43),
             (functions.Acos(0.5), 1.0471975511965979),
             (functions.Asin(0.5), 0.5235987755982989),
             (functions.Atan(0.5), 0.4636476090008061),
@@ -268,6 +263,47 @@ class BackendTestCase(TestCase):
         cursor.execute(*Select([DateTrunc(None, dt.datetime.now())]))
         value, = cursor.fetchone()
         self.assertEqual(value, None)
+
+    @with_transaction()
+    def test_function_age(self):
+        "Test Age function"
+        cursor = Transaction().connection.cursor()
+
+        for t1, t2, result in [
+                (dt.date(2026, 4, 13), dt.date(2026, 4, 1),
+                    dt.timedelta(days=12)),
+                (dt.date(2026, 4, 13), dt.datetime(2026, 4, 1, 12, 0),
+                    dt.timedelta(days=11, hours=12)),
+                (dt.datetime(2026, 4, 13, 12, 0), dt.date(2026, 4, 1),
+                    dt.timedelta(days=12, hours=12)),
+                (dt.datetime(2026, 4, 13, 12, 0),
+                    dt.datetime(2026, 4, 1, 12, 0),
+                    dt.timedelta(days=12)),
+                ]:
+            for t1, t2, result in [
+                    (t1, t2, result),
+                    (t2, t1, -result),
+                    ]:
+                with self.subTest(t1=t1, t2=t2):
+                    query = Select([Age(t1, t2).as_('age')])
+                    if backend.name == 'sqlite':
+                        sqlite_apply_types(query, ['INTERVAL'])
+                    cursor.execute(*query)
+                    value, = cursor.fetchone()
+                    self.assertEqual(value, result)
+
+    @with_transaction()
+    def test_function_age_current_date(self):
+        "Test Age function with current_date"
+        cursor = Transaction().connection.cursor()
+
+        today = dt.date.today()
+        query = Select([Age(today - dt.timedelta(days=10)).as_('age')])
+        if backend.name == 'sqlite':
+            sqlite_apply_types(query, ['INTERVAL'])
+        cursor.execute(*query)
+        value, = cursor.fetchone()
+        self.assertEqual(value, dt.timedelta(days=10))
 
     @with_transaction()
     def test_operator_range_contain(self):

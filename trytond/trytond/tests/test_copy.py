@@ -7,20 +7,15 @@ from unittest.mock import patch
 from trytond.model import fields
 from trytond.model.exceptions import AccessError
 from trytond.pool import Pool
-from trytond.tests.test_tryton import (
-    TestCase, activate_module, with_transaction)
+from trytond.tests.test_tryton import DBTestCase, with_transaction
 from trytond.transaction import Transaction
 
 from .test_modelsql import TranslationTestCase
 
 
-class CopyTestCase(TestCase):
+class CopyTestCase(DBTestCase):
     'Test copy'
-
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        activate_module('tests')
+    module = 'tests'
 
     @with_transaction()
     def test_copy(self):
@@ -276,11 +271,14 @@ class CopyTestCase(TestCase):
     def test_no_acccess_copy_with_custom_value(self):
         "Test copying field with no access and custom value"
         pool = Pool()
+        User = pool.get('res.user')
         FieldAccess = pool.get('ir.model.field.access')
         TestAccess = pool.get('test.copy.access')
 
         record, = TestAccess.create([{'name': 'foo'}])
 
+        user = User(login='foo')
+        user.save()
         FieldAccess.create([{
                     'model': 'test.copy.access',
                     'field': 'name',
@@ -289,16 +287,20 @@ class CopyTestCase(TestCase):
                     'perm_write': False,
                     }])
 
-        with self.assertRaises(AccessError):
-            new_record, = TestAccess.copy([record])
+        with Transaction().set_user(user.id):
+            with self.assertRaises(AccessError):
+                new_record, = TestAccess.copy([record])
 
     @with_transaction(context={'_check_access': True})
     def test_no_acccess_copy_with_default(self):
         "Test copying field with no access but default value"
         pool = Pool()
+        User = pool.get('res.user')
         FieldAccess = pool.get('ir.model.field.access')
         TestAccess = pool.get('test.copy.access')
 
+        user = User(login='foo')
+        user.save()
         FieldAccess.create([{
                     'model': 'test.copy.access',
                     'field': 'name',
@@ -307,20 +309,24 @@ class CopyTestCase(TestCase):
                     'perm_write': False,
                     }])
 
-        record, = TestAccess.create([{}])
-        self.assertEqual(record.name, "Default")
-        new_record, = TestAccess.copy([record])
-        self.assertEqual(new_record.name, "Default")
+        with Transaction().set_user(user.id):
+            record, = TestAccess.create([{}])
+            self.assertEqual(record.name, "Default")
+            new_record, = TestAccess.copy([record])
+            self.assertEqual(new_record.name, "Default")
 
     @with_transaction(context={'_check_access': True})
     def test_no_acccess_copy_with_defaults(self):
         "Test copying field with no access and defaults"
         pool = Pool()
+        User = pool.get('res.user')
         FieldAccess = pool.get('ir.model.field.access')
         TestAccess = pool.get('test.copy.access')
 
         record, = TestAccess.create([{}])
 
+        user = User(login='foo')
+        user.save()
         FieldAccess.create([{
                     'model': 'test.copy.access',
                     'field': 'name',
@@ -329,19 +335,23 @@ class CopyTestCase(TestCase):
                     'perm_write': False,
                     }])
 
-        with self.assertRaises(AccessError):
-            new_record, = TestAccess.copy(
-                [record], default={'name': 'nondefault'})
+        with Transaction().set_user(user.id):
+            with self.assertRaises(AccessError):
+                new_record, = TestAccess.copy(
+                    [record], default={'name': 'nondefault'})
 
     @with_transaction(context={'_check_access': True})
     def test_copy_with_no_read_access(self):
         "Test copying field with no read access"
         pool = Pool()
+        User = pool.get('res.user')
         FieldAccess = pool.get('ir.model.field.access')
         TestAccess = pool.get('test.copy.access')
 
         record, = TestAccess.create([{}])
 
+        user = User(login='foo')
+        user.save()
         FieldAccess.create([{
                     'model': 'test.copy.access',
                     'field': 'name',
@@ -350,8 +360,9 @@ class CopyTestCase(TestCase):
                     'perm_write': False,
                     }])
 
-        new_record, = TestAccess.copy([record])
-        self.assertNotEqual(new_record.id, record.id)
+        with Transaction().set_user(user.id):
+            new_record, = TestAccess.copy([record])
+            self.assertNotEqual(new_record.id, record.id)
 
     @with_transaction()
     def test_copy_empty(self):

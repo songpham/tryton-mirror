@@ -79,9 +79,9 @@ def is_leaf(expression):
         and isinstance(expression[1], str))
 
 
-def constrained_leaf(part, boolop=operator.and_):
+def constrained_leaf(part):
     field, operand, value = part[:3]
-    if operand == '=' and boolop == operator.and_:
+    if operand == '=' or (operand == 'in' and len(value) == 1):
         # We should consider that other domain inversion will set a correct
         # value to this field
         return True
@@ -433,7 +433,8 @@ def unique_value(domain, single_value=True):
                         and operator == 'in' and len(value) == 1))
                 and (not count
                     or (count == 1 and model and name.endswith('.id')))):
-            value = value if operator == '=' and single_value else value[0]
+            if operator == 'in' and single_value:
+                value = value[0]
             if model and name.endswith('.id'):
                 model = model[0]
                 value = [model, value]
@@ -501,7 +502,7 @@ class And(object):
                 if (field not in context
                         or field in context
                         and (eval_leaf(part, context, operator.and_)
-                            or constrained_leaf(part, operator.and_))):
+                            or constrained_leaf(part))):
                     result.append(True)
                 else:
                     return False
@@ -543,8 +544,7 @@ class Or(And):
                 field = part[0]
                 field = self.base(field)
                 if (field in context
-                        and (eval_leaf(part, context, operator.or_)
-                            or constrained_leaf(part, operator.or_))):
+                        and eval_leaf(part, context, operator.or_)):
                     return True
                 elif (field in context
                         and not eval_leaf(part, context, operator.or_)):

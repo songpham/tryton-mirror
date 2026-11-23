@@ -11,17 +11,13 @@ from trytond.model.exceptions import (
 from trytond.model.modelview import set_visible
 from trytond.pool import Pool
 from trytond.pyson import Eval, PYSONDecoder, PYSONEncoder
-from trytond.tests.test_tryton import (
-    TestCase, activate_module, with_transaction)
+from trytond.tests.test_tryton import DBTestCase, with_transaction
+from trytond.transaction import Transaction
 
 
-class ModelView(TestCase):
+class ModelView(DBTestCase):
     "Test ModelView"
-
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        activate_module('tests')
+    module = 'tests'
 
     def test_set_visible(self):
         "Test loading of visible x2m fields in group"
@@ -409,50 +405,143 @@ class ModelView(TestCase):
                 })
 
     @with_transaction(context={'_check_access': True})
-    def test_button_access(self):
-        'Test Button Access'
+    def test_button_access_wo_any_access(self):
+        'Test Button Access without any access'
+        pool = Pool()
+        TestModel = pool.get('test.modelview.button')
+        Button = pool.get('ir.model.button')
+        User = pool.get('res.user')
+
+        user = User(login='foo')
+        user.save()
+        button = Button(model=TestModel.__name__, name='test')
+        button.save()
+
+        test = TestModel()
+        with Transaction().set_user(user.id):
+            TestModel.test([test])
+
+    @with_transaction(context={'_check_access': True})
+    def test_button_access_wo_read(self):
+        'Test Button Access without read access'
+        pool = Pool()
+        TestModel = pool.get('test.modelview.button')
+        Button = pool.get('ir.model.button')
+        ModelAccess = pool.get('ir.model.access')
+        User = pool.get('res.user')
+
+        user = User(login='foo')
+        user.save()
+        button = Button(model=TestModel.__name__, name='test')
+        button.save()
+        access = ModelAccess(
+            model=TestModel.__name__, group=None, perm_read=False)
+        access.save()
+
+        test = TestModel()
+        with Transaction().set_user(user.id):
+            with self.assertRaises(AccessError):
+                TestModel.test([test])
+
+    @with_transaction(context={'_check_access': True})
+    def test_button_access_wo_write(self):
+        'Test Button Access without write access'
+        pool = Pool()
+        TestModel = pool.get('test.modelview.button')
+        Button = pool.get('ir.model.button')
+        ModelAccess = pool.get('ir.model.access')
+        User = pool.get('res.user')
+
+        user = User(login='foo')
+        user.save()
+        button = Button(model=TestModel.__name__, name='test')
+        button.save()
+        access = ModelAccess(
+            model=TestModel.__name__, group=None, perm_read=True,
+            perm_write=False)
+        access.save()
+
+        test = TestModel()
+        with Transaction().set_user(2):
+            with self.assertRaises(AccessError):
+                TestModel.test([test])
+
+    @with_transaction(context={'_check_access': True})
+    def test_button_access_wo_write_w_button(self):
+        'Test Button Access without write access with button access'
         pool = Pool()
         TestModel = pool.get('test.modelview.button')
         Button = pool.get('ir.model.button')
         ModelAccess = pool.get('ir.model.access')
         Group = pool.get('res.group')
+        User = pool.get('res.user')
 
-        admin, = Group.search([('name', '=', 'Administration')])
-        test = TestModel()
-
+        user = User(login='foo')
+        user.save()
+        group = Group(name='Group')
+        group.users = [user]
+        group.save()
         button = Button(model=TestModel.__name__, name='test')
+        button.groups = [group]
         button.save()
-
-        # Without model/button access
-        TestModel.test([test])
-
-        # Without read access
         access = ModelAccess(
-            model=TestModel.__name__, group=None, perm_read=False)
+            model=TestModel.__name__, group=None, perm_read=True,
+            perm_write=False)
         access.save()
-        with self.assertRaises(AccessError):
+
+        test = TestModel()
+        with Transaction().set_user(user.id):
             TestModel.test([test])
 
-        # Without write access
-        access.perm_read = True
-        access.perm_write = False
-        access.save()
-        with self.assertRaises(AccessError):
-            TestModel.test([test])
+    @with_transaction(context={'_check_access': True})
+    def test_button_access_wo_button(self):
+        'Test Button Access without button access'
+        pool = Pool()
+        TestModel = pool.get('test.modelview.button')
+        Button = pool.get('ir.model.button')
+        ModelAccess = pool.get('ir.model.access')
+        User = pool.get('res.user')
+        Group = pool.get('res.group')
 
-        # Without write access but with button access
-        button.groups = [admin]
-        button.save()
-        TestModel.test([test])
-
-        # Without button access
-        ModelAccess.delete([access])
+        user = User(login='foo')
+        user.save()
         no_group = Group(name='no group')
         no_group.save()
+        button = Button(model=TestModel.__name__, name='test')
         button.groups = [no_group]
         button.save()
-        with self.assertRaises(AccessButtonError):
-            TestModel.test([test])
+        access = ModelAccess(
+            model=TestModel.__name__, group=None, perm_read=True,
+            perm_write=False)
+        access.save()
+
+        test = TestModel()
+        with Transaction().set_user(user.id):
+            with self.assertRaises(AccessButtonError):
+                TestModel.test([test])
+
+    @with_transaction(context={'_check_access': True})
+    def test_button_access_state(self):
+        "Test Button Access with states"
+        pool = Pool()
+        Model = pool.get('test.modelview.button')
+        User = pool.get('res.user')
+
+        user = User(login='foo')
+        user.save()
+        record = Model()
+
+        with Transaction().set_user(user.id):
+            Model.test_invisible([record])
+            Model.test_readonly([record])
+
+            record = Model(value=42)
+
+            with self.assertRaises(AccessButtonError):
+                Model.test_invisible([record])
+
+            with self.assertRaises(AccessButtonError):
+                Model.test_readonly([record])
 
     @with_transaction(context={'_check_access': True})
     def test_button_no_rule(self):
@@ -479,23 +568,27 @@ class ModelView(TestCase):
         Button = pool.get('ir.model.button')
         ButtonRule = pool.get('ir.model.button.rule')
         ButtonClick = pool.get('ir.model.button.click')
+        User = pool.get('res.user')
 
+        user = User(login='foo')
+        user.save()
         rule = ButtonRule(number_user=2)
         button = Button(model=TestModel.__name__, name='test', rules=[rule])
         button.save()
 
-        record = TestModel(id=-1)
-        with patch.object(TestModel, 'test_non_decorated') as button_func:
-            TestModel.test([record])
-            button_func.assert_called_with([])
+        with Transaction().set_user(user.id):
+            record = TestModel(id=-1)
+            with patch.object(TestModel, 'test_non_decorated') as button_func:
+                TestModel.test([record])
+                button_func.assert_called_with([])
 
-        clicks = ButtonClick.search([
-                ('button', '=', button.id),
-                ('record_id', '=', record.id),
-                ])
-        self.assertEqual(len(clicks), 1)
-        click, = clicks
-        self.assertEqual(click.user.id, 1)
+            clicks = ButtonClick.search([
+                    ('button', '=', button.id),
+                    ('record_id', '=', record.id),
+                    ])
+            self.assertEqual(len(clicks), 1)
+            click, = clicks
+            self.assertEqual(click.user.id, user.id)
 
     @with_transaction(context={'_check_access': True})
     def test_button_rule_passed(self):
@@ -505,23 +598,27 @@ class ModelView(TestCase):
         Button = pool.get('ir.model.button')
         ButtonRule = pool.get('ir.model.button.rule')
         ButtonClick = pool.get('ir.model.button.click')
+        User = pool.get('res.user')
 
+        user = User(login='foo')
+        user.save()
         rule = ButtonRule(number_user=1)
         button = Button(model=TestModel.__name__, name='test', rules=[rule])
         button.save()
 
-        record = TestModel(id=-1)
-        with patch.object(TestModel, 'test_non_decorated') as button_func:
-            TestModel.test([record])
-            button_func.assert_called_with([record])
+        with Transaction().set_user(user.id):
+            record = TestModel(id=-1)
+            with patch.object(TestModel, 'test_non_decorated') as button_func:
+                TestModel.test([record])
+                button_func.assert_called_with([record])
 
-        clicks = ButtonClick.search([
-                ('button', '=', button.id),
-                ('record_id', '=', record.id),
-                ])
-        self.assertEqual(len(clicks), 1)
-        click, = clicks
-        self.assertEqual(click.user.id, 1)
+            clicks = ButtonClick.search([
+                    ('button', '=', button.id),
+                    ('record_id', '=', record.id),
+                    ])
+            self.assertEqual(len(clicks), 1)
+            click, = clicks
+            self.assertEqual(click.user.id, user.id)
 
     @with_transaction()
     def test_button_rule_test_condition(self):
@@ -658,19 +755,23 @@ class ModelView(TestCase):
         pool = Pool()
         TestModel = pool.get('test.modelview.link')
         ModelAccess = pool.get('ir.model.access')
+        User = pool.get('res.user')
 
+        user = User(login='foo')
+        user.save()
         access = ModelAccess(
             model='test.modelview.link.target', group=None, perm_read=False)
         access.save()
 
-        arch = TestModel.fields_view_get()['arch']
-        parser = etree.XMLParser()
-        tree = etree.fromstring(arch, parser=parser)
-        links = tree.xpath('//link')
-        labels = tree.xpath('//label')
+        with Transaction().set_user(user.id):
+            arch = TestModel.fields_view_get()['arch']
+            parser = etree.XMLParser()
+            tree = etree.fromstring(arch, parser=parser)
+            links = tree.xpath('//link')
+            labels = tree.xpath('//label')
 
-        self.assertFalse(links)
-        self.assertTrue(labels)
+            self.assertFalse(links)
+            self.assertTrue(labels)
 
     @unittest.skipUnless(hasattr(etree, 'RelaxNG'), "etree is missing RelaxNG")
     @with_transaction()
@@ -688,7 +789,7 @@ class ModelView(TestCase):
         arch = TestModel.fields_view_get()['arch']
         parser = etree.XMLParser()
         tree = etree.fromstring(arch, parser=parser)
-        validator = etree.RelaxNG(etree=UIView.get_rng('form'))
+        validator = UIView._validator('form')
 
         self.assertTrue(validator.validate(tree))
 
@@ -700,7 +801,10 @@ class ModelView(TestCase):
         ActionWindow = pool.get('ir.action.act_window')
         Group = pool.get('res.group')
         ActionGroup = pool.get('ir.action-res.group')
+        User = pool.get('res.user')
 
+        user = User(login='foo')
+        user.save()
         group = Group(name="Group")
         group.save()
         action_window, = ActionWindow.search(
@@ -709,14 +813,15 @@ class ModelView(TestCase):
             action=action_window.action,
             group=group).save()
 
-        arch = TestModel.fields_view_get()['arch']
-        parser = etree.XMLParser()
-        tree = etree.fromstring(arch, parser=parser)
-        links = tree.xpath('//link')
-        labels = tree.xpath('//label')
+        with Transaction().set_user(user.id):
+            arch = TestModel.fields_view_get()['arch']
+            parser = etree.XMLParser()
+            tree = etree.fromstring(arch, parser=parser)
+            links = tree.xpath('//link')
+            labels = tree.xpath('//label')
 
-        self.assertFalse(links)
-        self.assertTrue(labels)
+            self.assertFalse(links)
+            self.assertTrue(labels)
 
     @with_transaction()
     def test_rpc_setup(self):
@@ -765,7 +870,10 @@ class ModelView(TestCase):
         pool = Pool()
         EmptyPage = pool.get('test.modelview.empty_page.access')
         FieldAccess = pool.get('ir.model.field.access')
+        User = pool.get('res.user')
 
+        user = User(login='foo')
+        user.save()
         access = FieldAccess()
         access.model = EmptyPage.__name__
         access.field = 'foo'
@@ -773,12 +881,13 @@ class ModelView(TestCase):
         access.perm_write = False
         access.save()
 
-        arch = EmptyPage.fields_view_get(view_type='form')['arch']
+        with Transaction().set_user(user.id):
+            arch = EmptyPage.fields_view_get(view_type='form')['arch']
 
-        parser = etree.XMLParser()
-        tree = etree.fromstring(arch, parser=parser)
-        pages = tree.xpath('//page')
-        self.assertEqual(len(pages), 0)
+            parser = etree.XMLParser()
+            tree = etree.fromstring(arch, parser=parser)
+            pages = tree.xpath('//page')
+            self.assertEqual(len(pages), 0)
 
     @with_transaction()
     def test_active_field(self):
@@ -799,7 +908,10 @@ class ModelView(TestCase):
         pool = Pool()
         CircularDepends = pool.get('test.modelview.circular_depends')
         FieldAccess = pool.get('ir.model.field.access')
+        User = pool.get('res.user')
 
+        user = User(login='foo')
+        user.save()
         FieldAccess.create([{
                     'model': CircularDepends.__name__,
                     'field': 'foo',
@@ -807,9 +919,9 @@ class ModelView(TestCase):
                     'perm_read': False,
                     }])
 
-        fields = CircularDepends.fields_view_get(view_type='form')['fields']
-
-        self.assertEqual(fields, {})
+        with Transaction().set_user(user.id):
+            fields_view = CircularDepends.fields_view_get(view_type='form')
+            self.assertEqual(fields_view['fields'], {})
 
     @with_transaction()
     def test_depends_depends(self):
@@ -840,7 +952,10 @@ class ModelView(TestCase):
         pool = Pool()
         Button = pool.get('test.modelview.button_depends')
         FieldAccess = pool.get('ir.model.field.access')
+        User = pool.get('res.user')
 
+        user = User(login='foo')
+        user.save()
         FieldAccess.create([{
                     'model': Button.__name__,
                     'field': 'value',
@@ -848,12 +963,13 @@ class ModelView(TestCase):
                     'perm_read': False,
                     }])
 
-        arch = Button.fields_view_get(view_type='form')['arch']
-        parser = etree.XMLParser()
-        tree = etree.fromstring(arch, parser=parser)
-        buttons = tree.xpath('//button')
+        with Transaction().set_user(user.id):
+            arch = Button.fields_view_get(view_type='form')['arch']
+            parser = etree.XMLParser()
+            tree = etree.fromstring(arch, parser=parser)
+            buttons = tree.xpath('//button')
 
-        self.assertEqual(len(buttons), 0)
+            self.assertEqual(len(buttons), 0)
 
     @with_transaction()
     def test_view_attributes(self):

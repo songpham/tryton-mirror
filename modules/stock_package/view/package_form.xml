@@ -15,6 +15,7 @@ this repository contains the full copyright notices and license terms. -->
     <notebook colspan="4">
         <page name="moves">
             <field name="moves" colspan="4" widget="many2many"/>
+            <button name="fill" colspan="4"/>
         </page>
         <page name="children">
             <field name="children" colspan="4"/>

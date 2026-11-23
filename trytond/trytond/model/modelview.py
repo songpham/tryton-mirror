@@ -19,6 +19,7 @@ from . import fields
 from .fields import on_change_result
 from .fields.field import _set_value
 from .model import Model
+from .modelstorage import _pyson_encoder, _record_eval_pyson
 
 __all__ = ['ModelView']
 
@@ -169,6 +170,7 @@ class ModelView(Model):
                     depend = depend[len('_parent_'):]
                 if dep_field := getattr(cls, depend, None):
                     if (isinstance(dep_field, fields.Function)
+                            and dep_field.getter
                             and dep_field.getter.startswith('on_change_with')):
                         meth_names.append(dep_field.getter)
 
@@ -269,7 +271,11 @@ class ModelView(Model):
         pool = Pool()
         User = pool.get('res.user')
 
-        key = (User.get_groups(), cls.__name__, view_id, view_type, level)
+        is_administrator = User.is_administrator()
+        groups = User.get_groups()
+
+        key = (
+            is_administrator, groups, cls.__name__, view_id, view_type, level)
         result = cls._fields_view_get_cache.get(key)
         if result:
             return result
@@ -287,7 +293,7 @@ class ModelView(Model):
                     ],
                 ]
             views = View.search(domain)
-            views = [v for v in views if v.rng_type == view_type]
+            views = [v for v in views if v.real_type == view_type]
             if views:
                 view = views[0]
                 view_id = view.id
@@ -430,15 +436,14 @@ class ModelView(Model):
                 if nodes and depends:
                     view_depends.extend(depends)
 
-        fields_width = {}
+        fields_width = collections.defaultdict(list)
         fields_optional = {}
         tree_root = tree.getroottree().getroot()
 
         # Find field without read access
-        fread_accesses = FieldAccess.check(cls.__name__,
-                list(cls._fields.keys()), 'read', access=True)
-        fields_to_remove = set(
-            x for x, y in fread_accesses.items() if not y)
+        fields_access = FieldAccess.get_access([cls.__name__])[cls.__name__]
+        fields_to_remove = {
+            f for f, a in fields_access.items() if not a['read']}
 
         # Find relation field without read access
         for name, field in cls._fields.items():
@@ -493,22 +498,14 @@ class ModelView(Model):
                     if field._type in {'one2many', 'many2many'}})
 
         if type == 'tree':
-            user = Transaction().user
             width, _ = Transaction().context.get('screen_size', (None, None))
             if Transaction().context.get('view_tree_width'):
                 ViewTreeWidth = pool.get('ir.ui.view_tree_width')
-                col_widths = ViewTreeWidth.get_width(cls.__name__, width)
-                fields_width.update({fname: w
-                        for fname, w in col_widths.items()
-                        if w > 0})
+                fields_width = ViewTreeWidth.get_width(cls.__name__, width)
 
             if view_id:
                 ViewTreeOptional = pool.get('ir.ui.view_tree_optional')
-                viewtreeoptionals = ViewTreeOptional.search([
-                        ('view', '=', view_id),
-                        ('user', '=', user),
-                        ])
-                fields_optional = {o.field: o.value for o in viewtreeoptionals}
+                fields_optional = ViewTreeOptional.get_optional(view_id)
 
         fields_def = cls.__parse_fields(
             tree_root, type,
@@ -570,10 +567,13 @@ class ModelView(Model):
         User = pool.get('res.user')
         ActionWindow = pool.get('ir.action.act_window')
 
+        is_administrator = User.is_administrator()
+        groups = set(User.get_groups())
+
         if fields_width is None:
-            fields_width = {}
+            fields_width = collections.defaultdict(list)
         if fields_optional is None:
-            fields_optional = {}
+            fields_optional = collections.defaultdict(list)
         if _fields_attrs is None:
             fields_attrs = {}
         else:
@@ -603,13 +603,15 @@ class ModelView(Model):
                 # Prefetch only the first view to prevent infinite loop
                 if view_ids:
                     for view_id in view_ids:
-                        view = Relation.fields_view_get(view_id=view_id)
+                        view = Relation.fields_view_get(
+                            view_id=view_id, level=0)
                         views[str(view_id)] = view
                         break
                 else:
                     for view_type in mode:
                         views[view_type] = (
-                            Relation.fields_view_get(view_type=view_type))
+                            Relation.fields_view_get(
+                                view_type=view_type, level=0))
                         break
             return views
 
@@ -639,14 +641,21 @@ class ModelView(Model):
                     fields_attrs[fname].setdefault('views', {}).update(views)
 
             if type == 'tree':
-                if element.get('name') in fields_width:
-                    element.set(
-                        'width', str(fields_width[element.get('name')]))
+                try:
+                    width = fields_width[element.get('name')].pop(0)
+                except IndexError:
+                    pass
+                else:
+                    if width is not None:
+                        element.set('width', str(width))
                 if element.get('optional'):
-                    if element.get('name') in fields_optional:
-                        optional = str(int(
-                                fields_optional[element.get('name')]))
-                        element.set('optional', optional)
+                    try:
+                        value = fields_optional[element.get('name')].pop(0)
+                    except IndexError:
+                        pass
+                    else:
+                        if value is not None:
+                            element.set('optional', str(int(value)))
 
         encoder = PYSONEncoder()
         if element.tag == 'button':
@@ -655,17 +664,17 @@ class ModelView(Model):
                 states = cls._buttons[button_name]
             else:
                 states = {}
-            groups = set(User.get_groups())
             button_attr = Button.get_view_attributes(
                 cls.__name__, button_name)
             for attr, value in button_attr.items():
                 if not element.get(attr):
                     element.set(attr, value or '')
             button_groups = Button.get_groups(cls.__name__, button_name)
-            if ((button_groups and not groups & button_groups)
-                    or (not button_groups
-                        and not ModelAccess.check(
-                            cls.__name__, 'write', raise_exception=False))):
+            if (not is_administrator
+                    and ((button_groups and not groups & button_groups)
+                        or (not button_groups
+                            and not ModelAccess.get_access(
+                                [cls.__name__])[cls.__name__]['write']))):
                 states = states.copy()
                 states['readonly'] = True
             element.set('states', encoder.encode(states))
@@ -700,8 +709,8 @@ class ModelView(Model):
                 action = None
             if (not action
                     or not action.res_model
-                    or not ModelAccess.check(
-                        action.res_model, 'read', raise_exception=False)):
+                    or not ModelAccess.get_access(
+                        [action.res_model])[action.res_model]['read']):
                 element.tag = 'label'
                 colspan = element.attrib.get('colspan')
                 link_name = element.attrib['name']
@@ -745,10 +754,11 @@ class ModelView(Model):
 
             transaction = Transaction()
             check_access = transaction.check_access
+            log = transaction.context.get('_log', False)
 
             assert len(records) == len(set(records)), "Duplicate records"
 
-            if (transaction.user != 0) and check_access:
+            if not User.is_administrator() and check_access:
                 ModelAccess.check(cls.__name__, 'read')
                 if issubclass(cls, ModelStorage):
                     # Check record rule access
@@ -763,9 +773,24 @@ class ModelView(Model):
                         raise AccessButtonError(
                             gettext('ir.msg_access_button_error',
                                 button=func.__name__,
-                                model=cls.__name__))
+                                **cls.__names__()))
                 else:
                     ModelAccess.check(cls.__name__, 'write')
+
+            if (transaction.user != 0) and check_access:
+                states = cls._buttons.get(func.__name__, {})
+                with transaction.set_context(
+                        groups=User.get_groups(),
+                        administrator=User.is_administrator()):
+                    for state_name in (
+                            {'invisible', 'readonly'} & states.keys()):
+                        state = _pyson_encoder.encode(states[state_name])
+                        for record in records:
+                            if _record_eval_pyson(record, state, encoded=True):
+                                raise AccessButtonError(
+                                    gettext('ir.msg_button_state_record',
+                                        button=func.__name__,
+                                        **cls.__names__(record=record)))
 
             if (transaction.user != 0) and check_access:
                 button_rules = Button.get_rules(
@@ -781,7 +806,7 @@ class ModelView(Model):
             if names:
                 ButtonClick.reset(cls.__name__, names, records)
 
-            if check_access and issubclass(cls, ModelStorage):
+            if (check_access or log) and issubclass(cls, ModelStorage):
                 cls.log(records, 'button', func.__name__)
             with without_check_access():
                 return func(cls, records, *args, **kwargs)

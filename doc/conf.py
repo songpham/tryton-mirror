@@ -9,6 +9,7 @@ if base_url:
     trytond_gis_url = base_url + '/backend-gis/'
     tryton_url = base_url + '/client-desktop/'
     proteus_url = base_url + '/client-library/'
+    naiad_url = base_url + '/client-rest/'
 else:
     modules_url = (
         'https://docs.tryton.org/${series}/modules-{module}/')
@@ -16,28 +17,31 @@ else:
     trytond_gis_url = 'https://docs.tryton.org/${series}/backend-gis/'
     tryton_url = 'https://docs.tryton.org/${series}/client-desktop/'
     proteus_url = 'https://docs.tryton.org/${series}/client-library/'
+    naiad_url = 'https://docs.tryton.org/${series}/client-rest/'
 
 
 def get_info():
+    import json
     import subprocess
-    import sys
 
     trytond_dir = os.path.join(os.path.dirname(__file__), '../trytond')
 
     info = dict()
 
-    result = subprocess.run(
-        [sys.executable, 'setup.py', '--version'],
-        stdout=subprocess.PIPE, check=True, cwd=trytond_dir)
-    version = result.stdout.decode('utf-8').strip()
-    major_version, minor_version, _ = version.split('.', 2)
+    metadata_cmd = 'python3 -m build -qq --metadata'
+    if os.environ.get('DOC_NO_ISOLATION'):
+        metadata_cmd += ' --no-isolation'
+    metadata = subprocess.check_output(
+        metadata_cmd, shell=True, encoding='utf-8', cwd=trytond_dir).strip()
+    metadata = json.loads(metadata)
+    major_version, minor_version, _ = metadata['version'].split('.', 2)
     major_version = int(major_version)
     minor_version = int(minor_version)
     if minor_version % 2:
         info['series'] = 'latest'
         info['branch'] = 'branch/default'
     else:
-        info['series'] = '.'.join(version.split('.', 2)[:2])
+        info['series'] = '.'.join(metadata['version'].split('.', 2)[:2])
         info['branch'] = 'branch/' + info['series']
 
     info['modules'] = [
@@ -82,6 +86,7 @@ intersphinx_mapping = {
     'trytond_gis': (trytond_gis_url.format(series=version), None),
     'tryton': (tryton_url.format(series=version), None),
     'proteus': (proteus_url.format(series=version), None),
+    'naiad': (naiad_url.format(series=version), None),
     }
 intersphinx_mapping.update({
         m: (modules_url.format(
@@ -91,4 +96,4 @@ intersphinx_mapping.update({
 linkcheck_ignore = [r'/.*', r'https://demo.tryton.org/*']
 del (
     get_info, info, base_url, modules_url, trytond_url, trytond_gis_url,
-    tryton_url, proteus_url)
+    tryton_url, proteus_url, naiad_url)

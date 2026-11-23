@@ -6,6 +6,10 @@ msgctxt "field:ir.email.template,contact_mechanism:"
 msgid "Contact Mechanism"
 msgstr "Kontaktinformation"
 
+msgctxt "field:party.address,attn:"
+msgid "Attn"
+msgstr "Zustellzusatz"
+
 msgctxt "field:party.address,building_name:"
 msgid "Building Name"
 msgstr "Gebäudename"
@@ -44,7 +48,7 @@ msgstr "Partei"
 
 msgctxt "field:party.address,party_name:"
 msgid "Party Name"
-msgstr "Zustellzusatz"
+msgstr "Abweichender Empfängername"
 
 msgctxt "field:party.address,post_box:"
 msgid "Post Box"
@@ -158,13 +162,9 @@ msgctxt "field:party.category,parent:"
 msgid "Parent"
 msgstr "Übergeordnet (Kategorie)"
 
-msgctxt "field:party.check_vies.result,parties_failed:"
-msgid "Parties Failed"
-msgstr "Parteien mit fehlgeschlagener Überprüfung"
-
-msgctxt "field:party.check_vies.result,parties_succeed:"
-msgid "Parties Succeed"
-msgstr "Parteien mit erfolgreicher Überprüfung"
+msgctxt "field:party.configuration,identifier_eu_vat_validation_period:"
+msgid "European VAT Number Validation Period"
+msgstr "Europäische USt-IdNr. Gültigkeitszeitraum"
 
 msgctxt "field:party.configuration,identifier_types:"
 msgid "Identifier Types"
@@ -240,7 +240,7 @@ msgstr "Wert"
 
 msgctxt "field:party.contact_mechanism,value_compact:"
 msgid "Value Compact"
-msgstr "Kompaktformat"
+msgstr "Wert Kompaktformat"
 
 msgctxt "field:party.contact_mechanism,website:"
 msgid "Website"
@@ -265,6 +265,18 @@ msgstr "Adresse"
 msgctxt "field:party.identifier,code:"
 msgid "Code"
 msgstr "Code"
+
+msgctxt "field:party.identifier,code_compact:"
+msgid "Code Compact"
+msgstr "Code Kompaktformat"
+
+msgctxt "field:party.identifier,eu_vat_valid:"
+msgid "European VAT Number Valid"
+msgstr "Europäische USt-IdNr. gültig"
+
+msgctxt "field:party.identifier,eu_vat_validated_at:"
+msgid "European VAT Number Validated At"
+msgstr "Europäische USt-IdNr. geprüft am"
 
 msgctxt "field:party.identifier,party:"
 msgid "Party"
@@ -482,6 +494,10 @@ msgctxt "help:party.category,parent:"
 msgid "Add the category below the parent."
 msgstr "Der übergeordneten Kategorie hinzufügen."
 
+msgctxt "help:party.configuration,identifier_eu_vat_validation_period:"
+msgid "The period during which the number is still considered valid."
+msgstr "Der Zeitraum, in dem die Nummer noch als gültig gilt."
+
 msgctxt "help:party.configuration,identifier_types:"
 msgid ""
 "Defines which identifier types are available.\n"
@@ -521,6 +537,10 @@ msgstr "Die zu löschende Partei."
 msgctxt "help:party.identifier,address:"
 msgid "The address identified by this record."
 msgstr "Die Adresse die durch diesen Datensatz identifiziert wird."
+
+msgctxt "help:party.identifier,eu_vat_valid:"
+msgid "Checked if the number has been validated on VIES service."
+msgstr "Ausgewählt, wenn die Nummer über den MIAS-Dienst geprüft wurde."
 
 msgctxt "help:party.identifier,party:"
 msgid "The party identified by this record."
@@ -586,6 +606,10 @@ msgctxt "model:ir.action,name:act_contact_mechanism_form"
 msgid "Contact Mechanisms"
 msgstr "Kontaktinformationen"
 
+msgctxt "model:ir.action,name:act_identifier_form"
+msgid "Identifiers"
+msgstr "Identifikatoren"
+
 msgctxt "model:ir.action,name:act_party_by_category"
 msgid "Parties by Category"
 msgstr "Parteien nach Kategorien"
@@ -601,10 +625,6 @@ msgstr "Parteien"
 msgctxt "model:ir.action,name:report_label"
 msgid "Labels"
 msgstr "Etiketten"
-
-msgctxt "model:ir.action,name:wizard_check_vies"
-msgid "Check VIES"
-msgstr "Mit MIAS (VIES) überprüfen"
 
 msgctxt "model:ir.action,name:wizard_erase"
 msgid "Erase"
@@ -684,6 +704,11 @@ msgid "Invalid format \"%(format)s\" with exception \"%(exception)s\"."
 msgstr "Ungültiges Format \"%(format)s\" mit Fehlermeldung \"%(exception)s\"."
 
 #, python-format
+msgctxt "model:ir.message,text:msg_invalid_format_strip"
+msgid "Invalid format \"%(format)s\". Empty address generates \"%(value)s\"."
+msgstr "Ungültiges Format \"%(format)s\". Leere Adresse generiert \"%(value)s\"."
+
+#, python-format
 msgctxt "model:ir.message,text:msg_invalid_phone_number"
 msgid "The phone number \"%(phone)s\" for party \"%(party)s\" is not valid."
 msgstr "Die Telefonnummer \"%(phone)s\" von Partei \"%(party)s\" ist nicht gültig."
@@ -703,6 +728,13 @@ msgid "The party \"%(party)s\" has the same %(type)s \"%(code)s\"."
 msgstr "Die Partei \"%(party)s\" hat dieselbe %(type)s \"%(code)s\"."
 
 #, python-format
+msgctxt "model:ir.message,text:msg_party_identifier_eu_vat_invalid"
+msgid "The VAT numbers \"%(identifiers)s\" are not valid for the VIES service."
+msgstr ""
+"Die europäischen USt-Identifikationsnummern \"%(identifiers)s\" sind lt. dem"
+" MIAS-Dienst ungültig."
+
+#, python-format
 msgctxt "model:ir.message,text:msg_party_set_contact_mechanism"
 msgid ""
 "To change the \"%(field)s\" for party \"%(party)s\", you must edit their "
@@ -716,6 +748,10 @@ msgid "The VIES service is unavailable, try again later."
 msgstr ""
 "Der MIAS (VIES) Dienst ist nicht erreichbar. Bitte versuchen Sie es später "
 "noch einmal."
+
+msgctxt "model:ir.model.button,string:identifier_check_view_button"
+msgid "Check VIES"
+msgstr "Mit MIAS (VIES) überprüfen"
 
 msgctxt "model:ir.sequence,name:sequence_party"
 msgid "Party"
@@ -753,6 +789,10 @@ msgctxt "model:ir.ui.menu,name:menu_contact_mechanism_form"
 msgid "Contact Mechanisms"
 msgstr "Kontaktinformationen"
 
+msgctxt "model:ir.ui.menu,name:menu_identifier_form"
+msgid "Identifiers"
+msgstr "Identifikatoren"
+
 msgctxt "model:ir.ui.menu,name:menu_party"
 msgid "Parties"
 msgstr "Parteien"
@@ -780,10 +820,6 @@ msgstr "Partei Adresse Verwaltungeinheit Typ"
 msgctxt "model:party.category,string:"
 msgid "Party Category"
 msgstr "Partei Kategorie"
-
-msgctxt "model:party.check_vies.result,string:"
-msgid "Party Check Vies Result"
-msgstr "Partei Prüfung MIAS (VIES) Ergebnis"
 
 msgctxt "model:party.configuration,string:"
 msgid "Party Configuration"
@@ -832,6 +868,10 @@ msgstr "Partei Ersetzen Frage"
 msgctxt "model:res.group,name:group_party_admin"
 msgid "Party Administration"
 msgstr "Parteien Administration"
+
+msgctxt "selection:ir.cron,method:"
+msgid "Check European VAT Number with VIES"
+msgstr "Europäische USt-IdNr. mit MIAS überprüfen"
 
 msgctxt "selection:party.configuration,identifier_types:"
 msgid "Albanian VAT Number"
@@ -882,6 +922,10 @@ msgid "Austrian Umsatzsteuer-Identifikationsnummer"
 msgstr "Österreichische Umsatzsteuer-Identifikationsnummer"
 
 msgctxt "selection:party.configuration,identifier_types:"
+msgid "Azerbaijan Tax Number"
+msgstr "Aserbaidschanische Steuernummer"
+
+msgctxt "selection:party.configuration,identifier_types:"
 msgid "Belarus VAT Number"
 msgstr "Belarussische Umsatzsteuer-Identifikationsnummer"
 
@@ -896,6 +940,10 @@ msgstr "Belgische Unternehmensnummer"
 msgctxt "selection:party.configuration,identifier_types:"
 msgid "Belgian National Number"
 msgstr "Belgische Nationalregisternummer"
+
+msgctxt "selection:party.configuration,identifier_types:"
+msgid "Belgian Social Security Number"
+msgstr "Belgische Sozialversicherungsnummer"
 
 msgctxt "selection:party.configuration,identifier_types:"
 msgid "Belgian VAT Number"
@@ -1093,6 +1141,10 @@ msgid "French Tax Identification Number"
 msgstr "Französische Steuernummer (NIF)"
 
 msgctxt "selection:party.configuration,identifier_types:"
+msgid "French Trade Registration Number"
+msgstr "Französische Handelsregisternummer"
+
+msgctxt "selection:party.configuration,identifier_types:"
 msgid "French VAT Number"
 msgstr "Französische Umsatzsteuer-Identifikationsnummer (n° TVA)"
 
@@ -1254,6 +1306,10 @@ msgid "Moroccan Tax Number"
 msgstr "Marokkanische Steuernummer"
 
 msgctxt "selection:party.configuration,identifier_types:"
+msgid "Mozambique Tax Number"
+msgstr "Mosambikanische Steuernummer"
+
+msgctxt "selection:party.configuration,identifier_types:"
 msgid "New Zealand Inland Revenue Department Number"
 msgstr "Neuseeländische Steuernummer"
 
@@ -1318,6 +1374,10 @@ msgid "Romanian VAT Number"
 msgstr "Rumänische Umsatzsteuer-Identifikationsnummer (CF)"
 
 msgctxt "selection:party.configuration,identifier_types:"
+msgid "Russian Primary State Registration Number"
+msgstr "Russische Identifikationsnummer für juristische Personen"
+
+msgctxt "selection:party.configuration,identifier_types:"
 msgid "Russian Tax identifier"
 msgstr "Russischer Steueridentifikator"
 
@@ -1328,6 +1388,10 @@ msgstr "SEPA Gläubiger-Identifikationsnummer (AT-02)"
 msgctxt "selection:party.configuration,identifier_types:"
 msgid "San Marino National Tax Number"
 msgstr "San-marinesische Steuernummer (COE)"
+
+msgctxt "selection:party.configuration,identifier_types:"
+msgid "Senegal Tax Number"
+msgstr "Senegalesische Steuernummer"
 
 msgctxt "selection:party.configuration,identifier_types:"
 msgid "Serbian Tax Identification"
@@ -1372,6 +1436,10 @@ msgstr "Südkoreanische Unternehmensnummer"
 msgctxt "selection:party.configuration,identifier_types:"
 msgid "South Korean Resident Registration Number"
 msgstr "Südafrikanische Steueridentifikationsnummer"
+
+msgctxt "selection:party.configuration,identifier_types:"
+msgid "Spanish Activity Establishment Code"
+msgstr "Spanische Betriebsnummer"
 
 msgctxt "selection:party.configuration,identifier_types:"
 msgid "Spanish Company Tax"
@@ -1541,6 +1609,14 @@ msgctxt "view:party.address:"
 msgid "General"
 msgstr "Allgemein"
 
+msgctxt "view:party.identifier:"
+msgid "Valid:"
+msgstr "Gültig:"
+
+msgctxt "view:party.identifier:"
+msgid "at"
+msgstr "am"
+
 msgctxt "view:party.party:"
 msgid "General"
 msgstr "Allgemein"
@@ -1552,10 +1628,6 @@ msgstr "Partei"
 msgctxt "view:party.replace.ask:"
 msgid "Replaced By"
 msgstr "Ersetzt durch"
-
-msgctxt "wizard_button:party.check_vies,result,end:"
-msgid "OK"
-msgstr "OK"
 
 msgctxt "wizard_button:party.erase,ask,end:"
 msgid "Cancel"

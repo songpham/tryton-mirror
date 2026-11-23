@@ -1,9 +1,10 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
+from sql import Null
+
 from trytond.model import ModelSQL, ModelView, fields, sequence_ordered
 from trytond.pool import Pool, PoolMeta
 from trytond.pyson import Bool, Eval, Or
-from trytond.tools import grouped_slice
 
 
 class Category(metaclass=PoolMeta):
@@ -11,7 +12,7 @@ class Category(metaclass=PoolMeta):
     customs = fields.Boolean(
         "Customs",
         states={
-            'readonly': Bool(Eval('childs', [0])) | Bool(Eval('parent')),
+            'editable': Bool(Eval('childs', [0])) | Bool(Eval('parent')),
             })
     tariff_codes_parent = fields.Boolean("Use Parent's Tariff Codes",
         states={
@@ -82,15 +83,10 @@ class Category(metaclass=PoolMeta):
 
         callback = super().on_delete(categories)
 
-        product_tariffcodes = set()
-        products = [str(t) for t in categories]
-        for products in grouped_slice(products):
-            product_tariffcodes.update(Product_TariffCode.search([
-                        'product', 'in', list(products),
-                        ]))
+        product_tariffcodes = Product_TariffCode.search([
+                'product', 'in', [str(t) for t in categories],
+                ])
         if product_tariffcodes:
-            product_tariffcodes = Product_TariffCode.browse(
-                product_tariffcodes)
             callback.append(
                 lambda: Product_TariffCode.delete(product_tariffcodes))
         return callback
@@ -157,18 +153,39 @@ class Template(metaclass=PoolMeta):
 
         callback = super().on_delete(templates)
 
-        product_tariffcodes = set()
-        products = [str(t) for t in templates]
-        for products in grouped_slice(products):
-            product_tariffcodes.update(Product_TariffCode.search([
-                        'product', 'in', list(products),
-                        ]))
+        product_tariffcodes = Product_TariffCode.search([
+                'product', 'in', [str(t) for t in templates],
+                ])
         if product_tariffcodes:
-            product_tariffcodes = Product_TariffCode.browse(
-                product_tariffcodes)
             callback.append(
                 lambda: Product_TariffCode.delete(product_tariffcodes))
         return callback
+
+
+class TemplateCustomsCategory(ModelSQL):
+    __name__ = 'product.template-product.category.customs'
+    template = fields.Many2One('product.template', 'Template')
+    category = fields.Many2One('product.category', 'Category')
+
+    @classmethod
+    def table_query(cls):
+        pool = Pool()
+        Template = pool.get('product.template')
+        template = Template.__table__()
+        return template.select(
+            template.id.as_('id'),
+            template.id.as_('template'),
+            template.customs_category.as_('category'),
+            where=template.customs_category != Null)
+
+
+class TemplateCategoryAll(metaclass=PoolMeta):
+    __name__ = 'product.template-product.category.all'
+
+    @classmethod
+    def union_models(cls):
+        return super().union_models() + [
+            'product.template-product.category.customs']
 
 
 class Product_TariffCode(sequence_ordered(), ModelSQL, ModelView):

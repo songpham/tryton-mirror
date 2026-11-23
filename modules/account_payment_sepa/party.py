@@ -56,9 +56,11 @@ class PartyReceptionDirectDebit(metaclass=PoolMeta):
         'account.payment.sepa.mandate', "Mandate", ondelete='CASCADE',
         domain=[
             ('party', '=', Eval('party', -1)),
+            ('company', '=', Eval('company', -1)),
             ],
         states={
             'invisible': Eval('process_method') != 'sepa',
+            'required': Eval('process_method') == 'sepa',
             'readonly': ~Eval('party') | (Eval('party', -1) < 0),
             })
 
@@ -66,6 +68,13 @@ class PartyReceptionDirectDebit(metaclass=PoolMeta):
         payment = super()._get_payment(line, date, amount)
         payment.sepa_mandate = self.sepa_mandate
         return payment
+
+    def match(self, pattern, match_none=False):
+        result = super().match(pattern, match_none=match_none)
+        if (self.process_method == 'sepa'
+                and self.sepa_mandate.state != 'validated'):
+            result = False
+        return result
 
 
 class PartyIdentifier(metaclass=PoolMeta):

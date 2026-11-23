@@ -14,6 +14,65 @@ from trytond.pyson import Eval
 from trytond.transaction import Transaction
 from trytond.wizard import Button, StateTransition, StateView, Wizard
 
+VATEX_CODES = [
+    ('VATEX-FR-FRANCHISE', "France domestic VAT franchise in base"),
+    ('VATEX-FR-CNWVAT',
+        "France domestic Credit Notes without VAT, due to supplier forfeit of "
+        "VAT for discount"),
+    ('VATEX-EU-153',
+        "Exempt based on article 153 of Council Directive 2006/112/EC"),
+    ('VATEX-FR-CGI261-1',
+        "Exempt based on 1 of article 261 of the General tax code (CGI)"),
+    ('VATEX-FR-CGI261-2',
+        "Exempt based on 2 of article 261 of the General tax code (CGI)"),
+    ('VATEX-FR-CGI261-3',
+        "Exempt based on 3 of article 261 of the General tax code (CGI)"),
+    ('VATEX-FR-CGI261-4',
+        "Exempt based on 4 of article 261 of the General tax code (CGI)"),
+    ('VATEX-FR-CGI261-5',
+        "Exempt based on 5 of article 261 of the General tax code (CGI)"),
+    ('VATEX-FR-CGI261-7',
+        "Exempt based on 7 of article 261 of the General tax code (CGI)"),
+    ('VATEX-FR-CGI261-8',
+        "Exempt based on 8 of article 261 of the General tax code (CGI)"),
+    ('VATEX-FR-CGI261A',
+        "Exempt based on article 261 A of the General tax code (CGI)"),
+    ('VATEX-FR-CGI261B',
+        "Exempt based on article 261 B of the General tax code (CGI)"),
+    ('VATEX-FR-CGI261C-1',
+        "Exempt based on 1. of article 261 C of the General tax code (CGI)"),
+    ('VATEX-FR-CGI261C-2',
+        "Exempt based on 2. of article 261 C of the General tax code (CGI)"),
+    ('VATEX-FR-CGI261C-3',
+        "Exempt based on 3. of article 261 C of the General tax code (CGI)"),
+    ('VATEX-FR-CGI261D-1',
+        "Exempt based on 1. of article 261 D of the General tax code (CGI)"),
+    ('VATEX-FR-CGI261D-1BIS',
+        "Exempt based on 1.bis of article 261 D "
+        "of the General tax code (CGI)"),
+    ('VATEX-FR-CGI261D-2',
+        "Exempt based on 2. of article 261 D of the General tax code (CGI)"),
+    ('VATEX-FR-CGI261D-3',
+        "Exempt based on 3. of article 261 D of the General tax code (CGI)"),
+    ('VATEX-FR-CGI261D-4',
+        "Exempt based on 4. of article 261 D of the General tax code (CGI)"),
+    ('VATEX-FR-CGI261E-1',
+        "Exempt based on 1. of article 261 E of the General tax code (CGI)"),
+    ('VATEX-FR-CGI261E-2',
+        "Exempt based on 2. of article 261 E of the General tax code (CGI)"),
+    ('VATEX-FR-CGI277A',
+        "Exempt based on article 277 A of the General tax code (CGI)"),
+    ('VATEX-FR-CGI275',
+        "Exempt based on article 275 of the General tax code (CGI)"),
+    ('VATEX-FR-298SEXDECIESA',
+        "Exempt based on article 298 sexdecies A "
+        "of the General tax code (CGI)"),
+    ('VATEX-FR-CGI295',
+        "Exempt based on article 295 of the General tax code (CGI)"),
+    ('VATEX-FR-AE',
+        "Exempt based on 2 of article 283 of the General tax code (CGI)"),
+    ]
+
 
 class AccountTemplate(metaclass=PoolMeta):
     __name__ = 'account.account.template'
@@ -43,6 +102,16 @@ class AccountTemplate(metaclass=PoolMeta):
                         & (model_data.module == module_name)))
 
         super().__register__(module_name)
+
+
+class Tax(metaclass=PoolMeta):
+    __name__ = 'account.tax'
+
+    @classmethod
+    def __setup__(cls):
+        super().__setup__()
+        if hasattr(cls, 'vatex_code'):
+            cls.vatex_code.selection.extend(VATEX_CODES)
 
 
 class CreateChart(metaclass=PoolMeta):

@@ -538,6 +538,10 @@ msgctxt "field:ir.chat.channel,followers:"
 msgid "Followers"
 msgstr ""
 
+msgctxt "field:ir.chat.channel,identifier:"
+msgid "Identifier"
+msgstr ""
+
 #, fuzzy
 msgctxt "field:ir.chat.channel,resource:"
 msgid "Resource"
@@ -583,6 +587,15 @@ msgstr "محتوا"
 msgctxt "field:ir.chat.message,email:"
 msgid "Email"
 msgstr "ایمیل"
+
+msgctxt "field:ir.chat.message,reference:"
+msgid "Reference"
+msgstr ""
+
+#, fuzzy
+msgctxt "field:ir.chat.message,summary:"
+msgid "Summary"
+msgstr "خلاصه"
 
 #, fuzzy
 msgctxt "field:ir.chat.message,user:"
@@ -678,6 +691,16 @@ msgstr ""
 msgctxt "field:ir.email,body:"
 msgid "Body"
 msgstr ""
+
+#, fuzzy
+msgctxt "field:ir.email,last_modification:"
+msgid "Last Modification"
+msgstr "آخرین به روز رسانی"
+
+#, fuzzy
+msgctxt "field:ir.email,last_user:"
+msgid "Last User"
+msgstr "آخرین کاربر"
 
 #, fuzzy
 msgctxt "field:ir.email,message_id:"
@@ -881,6 +904,36 @@ msgstr "صادرات"
 msgctxt "field:ir.export.line,name:"
 msgid "Name"
 msgstr "نام"
+
+#, fuzzy
+msgctxt "field:ir.filestore.queue,field:"
+msgid "Field"
+msgstr "فیلد"
+
+#, fuzzy
+msgctxt "field:ir.filestore.queue,field_ref:"
+msgid "Field"
+msgstr "فیلد"
+
+#, fuzzy
+msgctxt "field:ir.filestore.queue,file_id:"
+msgid "File ID"
+msgstr "کد فایل"
+
+#, fuzzy
+msgctxt "field:ir.filestore.queue,model:"
+msgid "Model"
+msgstr "مدل"
+
+#, fuzzy
+msgctxt "field:ir.filestore.queue,model_ref:"
+msgid "Model"
+msgstr "مدل"
+
+#, fuzzy
+msgctxt "field:ir.filestore.queue,prefix:"
+msgid "Prefix"
+msgstr "پیشوند"
 
 msgctxt "field:ir.lang,am:"
 msgid "AM"
@@ -1288,6 +1341,16 @@ msgid "Event"
 msgstr ""
 
 #, fuzzy
+msgctxt "field:ir.model.log,last_modification:"
+msgid "Last Modification"
+msgstr "آخرین به روز رسانی"
+
+#, fuzzy
+msgctxt "field:ir.model.log,last_user:"
+msgid "Last User"
+msgstr "آخرین کاربر"
+
+#, fuzzy
 msgctxt "field:ir.model.log,resource:"
 msgid "Resource"
 msgstr "منبع"
@@ -1334,9 +1397,10 @@ msgctxt "field:ir.module,version:"
 msgid "Version"
 msgstr "نسخه"
 
-msgctxt "field:ir.module.activate_upgrade.start,module_info:"
-msgid "Modules to update"
-msgstr "ماژول ها برای بروزرسانی"
+#, fuzzy
+msgctxt "field:ir.module.activate_upgrade.start,modules:"
+msgid "Modules to Activate / Upgrade"
+msgstr "فعال سازی و ارتقاء ماژول انجام شد"
 
 #, fuzzy
 msgctxt "field:ir.module.config.start,modules:"
@@ -1637,6 +1701,16 @@ msgctxt "field:ir.session.wizard,data:"
 msgid "Data"
 msgstr "داده"
 
+#, fuzzy
+msgctxt "field:ir.translation,field:"
+msgid "Field"
+msgstr "فیلد"
+
+#, fuzzy
+msgctxt "field:ir.translation,field_ref:"
+msgid "Field"
+msgstr "فیلد"
+
 msgctxt "field:ir.translation,fuzzy:"
 msgid "Fuzzy"
 msgstr "نامانوس"
@@ -1649,6 +1723,11 @@ msgctxt "field:ir.translation,model:"
 msgid "Model"
 msgstr "مدل"
 
+#, fuzzy
+msgctxt "field:ir.translation,model_ref:"
+msgid "Model"
+msgstr "مدل"
+
 msgctxt "field:ir.translation,module:"
 msgid "Module"
 msgstr "ماژول"
@@ -1658,9 +1737,10 @@ msgctxt "field:ir.translation,module_ref:"
 msgid "Module"
 msgstr "ماژول"
 
+#, fuzzy
 msgctxt "field:ir.translation,name:"
-msgid "Field Name"
-msgstr "نام فیلد"
+msgid "Name"
+msgstr "نام"
 
 msgctxt "field:ir.translation,overriding_module:"
 msgid "Overriding Module"
@@ -1820,6 +1900,11 @@ msgctxt "field:ir.ui.menu,action_keywords:"
 msgid "Action Keywords"
 msgstr "کلید واژه های اقدام"
 
+#, fuzzy
+msgctxt "field:ir.ui.menu,administration:"
+msgid "Administrator"
+msgstr "مدیریت"
+
 msgctxt "field:ir.ui.menu,childs:"
 msgid "Children"
 msgstr "زیر مجموعه"
@@ -1976,6 +2061,10 @@ msgctxt "field:ir.ui.view_tree_optional,model_ref:"
 msgid "Model"
 msgstr "مدل"
 
+msgctxt "field:ir.ui.view_tree_optional,occurrence:"
+msgid "Occurrence"
+msgstr ""
+
 #, fuzzy
 msgctxt "field:ir.ui.view_tree_optional,user:"
 msgid "User"
@@ -2042,6 +2131,10 @@ msgstr "مدل"
 msgctxt "field:ir.ui.view_tree_width,model_ref:"
 msgid "Model"
 msgstr "مدل"
+
+msgctxt "field:ir.ui.view_tree_width,occurrence:"
+msgid "Occurrence"
+msgstr ""
 
 #, fuzzy
 msgctxt "field:ir.ui.view_tree_width,screen_width:"
@@ -2329,6 +2422,10 @@ msgstr ""
 "تنظیم حداقل تاخیر زمانی بین تماس به \"عملکرد اقدام\" برای یک رکورد مشابه.\n"
 "خالی برای بدون تأخیر."
 
+msgctxt "help:ir.ui.menu,administration:"
+msgid "Check to restrict access to only administrators."
+msgstr ""
+
 #, fuzzy
 msgctxt "help:ir.ui.view_search,domain:"
 msgid "The PYSON domain."
@@ -2357,6 +2454,15 @@ msgstr "دستیارها"
 msgctxt "model:ir.action,name:act_attachment_form"
 msgid "Attachments"
 msgstr "پیوست ها"
+
+msgctxt "model:ir.action,name:act_chat_channel"
+msgid "Channels"
+msgstr ""
+
+#, fuzzy
+msgctxt "model:ir.action,name:act_chat_message"
+msgid "Messages"
+msgstr "پیام ها"
 
 msgctxt "model:ir.action,name:act_config_wizard_item_form"
 msgid "Config Wizard Items"
@@ -2890,6 +2996,10 @@ msgctxt "model:ir.export.line,string:"
 msgid "Export Line"
 msgstr "خط صادرات"
 
+msgctxt "model:ir.filestore.queue,string:"
+msgid "Filestore Queue"
+msgstr ""
+
 msgctxt "model:ir.lang,name:lang_bg"
 msgid "Bulgarian"
 msgstr "بلغاری"
@@ -3021,6 +3131,11 @@ msgctxt "model:ir.message,text:msg_access_report_error"
 msgid "You are not allowed to execute report \"%(report)s\"."
 msgstr "شما مجاز به دسترسی به \"%(model)s\" نیستید."
 
+#, fuzzy, python-format
+msgctxt "model:ir.message,text:msg_access_resource_search_error"
+msgid "You are not allowed to search on the \"%(resource)s\" resource."
+msgstr "شما مجاز به دسترسی به \"%(model)s\" نیستید."
+
 #, python-format
 msgctxt "model:ir.message,text:msg_access_rule_error"
 msgid "You are not allowed to access \"%(model)s\"."
@@ -3110,6 +3225,11 @@ msgctxt "model:ir.message,text:msg_button_name_unique"
 msgid "The name of the button must be unique per model."
 msgstr "نام مدل باید منحصر به فرد باشد!"
 
+#, fuzzy, python-format
+msgctxt "model:ir.message,text:msg_button_state_record"
+msgid "You can not call \"%(button)s\" on \"%(record)s\" of \"%(model)s\"."
+msgstr "شما مجاز به دسترسی به \"%(model)s\" نیستید."
+
 #, fuzzy
 msgctxt "model:ir.message,text:msg_cache_name_unique"
 msgid "The name of cache must be unique."
@@ -3119,6 +3239,11 @@ msgstr "مدل باید منحصر به فرد باشد!"
 msgctxt "model:ir.message,text:msg_chat_author_email_invalid"
 msgid "The email address \"%(email)s\" is not valid."
 msgstr ""
+
+#, fuzzy
+msgctxt "model:ir.message,text:msg_chat_channel_identifier_unique"
+msgid "Identifier must be unique per channel."
+msgstr "نام مدل باید منحصر به فرد باشد!"
 
 msgctxt "model:ir.message,text:msg_chat_channel_resource_unique"
 msgid "Only one channel per resource is allowed."
@@ -3130,6 +3255,21 @@ msgstr ""
 
 msgctxt "model:ir.message,text:msg_chat_follower_channel_user_unique"
 msgid "A user can follow a channel only once."
+msgstr ""
+
+#, python-format
+msgctxt "model:ir.message,text:msg_chat_follower_joined"
+msgid "\"%(name)s\" joined"
+msgstr ""
+
+#, python-format
+msgctxt "model:ir.message,text:msg_chat_follower_left"
+msgid "\"%(name)s\" left"
+msgstr ""
+
+#, python-format
+msgctxt "model:ir.message,text:msg_chat_subject"
+msgid "%(channel)s: %(author)s left a message"
 msgstr ""
 
 msgctxt "model:ir.message,text:msg_chat_user_or_email"
@@ -3439,6 +3579,11 @@ msgid ""
 msgstr "مفاد : \"%s\" در اقدام : \"%s\" نامعتبر است."
 
 #, fuzzy
+msgctxt "model:ir.message,text:msg_last_modified_at"
+msgid "Last Modified at"
+msgstr "آخرین به روز رسانی"
+
+#, fuzzy
 msgctxt "model:ir.message,text:msg_model_data_db_id_model_unique"
 msgid "The database ID must be unique per model."
 msgstr "نام مدل باید منحصر به فرد باشد!"
@@ -3455,6 +3600,18 @@ msgid ""
 "rule \"%(rule)s\"."
 msgstr "شرط : \"%s\" یک عبارت PYSON معتبر نیست در قانون دکمه :\"%s\" ."
 
+#, fuzzy, python-format
+msgctxt "model:ir.message,text:msg_modification_readonly_field_error"
+msgid "You are not allowed to modify the field \"%(field)s\" of \"%(model)s\"."
+msgstr "یک مقدار برای فیلد :\"%(field)s\" در\"%(model)s\" مورد نیاز است."
+
+#, fuzzy, python-format
+msgctxt "model:ir.message,text:msg_modification_readonly_field_record_error"
+msgid ""
+"You are not allowed to modify the field \"%(field)s\" in record "
+"\"%(record)s\" of \"%(model)s\"."
+msgstr "یک مقدار برای فیلد :\"%(field)s\" در\"%(model)s\" مورد نیاز است."
+
 msgctxt "model:ir.message,text:msg_module_deactivate_dependency"
 msgid ""
 "Some activated modules depend on the ones you are trying to deactivate:"
@@ -3470,6 +3627,11 @@ msgstr "شما نمیتوانید یک ماژول فعال شده یا در دس
 msgctxt "model:ir.message,text:msg_notes"
 msgid "Notes"
 msgstr "یادداشت ها"
+
+#, fuzzy, python-format
+msgctxt "model:ir.message,text:msg_order_function_missing"
+msgid "Missing order function for field \"%(field)s\" in \"%(model)s\"."
+msgstr "عملکرد جستجو برای فیلد \"٪ s\" گم شده است."
 
 #, fuzzy, python-format
 msgctxt "model:ir.message,text:msg_read_error"
@@ -3708,9 +3870,20 @@ msgctxt "model:ir.message,text:msg_view_search_invalid_domain"
 msgid "Invalid domain or search criteria \"%(domain)s\" for search \"%(search)s\"."
 msgstr "نام دامنه یا معیارهای جستجوی: \"%s\" در اقدام: \"%s\" معتبر نیست."
 
+msgctxt ""
+"model:ir.message,text:msg_view_tree_optional_field_occurrence_user_unique"
+msgid ""
+"A user can set only one optional per occurrence of field on the same view."
+msgstr ""
+
 #, python-format
 msgctxt "model:ir.message,text:msg_view_tree_optional_type"
 msgid "You cannot store optional on view \"%(view)s\"."
+msgstr ""
+
+msgctxt ""
+"model:ir.message,text:msg_view_tree_width_field_occurrence_user_unique"
+msgid "A user can set only one width per occurrence of field."
 msgstr ""
 
 #, fuzzy, python-format
@@ -3750,6 +3923,12 @@ msgctxt "model:ir.model.access,string:"
 msgid "Model Access"
 msgstr "مدل های دسترسی"
 
+msgctxt "model:ir.model.button,confirm:chat_channel_reset_identifier_button"
+msgid ""
+"This action will make previous entry point unusable. Do you want to "
+"continue?"
+msgstr ""
+
 msgctxt "model:ir.model.button,confirm:lang_load_translations_button"
 msgid "Are you sure you want to load languages' translations?"
 msgstr ""
@@ -3762,6 +3941,10 @@ msgstr ""
 msgctxt "model:ir.model.button,string:"
 msgid "Model Button"
 msgstr "مدل دکمه"
+
+msgctxt "model:ir.model.button,string:chat_channel_reset_identifier_button"
+msgid "Reset Identifier"
+msgstr ""
 
 msgctxt "model:ir.model.button,string:cron_run_once_button"
 msgid "Run Once"
@@ -3962,8 +4145,8 @@ msgstr "ادامه"
 
 #, fuzzy
 msgctxt "model:ir.sequence.strict,string:"
-msgid "Sequence"
-msgstr "ادامه"
+msgid "Sequence Strict"
+msgstr "دنباله های سخت"
 
 #, fuzzy
 msgctxt "model:ir.sequence.type,string:"
@@ -4071,6 +4254,10 @@ msgstr "مدیریت"
 msgctxt "model:ir.ui.menu,name:menu_attachment_form"
 msgid "Attachments"
 msgstr "پیوست ها"
+
+msgctxt "model:ir.ui.menu,name:menu_chat_channel_form"
+msgid "Channels"
+msgstr ""
 
 msgctxt "model:ir.ui.menu,name:menu_config_wizard_item_form"
 msgid "Config Wizard Items"
@@ -4503,6 +4690,14 @@ msgid "Refresh Materialized Models"
 msgstr ""
 
 msgctxt "selection:ir.cron,method:"
+msgid "Remove Deleted Binaries"
+msgstr ""
+
+msgctxt "selection:ir.cron,method:"
+msgid "Retry Queued Tasks"
+msgstr ""
+
+msgctxt "selection:ir.cron,method:"
 msgid "Run On Time Triggers"
 msgstr ""
 
@@ -4742,9 +4937,19 @@ msgctxt "view:ir.email.template:"
 msgid "Secondary Recipients:"
 msgstr ""
 
+#, fuzzy
+msgctxt "view:ir.error:"
+msgid "Date"
+msgstr "تاریخ"
+
 msgctxt "view:ir.error:"
 msgid "Origin"
 msgstr ""
+
+#, fuzzy
+msgctxt "view:ir.error:"
+msgid "Time"
+msgstr "زمان"
 
 msgctxt "view:ir.lang.config.start:"
 msgid "You can now load additional translations to the system."
@@ -4780,14 +4985,6 @@ msgstr "مسیر"
 msgctxt "view:ir.module.activate_upgrade.done:"
 msgid "The modules have been upgraded / activated."
 msgstr "ماژول ها فعال شده / ارتقاء یافته هستند."
-
-msgctxt "view:ir.module.activate_upgrade.start:"
-msgid "Note that this operation may take a few minutes."
-msgstr "توجه داشته باشید که این عملیات ممکن است چند دقیقه طول بکشد."
-
-msgctxt "view:ir.module.activate_upgrade.start:"
-msgid "Your system will be upgraded."
-msgstr "سیستم شما به روز رسانی خواهد شد."
 
 msgctxt "view:ir.module.config.start:"
 msgid "You can now activate additional modules to the system."
@@ -4833,6 +5030,10 @@ msgctxt "view:ir.translation.set.succeed:"
 msgid "Translations set successfully."
 msgstr "ترجمه باید منحصر به فرد باشد"
 
+msgctxt "view:ir.ui.menu:"
+msgid "Access Permissions"
+msgstr ""
+
 #, fuzzy
 msgctxt "view:ir.ui.menu:"
 msgid "Actions"
@@ -4864,9 +5065,10 @@ msgctxt "wizard_button:ir.module.activate_upgrade,start,end:"
 msgid "Cancel"
 msgstr "انصراف"
 
+#, fuzzy
 msgctxt "wizard_button:ir.module.activate_upgrade,start,upgrade:"
-msgid "Start Upgrade"
-msgstr "شروع ارتقاء"
+msgid "OK"
+msgstr "قبول"
 
 #, fuzzy
 msgctxt "wizard_button:ir.module.config,start,activate:"

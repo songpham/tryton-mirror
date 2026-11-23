@@ -15,7 +15,7 @@ from trytond.model import ModelSQL, ModelView, UnionMixin, fields, sum_tree
 from trytond.modules.currency.fields import Monetary
 from trytond.pool import Pool
 from trytond.pyson import Eval, If
-from trytond.tools import grouped_slice, pairwise_longest, reduce_ids
+from trytond.tools import pairwise_longest
 from trytond.tools.chart import sparkline
 from trytond.transaction import Transaction
 from trytond.wizard import StateAction, StateTransition, Wizard
@@ -228,7 +228,7 @@ class AbstractTimeseries(Abstract):
     @classmethod
     def _group_by(cls, tables, withs):
         return super()._group_by(tables, withs) + [
-            cls._column_date(tables, withs)]
+            cls._column_date(tables, withs).as_('date')]
 
 
 class Context(ModelView):
@@ -373,6 +373,11 @@ class CustomerCategoryMixin:
     category = fields.Many2One('party.category', "Category")
 
     @classmethod
+    def __setup__(cls):
+        super().__setup__()
+        cls.id._sql_type = 'BIGINT'
+
+    @classmethod
     def _joins(cls):
         pool = Pool()
         PartyCategory = pool.get('party.party-party.category')
@@ -403,7 +408,7 @@ class CustomerCategoryMixin:
         # by using a number one order bigger.
         nb_category = category.select(
             Power(10, (Ceil(Log(Max(category.id))) + Literal(1))))
-        return Min(line.id * nb_category + party_category.id)
+        return cls.id.sql_cast(Min(line.id * nb_category + party_category.id))
 
     @classmethod
     def _group_by(cls, tables, withs):
@@ -513,15 +518,13 @@ class CustomerCategoryTree(ModelSQL, ModelView):
         categories = cls.search([
                 ('parent', 'child_of', [c.id for c in categories]),
                 ])
-        ids = [c.id for c in categories]
         reporting_customer_categories = []
-        for sub_ids in grouped_slice(ids):
-            sub_ids = list(sub_ids)
-            where = reduce_ids(reporting_product_category.id, sub_ids)
-            cursor.execute(
-                *reporting_product_category.select(
-                    reporting_product_category.id, where=where))
-            reporting_customer_categories.extend(r for r, in cursor)
+        where = fields.SQL_OPERATORS['in'](
+            reporting_product_category.id, map(int, categories))
+        cursor.execute(
+            *reporting_product_category.select(
+                reporting_product_category.id, where=where))
+        reporting_customer_categories.extend(r for r, in cursor)
 
         result = {}
         reporting_product_categories = ReportingCustomerCategory.browse(
@@ -608,6 +611,11 @@ class ProductCategoryMixin(object):
         depends={'company'})
 
     @classmethod
+    def __setup__(cls):
+        super().__setup__()
+        cls.id._sql_type = 'BIGINT'
+
+    @classmethod
     def _joins(cls):
         pool = Pool()
         Product = pool.get('product.product')
@@ -645,7 +653,8 @@ class ProductCategoryMixin(object):
         # by using number one order bigger.
         nb_category = category.select(
             Power(10, (Ceil(Log(Max(category.id))) + Literal(1))))
-        return Min(line.id * nb_category + template_category.id)
+        return cls.id.sql_cast(
+            Min(line.id * nb_category + template_category.id))
 
     @classmethod
     def _group_by(cls, tables, withs):
@@ -754,15 +763,13 @@ class ProductCategoryTree(ModelSQL, ModelView):
         categories = cls.search([
                 ('parent', 'child_of', [c.id for c in categories]),
                 ])
-        ids = [c.id for c in categories]
         reporting_product_categories = []
-        for sub_ids in grouped_slice(ids):
-            sub_ids = list(sub_ids)
-            where = reduce_ids(reporting_product_category.id, sub_ids)
-            cursor.execute(
-                *reporting_product_category.select(
-                    reporting_product_category.id, where=where))
-            reporting_product_categories.extend(r for r, in cursor)
+        where = fields.SQL_OPERATORS['in'](
+            reporting_product_category.id, map(int, categories))
+        cursor.execute(
+            *reporting_product_category.select(
+                reporting_product_category.id, where=where))
+        reporting_product_categories.extend(r for r, in cursor)
 
         result = {}
         reporting_product_categories = ReportingProductCategory.browse(

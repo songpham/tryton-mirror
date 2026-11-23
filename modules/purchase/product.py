@@ -3,25 +3,30 @@
 import datetime
 from collections import defaultdict
 
-from sql import Literal
-from sql.aggregate import Count, Max
+from dateutil.relativedelta import relativedelta
+from sql import Null
+from sql.aggregate import Avg, Count, Max
+from sql.conditionals import Case, Coalesce
+from sql.functions import Age, DateTrunc
 
+from trytond import backend
 from trytond.i18n import gettext
 from trytond.model import (
     Index, MatchMixin, ModelSQL, ModelView, fields, sequence_ordered)
 from trytond.modules.currency.fields import Monetary
 from trytond.modules.product import (
-    ProductDeactivatableMixin, price_digits, round_price)
+    ProductDeactivatableMixin, copy_product_filtered, copy_template_filtered,
+    price_digits, round_price)
 from trytond.pool import Pool, PoolMeta
 from trytond.pyson import Bool, Eval, If, TimeDelta
-from trytond.tools import (
-    grouped_slice, is_full_text, lstrip_wildcard, reduce_ids)
+from trytond.tools import is_full_text, lstrip_wildcard, sqlite_apply_types
 from trytond.transaction import Transaction
 
 from .exceptions import PurchaseUOMWarning
 
 
-class Template(metaclass=PoolMeta):
+class Template(
+        copy_template_filtered('product_suppliers'), metaclass=PoolMeta):
     __name__ = "product.template"
     purchasable = fields.Boolean("Purchasable")
     product_suppliers = fields.One2Many(
@@ -86,33 +91,9 @@ class Template(metaclass=PoolMeta):
                         raise PurchaseUOMWarning(
                             name, gettext('purchase.msg_change_purchase_uom'))
 
-    @classmethod
-    def copy(cls, templates, default=None):
-        pool = Pool()
-        ProductSupplier = pool.get('purchase.product_supplier')
-        if default is None:
-            default = {}
-        else:
-            default = default.copy()
 
-        copy_suppliers = 'product_suppliers' not in default
-        default.setdefault('product_suppliers', None)
-        new_templates = super().copy(templates, default)
-        if copy_suppliers:
-            old2new = {}
-            to_copy = []
-            for template, new_template in zip(templates, new_templates):
-                to_copy.extend(
-                    ps for ps in template.product_suppliers if not ps.product)
-                old2new[template.id] = new_template.id
-            if to_copy:
-                ProductSupplier.copy(to_copy, {
-                        'template': lambda d: old2new[d['template']],
-                        })
-        return new_templates
-
-
-class Product(metaclass=PoolMeta):
+class Product(
+        copy_product_filtered('product_suppliers'), metaclass=PoolMeta):
     __name__ = 'product.product'
 
     product_suppliers = fields.One2Many(
@@ -156,16 +137,15 @@ class Product(metaclass=PoolMeta):
         supplier = context.get('supplier')
         if supplier:
             where &= purchase.party == supplier
-        for sub_products in grouped_slice(products):
-            query = (line
-                .join(purchase, condition=line.purchase == purchase.id)
-                .select(
-                    Max(line.id),
-                    where=where & reduce_ids(
-                        line.product, map(int, sub_products)),
-                    group_by=[line.product]))
-            cursor.execute(*query)
-            line_ids.extend(i for i, in cursor)
+        query = (line
+            .join(purchase, condition=line.purchase == purchase.id)
+            .select(
+                Max(line.id),
+                where=where & fields.SQL_OPERATORS['in'](
+                    line.product, map(int, products)),
+                group_by=[line.product]))
+        cursor.execute(*query)
+        line_ids.extend(i for i, in cursor)
         lines = Line.browse(line_ids)
 
         uom = None
@@ -277,35 +257,6 @@ class Product(metaclass=PoolMeta):
             prices[product.id] = unit_price
         return prices
 
-    @classmethod
-    def copy(cls, products, default=None):
-        pool = Pool()
-        ProductSupplier = pool.get('purchase.product_supplier')
-        if default is None:
-            default = {}
-        else:
-            default = default.copy()
-
-        copy_suppliers = 'product_suppliers' not in default
-        if 'template' in default:
-            default.setdefault('product_suppliers', None)
-        new_products = super().copy(products, default)
-        if 'template' in default and copy_suppliers:
-            template2new = {}
-            product2new = {}
-            to_copy = []
-            for product, new_product in zip(products, new_products):
-                if product.product_suppliers:
-                    to_copy.extend(product.product_suppliers)
-                    template2new[product.template.id] = new_product.template.id
-                    product2new[product.id] = new_product.id
-            if to_copy:
-                ProductSupplier.copy(to_copy, {
-                        'product': lambda d: product2new[d['product']],
-                        'template': lambda d: template2new[d['template']],
-                        })
-        return new_products
-
 
 class ProductSupplier(
         sequence_ordered(), ProductDeactivatableMixin, MatchMixin,
@@ -367,6 +318,12 @@ class ProductSupplier(
         help="The time from confirming the purchase order to receiving the "
         "products.\n"
         "If empty the lead time of the supplier is used.")
+    lead_time_used = fields.Function(
+        fields.TimeDelta("Lead Time"),
+        'on_change_with_lead_time_used')
+    average_lead_time = fields.Function(
+        fields.TimeDelta("Average Lead Time"),
+        'get_average_lead_time')
     currency = fields.Many2One('currency.currency', 'Currency', required=True,
         ondelete='RESTRICT')
     unit = fields.Function(
@@ -378,7 +335,7 @@ class ProductSupplier(
         super().__setup__()
         t = cls.__table__()
         cls._sql_indexes.update({
-                Index(t, (t.code, Index.Similarity())),
+                Index(t, (Coalesce(t.code, ''), Index.Similarity())),
                 })
 
     @staticmethod
@@ -407,10 +364,82 @@ class ProductSupplier(
             cursor.execute(*table.select(table.currency,
                     where=table.party == self.party.id,
                     group_by=table.currency,
-                    order_by=Count(Literal(1)).desc))
+                    order_by=Count().desc))
             row = cursor.fetchone()
             if row:
                 self.currency, = row
+
+    @classmethod
+    def get_average_lead_time(cls, product_suppliers, name):
+        return defaultdict(
+            lambda: None, cls._average_lead_time(product_suppliers))
+
+    @classmethod
+    def _average_lead_time(cls, product_suppliers, delta=None, date=None):
+        pool = Pool()
+        Date = pool.get('ir.date')
+        Purchase = pool.get('purchase.purchase')
+        PurchaseLine = pool.get('purchase.line')
+        Product = pool.get('product.product')
+        Move = pool.get('stock.move')
+        table = cls.__table__()
+        cursor = Transaction().connection.cursor()
+
+        purchase = Purchase.__table__()
+        purchase_line = PurchaseLine.__table__()
+        product = Product.__table__()
+        move = Move.__table__()
+
+        if delta is None:
+            delta = relativedelta(years=1)
+        if date is None:
+            date = Date.today()
+        purchase_date = date - delta
+
+        effective_date = Coalesce(
+            move.effective_date,
+            Case((move.planned_date > date, move.planned_date),
+                else_=date))
+
+        query = (purchase
+            .join(purchase_line,
+                condition=((purchase_line.purchase == purchase.id)
+                    & (purchase_line.type == 'line')))
+            .join(product,
+                condition=purchase_line.product == product.id)
+            .join(table,
+                condition=((purchase_line.product_supplier == table.id)
+                   | (
+                        (purchase_line.product_supplier == Null)
+                        & (purchase.party == table.party)
+                        & (
+                            (purchase_line.product == table.product)
+                            | ((product.template == table.template)
+                                & (table.product == Null))))))
+            .join(move,
+                condition=(
+                    move.origin.like('purchase.line,%')
+                    & (Move.origin.sql_id(move.origin, Move)
+                        == purchase_line.id)))
+            .select(
+                table.id.as_('id'),
+                DateTrunc(
+                    'minute',
+                    Avg(Age(effective_date, purchase.purchase_date))
+                    ).as_('lead_time'),
+                where=(
+                    purchase.state.in_(['processing', 'done'])
+                    & (purchase.purchase_date >= purchase_date)
+                    & (purchase.delivery_date == Null)
+                    & (purchase_line.delivery_date_store == Null)
+                    & fields.SQL_OPERATORS['in'](
+                        table.id, [ps.id for ps in product_suppliers])
+                    ),
+                group_by=[table.id]))
+        if backend.name == 'sqlite':
+            sqlite_apply_types(query, [None, 'INTERVAL'])
+        cursor.execute(*query)
+        return dict(cursor)
 
     def get_rec_name(self, name):
         if not self.name and not self.code:
@@ -457,15 +486,13 @@ class ProductSupplier(
         elif self.template:
             return self.template.purchase_uom
 
-    @property
-    def lead_time_used(self):
-        # Use getattr because it can be called with an unsaved instance
-        lead_time = getattr(self, 'lead_time', None)
-        party = getattr(self, 'party', None)
-        if lead_time is None and party:
-            company = getattr(self, 'company', None)
-            lead_time = party.get_multivalue(
-                'supplier_lead_time', company=company.id if company else None)
+    @fields.depends('lead_time', 'party', 'company')
+    def on_change_with_lead_time_used(self, name=None):
+        lead_time = self.lead_time
+        if lead_time is None and self.party:
+            lead_time = self.party.get_multivalue(
+                'supplier_lead_time',
+                company=self.company.id if self.company else None)
         return lead_time
 
     def compute_supply_date(self, date=None):
@@ -499,6 +526,15 @@ class ProductSupplier(
         if 'product_supplier' in context:
             pattern['id'] = context['product_supplier']
         return pattern
+
+    @classmethod
+    def view_attributes(cls):
+        return super().view_attributes() + [
+            ('/tree/field[@name="average_lead_time"]',
+                'visual',
+                If(Eval('average_lead_time', 0) > Eval('lead_time_used', 0),
+                    'danger', '')),
+            ]
 
 
 class ProductSupplierPrice(

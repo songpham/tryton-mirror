@@ -18,7 +18,6 @@ from trytond.modules.stock import StockMixin
 from trytond.modules.stock.exceptions import ShipmentCheckQuantityWarning
 from trytond.pool import Pool, PoolMeta
 from trytond.pyson import Bool, Eval, If, Len
-from trytond.tools import grouped_slice
 from trytond.transaction import Transaction
 from trytond.wizard import Button, StateTransition, StateView, Wizard
 
@@ -81,12 +80,10 @@ class Lot(DeactivableMixin, ModelSQL, ModelView, LotMixin, StockMixin):
     def get_quantity(cls, lots, name):
         location_ids = Transaction().context.get('locations')
         product_ids = list(set(l.product.id for l in lots))
-        quantities = defaultdict(float)
-        for product_ids in grouped_slice(product_ids):
-            quantities.update(cls._get_quantity(lots, name, location_ids,
-                    grouping=('product', 'lot',),
-                    grouping_filter=(list(product_ids),)))
-        return quantities
+        return cls._get_quantity(
+            lots, name, location_ids,
+            grouping=('product', 'lot',),
+            grouping_filter=(product_ids,))
 
     @classmethod
     def search_quantity(cls, name, domain=None):
@@ -128,24 +125,20 @@ class Lot(DeactivableMixin, ModelSQL, ModelView, LotMixin, StockMixin):
     def check_modification(cls, mode, lots, values=None, external=False):
         pool = Pool()
         Move = pool.get('stock.move')
-        transaction = Transaction()
 
-        def find_moves(cls, state=None):
-            for sub_records in grouped_slice(lots):
-                domain = [
-                    ('lot', 'in', [r.id for r in sub_records])
-                    ]
-                if state:
-                    domain.append(('state', '=', state))
-                moves = Move.search(domain, limit=1, order=[])
-                if moves:
-                    return True
-            return False
+        def find_moves(state=None):
+            domain = [
+                ('lot', 'in', lots)
+                ]
+            if state:
+                domain.append(('state', '=', state))
+            moves = Move.search(domain, limit=1, order=[])
+            return bool(moves)
 
         super().check_modification(
             mode, lots, values=values, external=external)
         if mode == 'write':
-            if transaction.user and transaction.check_access:
+            if external:
                 for field, state, error in cls._modify_no_move:
                     if field in values:
                         if find_moves(state):
@@ -442,8 +435,11 @@ class Move(metaclass=PoolMeta):
         pass
 
     def add_lot(self):
+        transaction = Transaction()
         if not self.lot and self.product:
-            lot = self.product.create_lot()
+            date = transaction.context.get('date') or self.effective_date
+            with Transaction().set_context(date=date):
+                lot = self.product.create_lot()
             if lot:
                 self.lot = lot
 
@@ -528,6 +524,11 @@ class MoveAddLots(Wizard):
                     'stock_lot.msg_move_add_lot_quantity',
                     lot_quantity=lang.format_number(lot_quantity, digits),
                     move_quantity=lang.format_number(move_quantity, digits)))
+        moves = [self.record]
+        state = self.record.state
+        self.model.write(moves, {
+                'state': 'draft',
+                })
         lots = []
         for line in self.start.lots:
             lot = line.get_lot(self.record)
@@ -555,10 +556,13 @@ class MoveAddLots(Wizard):
                     self.record.save()
                 else:
                     with Transaction().set_context(_stock_move_split=True):
-                        self.model.copy([self.record], {
+                        moves.extend(self.model.copy([self.record], {
                                 'quantity': line.quantity,
                                 'lot': lot.id,
-                                })
+                                }))
+        self.model.write(moves, {
+                'state': state,
+                })
         return 'end'
 
 
@@ -926,3 +930,53 @@ class InventoryCountQuantity(ModelView):
         states={
             'invisible': ~Eval('lot', None),
             })
+
+
+class Conversion(metaclass=PoolMeta):
+    __name__ = 'stock.conversion'
+
+    input_lot = fields.Many2One(
+        'stock.lot', "Input Lot",
+        ondelete='RESTRICT',
+        domain=[
+            ('product', '=', Eval('input_product', -1)),
+            ],
+        states={
+            'readonly': Eval('state') != 'draft',
+            },
+        search_context={
+            'locations': If(Eval('location', None),
+                [Eval('location', -1)], []),
+            'stock_date_end': Eval('date', None),
+            })
+    output_lot = fields.Many2One(
+        'stock.lot', "Output Lot",
+        ondelete='RESTRICT',
+        domain=[
+            ('product', '=', Eval('output_product', -1)),
+            ],
+        states={
+            'readonly': Eval('state') != 'draft',
+            })
+
+    @fields.depends('input_product', 'input_lot')
+    def on_change_input_product(self):
+        super().on_change_input_product()
+        if self.input_product and self.input_lot:
+            if self.input_lot.product != self.input_product:
+                self.input_lot = None
+
+    @fields.depends('output_product', 'output_lot')
+    def on_change_output_product(self):
+        super().on_change_output_product()
+        if self.output_product and self.output_lot:
+            if self.output_lot.product != self.output_product:
+                self.output_lot = None
+
+    def _move(self, type):
+        move = super()._move(type)
+        if type == 'input':
+            move.lot = self.input_lot
+        elif type == 'output':
+            move.lot = self.output_lot
+        return move

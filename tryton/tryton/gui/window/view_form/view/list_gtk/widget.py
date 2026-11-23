@@ -604,7 +604,7 @@ class Binary(GenericText):
             size = field.get_size(record)
         else:
             size = len(field.get(record))
-        return common.humanize(size, 'B') if size else ''
+        return common.humanize(size, 'B') if size is not None else ''
 
     def value_from_text(self, record, text, callback=None):
         if callback:
@@ -694,11 +694,29 @@ class _BinarySave(_BinaryIcon):
             size = len(field.get(record))
         field.state_set(record, states=['invisible'])
         invisible = field.get_state_attrs(record).get('invisible', False)
-        cell.set_property('visible', not invisible and size)
+        cell.set_property('visible', not invisible and size is not None)
         self._set_visual(cell, record)
 
 
 class _BinarySelect(_BinaryIcon):
+
+    default_filters = None
+
+    @property
+    def filters(self):
+        file_filter = Gtk.FileFilter()
+        if filters := self.attrs.get('filters', self.default_filters):
+            file_filter.set_name(_("All Supported Types"))
+            for type in filters.split(','):
+                if type.startswith('.'):
+                    file_filter.add_pattern(type)
+                else:
+                    file_filter.add_mime_type(type)
+        else:
+            file_filter.set_name(_("All files"))
+            file_filter.add_pattern("*")
+        return [file_filter]
+
     def clicked(self, renderer, path):
         record, field = self._get_record_field_from_path(path)
         if hasattr(field, 'get_size'):
@@ -715,7 +733,7 @@ class _BinarySelect(_BinaryIcon):
             field.set_client(record, None)
         else:
             def _select():
-                filename = file_selection(_('Open...'))
+                filename = file_selection(_("Select"), filters=self.filters)
                 if filename:
                     with open(filename, 'rb') as fp:
                         field.set_client(record, fp.read())
@@ -745,7 +763,7 @@ class _BinarySelect(_BinaryIcon):
         invisible = field.get_state_attrs(record).get('invisible', False)
         readonly = self.attrs.get('readonly',
             field.get_state_attrs(record).get('readonly', False))
-        if readonly or size:
+        if readonly or size is not None:
             cell.set_property('visible', False)
         else:
             cell.set_property('visible', not invisible)
@@ -956,13 +974,15 @@ class M2O(GenericText):
         if target_id and target_id >= 0:
             screen.load([target_id])
             screen.current_record = screen.group.get(target_id)
-            WinForm(screen, open_callback, save_current=True)
+            WinForm(
+                screen, open_callback, save_current=True,
+                prev_view=screen.current_view)
         else:
             defaults = defaults.copy() if defaults is not None else {}
             defaults['rec_name'] = text
             WinForm(
                 screen, open_callback, new=True, save_current=True,
-                defaults=defaults)
+                defaults=defaults, prev_view=screen.current_view)
 
     def search_remote(self, record, field, text, callback=None):
         model = self.get_model(record, field)
@@ -1109,7 +1129,9 @@ class O2M(GenericText):
         def open_callback(result):
             if callback:
                 callback()
-        WinForm(screen, open_callback, view_type='tree', context=context)
+        WinForm(
+            screen, open_callback, view_type='tree', context=context,
+            prev_view=screen.current_view)
 
 
 class M2M(O2M):
@@ -1136,8 +1158,9 @@ class M2M(O2M):
         def open_callback(result):
             if callback:
                 callback()
-        WinForm(screen, open_callback, view_type='tree', domain=domain,
-            context=context)
+        WinForm(
+            screen, open_callback, view_type='tree', domain=domain,
+            context=context, prev_view=screen.current_view)
 
 
 class Selection(GenericText, SelectionMixin, PopdownMixin):

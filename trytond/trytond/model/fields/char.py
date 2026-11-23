@@ -3,7 +3,7 @@
 import string
 import warnings
 
-from sql import Expression, Query
+from sql import Column, CombiningQuery, Expression, Query, Select
 from sql.conditionals import Coalesce, NullIf
 from sql.functions import Trim
 from sql.operators import Not
@@ -114,17 +114,19 @@ class Char(FieldTranslate):
 
     def _domain_column(self, operator, column):
         column = super()._domain_column(operator, column)
-        column = Coalesce(column, '')
+        if not self.required:
+            column = Coalesce(column, '')
         if self.search_unaccented and operator.endswith('ilike'):
             database = Transaction().database
             column = database.unaccent(column)
         return column
 
     def _domain_value(self, operator, value):
-        if operator in {'in', 'not in'}:
-            value = [v if v is not None else '' for v in value]
-        elif value is None:
-            value = ''
+        if not isinstance(value, (Select, CombiningQuery)):
+            if operator in {'in', 'not in'}:
+                value = [v if v is not None else '' for v in value]
+            elif value is None:
+                value = ''
         value = super()._domain_value(operator, value)
         if self.search_unaccented and operator.endswith('ilike'):
             database = Transaction().database
@@ -143,10 +145,10 @@ class Char(FieldTranslate):
                 language = transaction.language
                 model, join, column = self._get_translation_column(
                     Model, name)
-                column = Coalesce(NullIf(column, ''), self.sql_column(model))
+                column = Coalesce(NullIf(column, ''), Column(model, self.name))
             else:
                 language = None
-                column = self.sql_column(table)
+                column = self.sql_column(tables, Model)
             column = self._domain_column(operator, column)
 
             threshold = context.get(
@@ -207,7 +209,7 @@ class Char(FieldTranslate):
                 column = self._get_translation_order(tables, Model, name)
             else:
                 language = None
-                column = self.sql_column(table)
+                column = self.sql_column(tables, Model)
             column = self._domain_column('ilike', column)
             if database.has_similarity():
                 sim_value = unescape_wildcard(value)

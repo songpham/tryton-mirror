@@ -21,7 +21,7 @@ from trytond.modules.currency.fields import Monetary
 from trytond.modules.product import price_digits, round_price
 from trytond.pool import Pool
 from trytond.pyson import Bool, Eval, Id, If
-from trytond.tools import grouped_slice, reduce_ids, sqlite_apply_types
+from trytond.tools import sqlite_apply_types
 from trytond.transaction import Transaction
 from trytond.wizard import Button, StateTransition, StateView, Wizard
 
@@ -82,15 +82,14 @@ class POS(ModelSQL, ModelView):
 
         if mode == 'write':
             if 'tax_included' in values:
-                for sub_points in grouped_slice(points):
-                    if Sale.search([
-                                ('point', 'in',
-                                    list(map(int, sub_points))),
-                                ],
-                            limit=1, order=[]):
-                        raise AccessError(gettext(
-                                'sale_point.'
-                                'msg_point_change_tax_included'))
+                if Sale.search([
+                            ('point', 'in',
+                                list(map(int, points))),
+                            ],
+                        limit=1, order=[]):
+                    raise AccessError(gettext(
+                            'sale_point.'
+                            'msg_point_change_tax_included'))
 
 
 class POSSale(Workflow, ModelSQL, ModelView, TaxableMixin, ChatMixin):
@@ -112,9 +111,8 @@ class POSSale(Workflow, ModelSQL, ModelView, TaxableMixin, ChatMixin):
     point = fields.Many2One(
         'sale.point', "Point", required=True, ondelete='RESTRICT',
         states={
-            'readonly': ((Eval('id', 0) > 0)
-                | Bool(Eval('lines', [0]))
-                | _states['readonly']),
+            'readonly': (Eval('id', -1) >= 0) | _states['readonly'],
+            'editable': ~Eval('lines', [0]),
             },
         domain=[
             ('company', '=', Eval('company', -1)),
@@ -248,7 +246,7 @@ class POSSale(Workflow, ModelSQL, ModelView, TaxableMixin, ChatMixin):
     def on_change_with_total_tax(self, name=None):
         return sum(line.tax_amount for line in self.lines)
 
-    @fields.depends('company', 'lines')
+    @fields.depends('lines')
     def on_change_with_total(self, name=None):
         return sum(line.gross_amount for line in self.lines)
 
@@ -325,8 +323,10 @@ class POSSale(Workflow, ModelSQL, ModelView, TaxableMixin, ChatMixin):
     @classmethod
     @Workflow.transition('done')
     def do(cls, sales):
+        sales_without_number = (sale for sale in sales if not sale.number)
         for (company, sequence), c_sales in groupby(
-                sales, key=lambda s: (s.company, s.point.sequence)):
+                sales_without_number,
+                key=lambda s: (s.company, s.point.sequence)):
             c_sales = list(c_sales)
             with Transaction().set_context(company=company.id):
                 for sale, number in zip(
@@ -335,6 +335,7 @@ class POSSale(Workflow, ModelSQL, ModelView, TaxableMixin, ChatMixin):
         cls.save(sales)
 
     @classmethod
+    @ModelView.button
     @Workflow.transition('posted')
     def post(cls, sales):
         pool = Pool()
@@ -480,12 +481,12 @@ class POSSaleLine(ModelSQL, ModelView, TaxableMixin):
     unit_list_price = fields.Numeric(
         "Unit List Price", digits=price_digits, required=True,
         states={
-            'readonly': True,  # Allow client to sent value
+            'editable': False,
             })
     unit_gross_price = fields.Numeric(
         "Unit Gross Price", digits=price_digits, required=True,
         states={
-            'readonly': True,  # Allow client to sent value
+            'editable': False,
             })
     unit_price = fields.Function(fields.Numeric(
             "Unit Price", digits=price_digits,
@@ -662,14 +663,20 @@ class POSSaleLine(ModelSQL, ModelView, TaxableMixin):
         return move
 
     @property
+    @fields.depends('quantity', 'sale', '_parent_sale.point')
     def from_location(self):
+        if self.quantity is None:
+            return
         if self.quantity >= 0:
             return self.sale.point.storage_location
         else:
             return self.sale.point.customer_location
 
     @property
+    @fields.depends('quantity', 'sale', '_parent_sale.point')
     def to_location(self):
+        if self.quantity is None:
+            return
         if self.quantity >= 0:
             return self.sale.point.customer_location
         else:
@@ -856,27 +863,28 @@ class POSCashSession(Workflow, ModelSQL, ModelView):
         transfer = Transfer.__table__()
         cursor = Transaction().connection.cursor()
         balances = defaultdict(Decimal)
-        for sub_sessions in grouped_slice(sessions):
-            sub_ids = [s.id for s in sub_sessions]
-            query = Union(
-                payment.select(
-                    payment.session.as_('session'),
-                    Sum(payment.amount).as_('amount'),
-                    where=reduce_ids(payment.session, sub_ids),
-                    group_by=[payment.session]),
-                transfer.select(
-                    transfer.session.as_('session'),
-                    Sum(transfer.amount).as_('amount'),
-                    where=reduce_ids(transfer.session, sub_ids),
-                    group_by=[transfer.session]),
-                all_=True)
-            query = query.select(
-                query.session, Sum(query.amount).as_('amount'),
-                group_by=[query.session])
-            if backend.name == 'sqlite':
-                sqlite_apply_types(query, [None, 'NUMERIC'])
-            cursor.execute(*query)
-            balances.update(cursor)
+        session_ids = [s.id for s in sessions]
+        query = Union(
+            payment.select(
+                payment.session.as_('session'),
+                Sum(payment.amount).as_('amount'),
+                where=fields.SQL_OPERATORS['in'](
+                    payment.session, session_ids),
+                group_by=[payment.session]),
+            transfer.select(
+                transfer.session.as_('session'),
+                Sum(transfer.amount).as_('amount'),
+                where=fields.SQL_OPERATORS['in'](
+                    transfer.session, session_ids),
+                group_by=[transfer.session]),
+            all_=True)
+        query = query.select(
+            query.session, Sum(query.amount).as_('amount'),
+            group_by=[query.session])
+        if backend.name == 'sqlite':
+            sqlite_apply_types(query, [None, 'NUMERIC'])
+        cursor.execute(*query)
+        balances.update(cursor)
         for session in sessions:
             balances[session.id] = session.currency.round(balances[session.id])
         return balances

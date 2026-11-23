@@ -5,6 +5,7 @@ import datetime
 import logging
 import posixpath
 from collections import defaultdict
+from functools import wraps
 
 from oauthlib.oauth2 import BackendApplicationClient, TokenExpiredError
 from requests_oauthlib import OAuth2Session
@@ -204,6 +205,22 @@ class Invoice(metaclass=PoolMeta):
         InvoiceChorus.save(invoices_chorus)
 
 
+def default_records(state):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(cls, records=None):
+            transaction = Transaction()
+            if records is None:
+                records = cls.search([
+                        ('invoice.company', '=',
+                            transaction.context.get('company')),
+                        ('state', '=', state),
+                        ])
+            return func(cls, records)
+        return wrapper
+    return decorator
+
+
 class InvoiceChorus(
         Workflow, ModelSQL, ModelView, _SyntaxMixin, metaclass=PoolMeta):
     __name__ = 'account.invoice.chorus'
@@ -337,6 +354,7 @@ class InvoiceChorus(
             }
 
     @classmethod
+    @default_records('draft')
     @ModelView.button
     @Workflow.transition('sent')
     def send(cls, records=None):
@@ -347,13 +365,6 @@ class InvoiceChorus(
         pool = Pool()
         Credential = pool.get('account.credential.chorus')
         transaction = Transaction()
-
-        if not records:
-            records = cls.search([
-                    ('invoice.company', '=',
-                        transaction.context.get('company')),
-                    ('state', '=', 'draft'),
-                    ])
 
         sessions = defaultdict(Credential.get_session)
         cls.lock(records)
@@ -392,19 +403,13 @@ class InvoiceChorus(
             }
 
     @classmethod
+    @default_records('sent')
     @ModelView.button
     def update(cls, records=None):
         "Update state from Chorus"
         pool = Pool()
         Credential = pool.get('account.credential.chorus')
         transaction = Transaction()
-
-        if not records:
-            records = cls.search([
-                    ('invoice.company', '=',
-                        transaction.context.get('company')),
-                    ('state', '=', 'sent'),
-                    ])
 
         sessions = defaultdict(Credential.get_session)
         succeeded, failed = [], []

@@ -7,7 +7,7 @@ from collections import defaultdict
 from decimal import Decimal
 from itertools import groupby
 
-from sql import Column, For, Literal, Null, Union
+from sql import Column, For, Literal, Null, Table, Union
 from sql.aggregate import Max, Sum
 from sql.conditionals import Case, Coalesce
 from sql.functions import Round
@@ -18,8 +18,8 @@ from trytond.model import (
 from trytond.model.exceptions import AccessError
 from trytond.modules.product import price_digits, round_price
 from trytond.pool import Pool
-from trytond.pyson import Bool, Eval, If, TimeDelta
-from trytond.tools import cached_property, grouped_slice, reduce_ids
+from trytond.pyson import Bool, Eval, Id, If, TimeDelta
+from trytond.tools import cached_property
 from trytond.transaction import Transaction, without_check_access
 
 from .exceptions import MoveFutureWarning, MoveOriginWarning
@@ -80,25 +80,34 @@ class StockMixin(object):
         """
         pool = Pool()
         Product = pool.get('product.product')
+        Location = pool.get('stock.location')
 
         quantities = defaultdict(float)
         if not location_ids:
             return quantities
 
-        with_childs = Transaction().context.get(
-            'with_childs', len(location_ids) == 1)
+        warehouse_only = all(
+            l.type == 'warehouse' for l in Location.browse(location_ids))
+        if warehouse_only:
+            grouped_location_ids = ([l] for l in location_ids)
+        else:
+            grouped_location_ids = [location_ids]
 
-        with Transaction().set_context(cls._quantity_context(name)):
-            pbl = Product.products_by_location(
-                location_ids,
-                with_childs=with_childs,
-                grouping=grouping,
-                grouping_filter=grouping_filter)
+        for sub_location_ids in grouped_location_ids:
+            with_childs = Transaction().context.get(
+                'with_childs', len(sub_location_ids) == 1)
 
-        for key, quantity in pbl.items():
-            # pbl could return None in some keys
-            if key[position] is not None:
-                quantities[key[position]] += quantity
+            with Transaction().set_context(cls._quantity_context(name)):
+                pbl = Product.products_by_location(
+                    sub_location_ids,
+                    with_childs=with_childs,
+                    grouping=grouping,
+                    grouping_filter=grouping_filter)
+
+            for key, quantity in pbl.items():
+                # pbl could return None in some keys
+                if key[position] is not None:
+                    quantities[key[position]] += quantity
         return quantities
 
     @classmethod
@@ -118,19 +127,30 @@ class StockMixin(object):
         Product = pool.get('product.product')
         Move = pool.get('stock.move')
         Uom = pool.get('product.uom')
+        Location = pool.get('stock.location')
+        transaction = Transaction()
+        context = transaction.context
         uom = Uom.__table__()
 
         if not location_ids or not domain:
             return []
-        with_childs = Transaction().context.get(
-            'with_childs', len(location_ids) == 1)
+
+        warehouse_only = all(
+            l.type == 'warehouse' for l in Location.browse(location_ids))
+        with_childs = context.get(
+            'with_childs', len(location_ids) == 1 or warehouse_only)
         _, operator_, operand = domain
 
-        with Transaction().set_context(cls._quantity_context(name)):
-            if (len(location_ids) == 1
-                    and not Transaction().context.get('stock_skip_warehouse')):
+        if operand is None:
+            return [('id', '=', -1)]
+
+        with transaction.set_context(cls._quantity_context(name)):
+            if ((len(location_ids) == 1 or warehouse_only)
+                    and not context.get('stock_skip_warehouse')):
                 # We can use the compute quantities query if the request is for
-                # a single location because all the locations are children and
+                # a single location because all the locations are children or
+                # if the request is for only warehouses because all the
+                # children locations are under a single warehouse
                 # so we can do a SUM.
                 Operator = fields.SQL_OPERATORS[operator_]
                 query = Move.compute_quantities_query(
@@ -151,6 +171,12 @@ class StockMixin(object):
             pbl = Product.products_by_location(
                 location_ids, with_childs=with_childs, grouping=grouping)
 
+        quantities = defaultdict(float)
+        for key, quantity in pbl.items():
+            # pbl could return None in some keys
+            if key[position] is not None:
+                quantities[key[position]] += quantity
+
         operator_ = {
             '=': operator.eq,
             '>=': operator.ge,
@@ -161,15 +187,8 @@ class StockMixin(object):
             'in': lambda v, l: v in l,
             'not in': lambda v, l: v not in l,
             }.get(operator_, lambda v, l: False)
-        record_ids = []
-        for key, quantity in pbl.items():
-            if (quantity is not None and operand is not None
-                    and operator_(quantity, operand)):
-                # pbl could return None in some keys
-                if key[position] is not None:
-                    record_ids.append(key[position])
-
-        return [('id', 'in', record_ids)]
+        return [('id', 'in',
+                [k for k, v in quantities.items() if operator_(v, operand)])]
 
 
 class Move(Workflow, ModelSQL, ModelView):
@@ -198,8 +217,8 @@ class Move(Workflow, ModelSQL, ModelView):
     unit = fields.Many2One(
         'product.uom', "Unit", required=True,
         states={
-            'readonly': (Eval('state').in_(['cancelled', 'assigned', 'done'])
-                | Eval('unit_price')),
+            'readonly': Eval('state').in_(['cancelled', 'assigned', 'done']),
+            'editable': ~Eval('unit_price'),
             },
         domain=[
             If(~Eval('state').in_(['done', 'cancelled']),
@@ -221,7 +240,13 @@ class Move(Workflow, ModelSQL, ModelView):
             ])
     from_location = fields.Many2One(
         'stock.location', "From Location",
-        required=True, states=STATES,
+        required=True,
+        states={
+            'readonly': STATES['readonly'],
+            'editable': ~(
+                Eval('shipment')
+                | Eval('_parent_shipment', None)),
+            },
         domain=[
             LOCATION_DOMAIN,
             ('id', '!=', Eval('to_location', -1)),
@@ -240,7 +265,13 @@ class Move(Workflow, ModelSQL, ModelView):
         'on_change_with_from_location_name')
     to_location = fields.Many2One(
         'stock.location', "To Location",
-        required=True, states=STATES,
+        required=True,
+        states={
+            'readonly': STATES['readonly'],
+            'editable': ~(
+                Eval('shipment')
+                | Eval('_parent_shipment', None)),
+            },
         domain=[
             LOCATION_DOMAIN,
             ('id', '!=', Eval('from_location', -1)),
@@ -258,9 +289,10 @@ class Move(Workflow, ModelSQL, ModelView):
             "To Location"),
         'on_change_with_to_location_name')
     shipment = fields.Reference(
-        "Shipment", selection='get_shipment', readonly=True,
+        "Shipment", selection='get_shipment',
         states={
             'invisible': ~Eval('shipment'),
+            'readonly': Eval('id', -1) >= 0,
             },
         help="Used to group several stock moves together.")
     origin = fields.Reference(
@@ -277,20 +309,20 @@ class Move(Workflow, ModelSQL, ModelView):
     planned_date = fields.Date(
         "Planned Date",
         states={
-            'readonly': (
-                Eval('state').in_(['cancelled', 'assigned', 'done'])
-                | Eval('shipment')
-                | Eval('_parent_shipment'))
+            'readonly': Eval('state').in_(['cancelled', 'assigned', 'done']),
+            'editable': ~(
+                Eval('shipment', None)
+                | Eval('_parent_shipment', None)),
             },
         help="When the stock is expected to be moved.")
     effective_date = fields.Date(
         "Effective Date",
         states={
             'required': Eval('state') == 'done',
-            'readonly': (
-                Eval('state').in_(['cancelled', 'done'])
-                | Eval('shipment')
-                | Eval('_parent_shipment')),
+            'readonly': Eval('state').in_(['cancelled', 'done']),
+            'editable': ~(
+                Eval('shipment', None)
+                | Eval('_parent_shipment', None)),
             },
         help="When the stock was actually moved.")
     delay = fields.Function(
@@ -323,8 +355,10 @@ class Move(Workflow, ModelSQL, ModelView):
                 ()),
             ],
         states={
-            'invisible': ~Eval('unit_price_required'),
-            'required': Bool(Eval('unit_price_required')),
+            'invisible': (
+                ~Eval('unit_price_required', False)
+                & (Eval('unit_price', None) == None)),  # noqa: E711
+            'required': Eval('unit_price_required', False),
             'readonly': Eval('state') != 'draft',
             })
     unit_price_company = fields.Function(
@@ -347,7 +381,7 @@ class Move(Workflow, ModelSQL, ModelView):
                 ()),
             ],
         states={
-            'invisible': ~Eval('cost_price_required'),
+            'invisible': ~Eval('cost_price_required', False),
             'required': (
                 (Eval('state') == 'done')
                 & Eval('cost_price_required', False)),
@@ -371,8 +405,10 @@ class Move(Workflow, ModelSQL, ModelView):
                 ()),
             ],
         states={
-            'invisible': ~Eval('unit_price_required'),
-            'required': Bool(Eval('unit_price_required')),
+            'invisible': (
+                ~Eval('unit_price_required')
+                & (Eval('currency', None) == None)),  # noqa: E711
+            'required': Eval('unit_price_required', False),
             'readonly': Eval('state') != 'draft',
             },
         help="The currency in which the unit price is specified.")
@@ -464,7 +500,14 @@ class Move(Workflow, ModelSQL, ModelView):
                 ))
         cls._buttons.update({
                 'cancel': {
-                    'invisible': ~Eval('state').in_(['draft', 'assigned']),
+                    'invisible': (
+                        (Eval('state') == 'cancelled')
+                        | ((Eval('state') == 'done')
+                            & ~Id('stock',
+                                'group_stock_cancellation').in_(
+                                Eval('context', {}).get('groups', []))
+                            & ~Eval('context', {}).get(
+                                'administrator', False))),
                     'readonly': Eval('shipment') | Eval('_parent_shipment'),
                     'depends': ['state', 'shipment'],
                     },
@@ -684,9 +727,15 @@ class Move(Workflow, ModelSQL, ModelView):
 
     @classmethod
     @without_check_access
-    def check_period_closed(cls, moves):
-        Period = Pool().get('stock.period')
-        for company, moves in groupby(moves, lambda m: m.company):
+    def check_period_closed(cls, moves, state=None):
+        pool = Pool()
+        Period = pool.get('stock.period')
+
+        def exclude_draft_staging(move):
+            return (state if state else move.state) not in {'draft', 'staging'}
+
+        for company, moves in groupby(
+                filter(exclude_draft_staging, moves), lambda m: m.company):
             periods = Period.search([
                     ('state', '=', 'closed'),
                     ('company', '=', company.id),
@@ -859,13 +908,13 @@ class Move(Workflow, ModelSQL, ModelView):
 
         cls.check_origin(moves)
         for key, grouped_moves in groupby(moves, key=cls._cost_price_key):
-            to_save = []
             cost_values = []
             products = set()
             grouped_moves = list(grouped_moves)
             context = dict(key)
             context.update(cls._cost_price_context(grouped_moves))
-            with Transaction().set_context(context):
+            with Transaction().set_context(context), \
+                    cls.bulk_save(auto=False) as save:
                 grouped_moves = cls.browse(grouped_moves)
                 for move in grouped_moves:
                     move.set_effective_date()
@@ -876,9 +925,8 @@ class Move(Workflow, ModelSQL, ModelView):
                             # The average computation of product cost price
                             # requires each previous move of the same product
                             # to be saved
-                            cls.save(to_save)
+                            save.flush()
                             set_cost_values(cost_values)
-                            del to_save[:]
                             del cost_values[:]
                             products.clear()
                             # Recompute with unmodified move but including new
@@ -888,7 +936,7 @@ class Move(Workflow, ModelSQL, ModelView):
                         cost_values.append(
                             (move.product, cost_price,
                                 move._cost_price_pattern))
-                    to_save.extend(extra_to_save)
+                    save.extend(extra_to_save)
                     if move.cost_price_required and move.cost_price is None:
                         if cost_price is None:
                             cost_price = move.product.get_multivalue(
@@ -896,11 +944,9 @@ class Move(Workflow, ModelSQL, ModelView):
                         move.cost_price = cost_price
                     move.state = 'done'
 
-                    to_save.append(move)
+                    save.push(move)
                     products.add(move.product)
 
-                if to_save:
-                    cls.save(to_save)
                 if cost_values:
                     set_cost_values(cost_values)
 
@@ -989,7 +1035,11 @@ class Move(Workflow, ModelSQL, ModelView):
     @classmethod
     def copy(cls, moves, default=None):
         default = default.copy() if default is not None else {}
+        default.setdefault('internal_quantity', 0)
+        default.setdefault('cost_price')
         default.setdefault('outcome_moves', None)
+        default.setdefault(
+            'unit_price_updated', cls.default_unit_price_updated())
         return super().copy(moves, default=default)
 
     def compute_fields(self, field_names=None):
@@ -1029,7 +1079,7 @@ class Move(Workflow, ModelSQL, ModelView):
             cls.check_period_closed(moves)
         elif mode == 'write':
             if values.keys() - cls._allow_modify_closed_period:
-                cls.check_period_closed(moves)
+                cls.check_period_closed(moves, state=values.get('state'))
             if values.keys() & cls._deny_modify_assigned:
                 for move in moves:
                     if move.state == 'assigned':
@@ -1309,7 +1359,6 @@ class Move(Workflow, ModelSQL, ModelView):
         connection = transaction.connection
 
         if database.has_select_for():
-            count = database.IN_MAX // 2
             PeriodCache = Period.get_cache(grouping)
             with connection.cursor() as cursor:
                 for company_id in company_ids:
@@ -1322,24 +1371,22 @@ class Move(Workflow, ModelSQL, ModelView):
                                 ], order=[('date', 'DESC')], limit=1)
                         if periods:
                             period, = periods
-                    for sub_location_ids in grouped_slice(location_ids, count):
-                        sub_location_ids = list(sub_location_ids)
-                        table = cls.__table__()
-                        query = table.select(Literal(1),
-                            where=(reduce_ids(
-                                    table.to_location, sub_location_ids)
-                                | reduce_ids(
-                                    table.from_location, sub_location_ids))
-                            & table.product.in_(product_ids)
-                            & (table.company == company_id),
-                            for_=For('UPDATE', nowait=True))
+                    table = cls.__table__()
+                    query = table.select(Literal(1),
+                        where=(fields.SQL_OPERATORS['in'](
+                                table.to_location, location_ids)
+                            | fields.SQL_OPERATORS['in'](
+                                table.from_location, location_ids))
+                        & table.product.in_(product_ids)
+                        & (table.company == company_id),
+                        for_=For('UPDATE', nowait=True))
 
-                        if period:
-                            query.where &= Coalesce(
-                                table.effective_date,
-                                table.planned_date,
-                                datetime.date.max) > period.date
-                        cursor.execute(*query)
+                    if period:
+                        query.where &= Coalesce(
+                            table.effective_date,
+                            table.planned_date,
+                            datetime.date.max) > period.date
+                    cursor.execute(*query)
         else:
             cls.lock()
 
@@ -1406,7 +1453,7 @@ class Move(Workflow, ModelSQL, ModelView):
         company = User(transaction.user).company
 
         def get_column(name, table):
-            if name == 'date':
+            if name == 'date' and isinstance(table, Table):
                 return cls.effective_date.sql_cast(
                     Coalesce(
                         table.effective_date,
@@ -1630,9 +1677,10 @@ class Move(Workflow, ModelSQL, ModelView):
                 if PeriodCache:
                     cache_column = Column(period_cache, fieldname)
                 if isinstance(grouping_ids[0], (int, float, Decimal)):
-                    where &= reduce_ids(column, grouping_ids)
+                    where &= fields.SQL_OPERATORS['in'](column, grouping_ids)
                     if PeriodCache:
-                        where_period &= reduce_ids(cache_column, grouping_ids)
+                        where_period &= fields.SQL_OPERATORS['in'](
+                            cache_column, grouping_ids)
                 else:
                     where &= column.in_(grouping_ids)
                     if PeriodCache:
@@ -1654,8 +1702,7 @@ class Move(Workflow, ModelSQL, ModelView):
         # One that sums incoming moves towards locations, one that sums
         # outgoing moves and one for the period cache.  UNION ALL is used
         # because we already know that there will be no duplicates.
-        move_keys_alias = [get_column(key, move).as_(key) for key in grouping]
-        move_keys = [get_column(key, move) for key in grouping]
+        move_keys = [get_column(key, move).as_(key) for key in grouping]
 
         if company:
             company_clause = move.company == company.id
@@ -1665,22 +1712,22 @@ class Move(Workflow, ModelSQL, ModelView):
             company_clause = Literal(False)
         query = move.select(move.to_location.as_('location'),
             Sum(move.internal_quantity).as_('quantity'),
-            *move_keys_alias,
+            *move_keys,
             where=state_date_clause_in
             & where
             & move.to_location.in_(location_query)
             & company_clause
             & dest_clause_from,
-            group_by=[move.to_location] + move_keys)
+            group_by=[move.to_location.as_('location')] + move_keys)
         query = Union(query, move.select(move.from_location.as_('location'),
                 (-Sum(move.internal_quantity)).as_('quantity'),
-                *move_keys_alias,
+                *move_keys,
                 where=state_date_clause_out
                 & where
                 & move.from_location.in_(location_query)
                 & company_clause
                 & dest_clause_to,
-                group_by=[move.from_location] + move_keys),
+                group_by=[move.from_location.as_('location')] + move_keys),
             all_=True)
         if PeriodCache and period:
             period_keys = [Column(period_cache, key).as_(key)
@@ -1702,7 +1749,7 @@ class Move(Workflow, ModelSQL, ModelView):
             + query_keys
             + [quantity.as_('quantity')])
         query = query.select(*columns,
-            group_by=[query.location] + query_keys)
+            group_by=[query.location.as_('location')] + query_keys)
         return query
 
     @classmethod

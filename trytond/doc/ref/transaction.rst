@@ -52,6 +52,10 @@ Transaction
 
 .. attribute:: Transaction.trigger_records
 
+.. attribute:: Transaction.log_records
+
+.. attribute:: Transaction.user_notifications
+
 .. attribute:: Transaction.check_warnings
 
     The dictionary of warnings already checked with user and warning
@@ -83,7 +87,7 @@ Transaction
 
    Return a monotonic time used to populate :attr:`~Transaction.started_at`.
 
-.. method:: Transaction.start(database_name, user[, readonly[, context[, close[, autocommit, \**extras]]]])
+.. method:: Transaction.start(database_name, user[, readonly[, context[, autocommit, \**extras]]])
 
    Start a new transaction and return a `context manager`_.
    The non-readonly transaction will be committed when exiting the ``with``

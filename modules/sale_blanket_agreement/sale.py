@@ -6,6 +6,7 @@ from decimal import Decimal
 from itertools import groupby
 
 from sql import Null
+from sql.conditionals import Coalesce
 from sql.functions import CharLength
 
 from trytond.i18n import gettext
@@ -114,9 +115,9 @@ class BlanketAgreement(Workflow, ModelSQL, ModelView, ChatMixin):
     company = fields.Many2One(
         'company.company', "Company", required=True,
         states={
-            'readonly': (
-                (Eval('state') != 'draft')
-                | Eval('lines', [0])
+            'readonly': Eval('state') != 'draft',
+            'editable': ~(
+                Eval('lines', [0])
                 | Eval('customer', True)),
             })
     number = fields.Char("Number", readonly=True)
@@ -129,9 +130,8 @@ class BlanketAgreement(Workflow, ModelSQL, ModelView, ChatMixin):
     customer = fields.Many2One(
         'party.party', "Customer", required=True,
         states={
-            'readonly': (
-                (Eval('state') != 'draft')
-                | (Eval('lines', [0]) & Eval('customer'))),
+            'readonly': Eval('state') != 'draft',
+            'editable': ~(Eval('lines', [0]) & Eval('customer', None)),
             },
         context={
             'company': Eval('company', -1),
@@ -162,16 +162,14 @@ class BlanketAgreement(Workflow, ModelSQL, ModelView, ChatMixin):
     currency = fields.Many2One(
         'currency.currency', "Currency", required=True,
         states={
-            'readonly': (
-                (Eval('state') != 'draft')
-                | (Eval('lines', [0]) & Eval('currency', 0))),
+            'readonly': Eval('state') != 'draft',
+            'editable': ~(Eval('lines', [0]) & Eval('currency', 0)),
             })
     lines = fields.One2Many(
         'sale.blanket_agreement.line', 'blanket_agreement', "Lines",
         states={
-            'readonly': (
-                (Eval('state') != 'draft')
-                | ~Eval('customer'))
+            'readonly': Eval('state') != 'draft',
+            'editable': Bool(Eval('customer', None)),
             })
 
     amount = fields.Function(Monetary(
@@ -192,7 +190,7 @@ class BlanketAgreement(Workflow, ModelSQL, ModelView, ChatMixin):
         super().__setup__()
         t = cls.__table__()
         cls._sql_indexes.update({
-                Index(t, (t.reference, Index.Similarity())),
+                Index(t, (Coalesce(t.reference, ''), Index.Similarity())),
                 Index(
                     t, (t.state, Index.Equality(cardinality='low')),
                     where=t.state.in_(['draft', 'running'])),
@@ -223,8 +221,11 @@ class BlanketAgreement(Workflow, ModelSQL, ModelView, ChatMixin):
                 'run': {
                     'invisible': (
                         (Eval('state') != 'draft')
-                        & ~(Id('sale', 'group_sale_admin').in_(
-                            Eval('context', {}).get('groups', []))
+                        & ~(
+                            (Id('sale', 'group_sale_admin').in_(
+                                    Eval('context', {}).get('groups', []))
+                                | Eval('context', {}).get(
+                                    'administrator', False))
                             & (Eval('state') == 'closed'))),
                     'readonly': (~Eval('lines')
                         | (Eval('from_date', Date()) > Date())),
@@ -425,7 +426,7 @@ class BlanketAgreement(Workflow, ModelSQL, ModelView, ChatMixin):
         cls.set_date(agreements, 'to_date')
         for agreement in agreements:
             if agreement.to_date > today:
-                if any(l.remaining_quantity > 0 for l in agreement.lines):
+                if any(l.remaining_quantity for l in agreement.lines):
                     warning_key = Warning.format(
                             'closed_remaining_quantity', [agreement])
                     if Warning.check(warning_key):

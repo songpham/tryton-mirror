@@ -122,9 +122,27 @@ msgctxt "field:res.user,warehouse:"
 msgid "Current Warehouse"
 msgstr "Huidig magazijn"
 
+#, fuzzy
+msgctxt "field:stock.configuration,inventory_cost_thresold:"
+msgid "Inventory Cost Thresold"
+msgstr "Voorraad bewegingen"
+
+#, fuzzy
+msgctxt "field:stock.configuration,inventory_quantity_tolerance:"
+msgid "Inventory Quantity Tolerance"
+msgstr "Voorraad reeks"
+
 msgctxt "field:stock.configuration,inventory_sequence:"
 msgid "Inventory Sequence"
 msgstr "Voorraad reeks"
+
+msgctxt "field:stock.configuration,period_closing_delay:"
+msgid "Period Closing Delay"
+msgstr ""
+
+msgctxt "field:stock.configuration,period_creation_interval:"
+msgid "Period Creation Interval"
+msgstr ""
 
 msgctxt "field:stock.configuration,shipment_in_return_sequence:"
 msgid "Supplier Return Shipment Sequence"
@@ -150,9 +168,32 @@ msgctxt "field:stock.configuration,shipment_out_sequence:"
 msgid "Customer Shipment Sequence"
 msgstr "Klant zending reeks"
 
+#, fuzzy
+msgctxt "field:stock.configuration.inventory,inventory_cost_thresold:"
+msgid "Inventory Cost Thresold"
+msgstr "Voorraad bewegingen"
+
+#, fuzzy
+msgctxt "field:stock.configuration.inventory,inventory_quantity_tolerance:"
+msgid "Inventory Quantity Tolerance"
+msgstr "Voorraad reeks"
+
 msgctxt "field:stock.configuration.location,shipment_internal_transit:"
 msgid "Internal Shipment Transit"
 msgstr "Interne zending doorvoer"
+
+#, fuzzy
+msgctxt "field:stock.configuration.period,company:"
+msgid "Company"
+msgstr "Bedrijf"
+
+msgctxt "field:stock.configuration.period,period_closing_delay:"
+msgid "Period Closing Delay"
+msgstr ""
+
+msgctxt "field:stock.configuration.period,period_creation_interval:"
+msgid "Period Creation Interval"
+msgstr ""
 
 msgctxt "field:stock.configuration.sequence,company:"
 msgid "Company"
@@ -234,6 +275,11 @@ msgctxt "field:stock.inventory.count.search,search:"
 msgid "Search"
 msgstr "Zoeken"
 
+#, fuzzy
+msgctxt "field:stock.inventory.line,cost_variation:"
+msgid "Cost Variation"
+msgstr "Kostprijs revisie"
+
 msgctxt "field:stock.inventory.line,expected_quantity:"
 msgid "Expected Quantity"
 msgstr "Verwachte hoeveelheid"
@@ -265,6 +311,20 @@ msgstr "Product"
 msgctxt "field:stock.inventory.line,quantity:"
 msgid "Actual Quantity"
 msgstr "Actuele hoeveelheid"
+
+#, fuzzy
+msgctxt "field:stock.inventory.line,quantity_variation:"
+msgid "Quantity Variation"
+msgstr "Maateenheid hoeveelheid"
+
+msgctxt "field:stock.inventory.line,tolerance_cost_variation:"
+msgid "Tolerance Cost Variation"
+msgstr ""
+
+#, fuzzy
+msgctxt "field:stock.inventory.line,tolerance_quantity_variation:"
+msgid "Tolerance Quantity Variation"
+msgstr "Cumulatieve hoeveelheid start"
 
 msgctxt "field:stock.inventory.line,unit:"
 msgid "Unit"
@@ -345,10 +405,6 @@ msgstr "Opslag"
 msgctxt "field:stock.location,type:"
 msgid "Type"
 msgstr "Soort"
-
-msgctxt "field:stock.location,warehouse:"
-msgid "Warehouse"
-msgstr "Magazijn"
 
 msgctxt "field:stock.location,waste_locations:"
 msgid "Waste Locations"
@@ -639,6 +695,14 @@ msgid "Output Quantity"
 msgstr "Afgegeven hoeveelheid"
 
 msgctxt "field:stock.reporting.inventory,product:"
+msgid "Variant"
+msgstr "Variant"
+
+msgctxt "field:stock.reporting.inventory,product_reference:"
+msgid "Product Reference"
+msgstr "Productreferentie"
+
+msgctxt "field:stock.reporting.inventory,product_template:"
 msgid "Product"
 msgstr "Product"
 
@@ -683,6 +747,14 @@ msgid "Output Quantity"
 msgstr "Afgegeven hoeveelheid"
 
 msgctxt "field:stock.reporting.inventory.daily,product:"
+msgid "Variant"
+msgstr "Variant"
+
+msgctxt "field:stock.reporting.inventory.daily,product_reference:"
+msgid "Product Reference"
+msgstr "Productreferentie"
+
+msgctxt "field:stock.reporting.inventory.daily,product_template:"
 msgid "Product"
 msgstr "Product"
 
@@ -727,6 +799,14 @@ msgid "Output Quantity"
 msgstr "Afgegeven hoeveelheid"
 
 msgctxt "field:stock.reporting.inventory.move,product:"
+msgid "Variant"
+msgstr "Variant"
+
+msgctxt "field:stock.reporting.inventory.move,product_reference:"
+msgid "Product Reference"
+msgstr "Productreferentie"
+
+msgctxt "field:stock.reporting.inventory.move,product_template:"
 msgid "Product"
 msgstr "Product"
 
@@ -767,6 +847,14 @@ msgid "Output Quantity"
 msgstr "Afgegeven hoeveelheid"
 
 msgctxt "field:stock.reporting.inventory.turnover,product:"
+msgid "Variant"
+msgstr "Variant"
+
+msgctxt "field:stock.reporting.inventory.turnover,product_reference:"
+msgid "Product"
+msgstr "Product"
+
+msgctxt "field:stock.reporting.inventory.turnover,product_template:"
 msgid "Product"
 msgstr "Product"
 
@@ -1320,11 +1408,28 @@ msgctxt "help:res.user,warehouse:"
 msgid "The warehouse that the user works at."
 msgstr "Het magazijn waar de gebruiker werkt."
 
+#, fuzzy
+msgctxt "help:stock.configuration,inventory_cost_thresold:"
+msgid "The inventory cost thresold accepted in company currency."
+msgstr "Eenheidsprijs in bedrijfsvaluta."
+
+msgctxt "help:stock.configuration,inventory_quantity_tolerance:"
+msgid "The inventory quantity variation accepted in percentage."
+msgstr ""
+
 msgctxt "help:stock.configuration,inventory_sequence:"
 msgid "Used to generate the number given to inventories."
 msgstr ""
 "Wordt gebruikt om het nummer te genereren dat aan de voorraden wordt "
 "gegeven."
+
+msgctxt "help:stock.configuration,period_closing_delay:"
+msgid "Leave it empty to prevent periods from being closed automatically."
+msgstr ""
+
+msgctxt "help:stock.configuration,period_creation_interval:"
+msgid "Leave it empty to prevent periods from being created automatically."
+msgstr ""
 
 msgctxt "help:stock.configuration,shipment_in_return_sequence:"
 msgid "Used to generate the number given to supplier return shipments."
@@ -1362,6 +1467,15 @@ msgid "Used to generate the number given to customer shipments."
 msgstr ""
 "Wordt gebruikt om het nummer te genereren dat aan klant zendingen wordt "
 "gegeven."
+
+#, fuzzy
+msgctxt "help:stock.configuration.inventory,inventory_cost_thresold:"
+msgid "The inventory cost thresold accepted in company currency."
+msgstr "Eenheidsprijs in bedrijfsvaluta."
+
+msgctxt "help:stock.configuration.inventory,inventory_quantity_tolerance:"
+msgid "The inventory quantity variation accepted in percentage."
+msgstr ""
 
 msgctxt "help:stock.configuration.location,shipment_internal_transit:"
 msgid ""
@@ -1421,6 +1535,10 @@ msgstr "De voorraad waar de regel toe behoort."
 msgctxt "help:stock.inventory.line,quantity:"
 msgid "The actual quantity found in the location."
 msgstr "De werkelijke hoeveelheid die op de locatie is gevonden."
+
+msgctxt "help:stock.inventory.line,quantity_variation:"
+msgid "The difference between expected quantity and actual quantity."
+msgstr ""
 
 msgctxt "help:stock.inventory.line,unit:"
 msgid "The unit in which the quantity is specified."
@@ -2281,6 +2399,13 @@ msgstr ""
 "Om de voorraad \"%(inventory)s\" te bevestigen, moet u een optie voor de "
 "lege hoeveelheid selecteren."
 
+#, fuzzy, python-format
+msgctxt "model:ir.message,text:msg_inventory_over_tolerance"
+msgid "The inventory line \"%(lines)s\" is outside the tolerance range."
+msgid_plural "The inventory lines \"%(lines)s\" are outside the tolerance range."
+msgstr[0] "De voorraden \"%(inventories)s\" hebben datums in de toekomst."
+msgstr[1] "De voorraden \"%(inventories)s\" hebben datums in de toekomst."
+
 #, python-format
 msgctxt "model:ir.message,text:msg_location_inactive_not_empty"
 msgid "To inactivate location \"%(location)s\", you must empty it."
@@ -2410,13 +2535,6 @@ msgid ""
 msgstr ""
 "Het is aan te raden om de voorraad op te maken in het magazijn voordat het "
 "product gedeactiveerd wordt."
-
-#, python-format
-msgctxt "model:ir.message,text:msg_product_quantities_max"
-msgid "You cannot select more than %(max)s products to compute quantities."
-msgstr ""
-"U kunt niet meer dan %(max)s producten selecteren om de hoeveelheden te "
-"berekenen."
 
 #, python-format
 msgctxt "model:ir.message,text:msg_shipment_check_quantity"
@@ -2968,6 +3086,10 @@ msgctxt "model:res.group,name:group_stock_admin"
 msgid "Stock Administration"
 msgstr "Voorraad administratie"
 
+msgctxt "model:res.group,name:group_stock_cancellation"
+msgid "Stock Cancellation"
+msgstr "Geannuleerde voorraad"
+
 msgctxt "model:res.group,name:group_stock_force_assignment"
 msgid "Stock Force Assignment"
 msgstr "Voorraad geforceerd toewijzen"
@@ -2976,9 +3098,19 @@ msgctxt "model:stock.configuration,string:"
 msgid "Stock Configuration"
 msgstr "Voorraad configuratie"
 
+#, fuzzy
+msgctxt "model:stock.configuration.inventory,string:"
+msgid "Stock Configuration Inventory"
+msgstr "Voorraad configuratie"
+
 msgctxt "model:stock.configuration.location,string:"
 msgid "Stock Configuration Location"
 msgstr "Voorraad configuratie locatie"
+
+#, fuzzy
+msgctxt "model:stock.configuration.period,string:"
+msgid "Stock Configuration Period"
+msgstr "Voorraad configuratie"
 
 msgctxt "model:stock.configuration.sequence,string:"
 msgid "Stock Configuration Sequence"
@@ -3412,6 +3544,16 @@ msgctxt "selection:ir.cron,method:"
 msgid "Assign Shipments"
 msgstr "Zendingen toewijzen"
 
+#, fuzzy
+msgctxt "selection:ir.cron,method:"
+msgid "Close Stock Periods"
+msgstr "Voorraad periode"
+
+#, fuzzy
+msgctxt "selection:ir.cron,method:"
+msgid "Create Stock Periods"
+msgstr "Voorraad periode"
+
 msgctxt "selection:ir.cron,method:"
 msgid "Recompute Cost Price from Moves"
 msgstr "Kostprijs berekenen aan de hand van voorraadbewegingen"
@@ -3532,11 +3674,11 @@ msgctxt "selection:stock.product_quantities_warehouse.move,product:"
 msgid "Variant"
 msgstr "Variant"
 
-msgctxt "selection:stock.reporting.inventory,product:"
+msgctxt "selection:stock.reporting.inventory,product_reference:"
 msgid "Product"
 msgstr "Product"
 
-msgctxt "selection:stock.reporting.inventory,product:"
+msgctxt "selection:stock.reporting.inventory,product_reference:"
 msgid "Variant"
 msgstr "Variant"
 
@@ -3548,27 +3690,27 @@ msgctxt "selection:stock.reporting.inventory.context,product_type:"
 msgid "Variant"
 msgstr "Variant"
 
-msgctxt "selection:stock.reporting.inventory.daily,product:"
+msgctxt "selection:stock.reporting.inventory.daily,product_reference:"
 msgid "Product"
 msgstr "Product"
 
-msgctxt "selection:stock.reporting.inventory.daily,product:"
+msgctxt "selection:stock.reporting.inventory.daily,product_reference:"
 msgid "Variant"
 msgstr "Variant"
 
-msgctxt "selection:stock.reporting.inventory.move,product:"
+msgctxt "selection:stock.reporting.inventory.move,product_reference:"
 msgid "Product"
 msgstr "Product"
 
-msgctxt "selection:stock.reporting.inventory.move,product:"
+msgctxt "selection:stock.reporting.inventory.move,product_reference:"
 msgid "Variant"
 msgstr "Variant"
 
-msgctxt "selection:stock.reporting.inventory.turnover,product:"
+msgctxt "selection:stock.reporting.inventory.turnover,product_reference:"
 msgid "Product"
 msgstr "Product"
 
-msgctxt "selection:stock.reporting.inventory.turnover,product:"
+msgctxt "selection:stock.reporting.inventory.turnover,product_reference:"
 msgid "Variant"
 msgstr "Variant"
 
@@ -3716,6 +3858,16 @@ msgctxt "view:res.user:"
 msgid "The warehouse that you work at."
 msgstr "Het magazijn waar u werkt."
 
+#, fuzzy
+msgctxt "view:stock.configuration:"
+msgid "%"
+msgstr "%"
+
+#, fuzzy
+msgctxt "view:stock.configuration:"
+msgid "Cost Thresold"
+msgstr "Kostprijs"
+
 msgctxt "view:stock.configuration:"
 msgid "Customer Return Sequence"
 msgstr "Klant retourzending reeks"
@@ -3736,6 +3888,16 @@ msgctxt "view:stock.configuration:"
 msgid "Inventory"
 msgstr "Voorraad"
 
+#, fuzzy
+msgctxt "view:stock.configuration:"
+msgid "Period"
+msgstr "Periode"
+
+#, fuzzy
+msgctxt "view:stock.configuration:"
+msgid "Quantity Tolerance"
+msgstr "Maateenheid hoeveelheid"
+
 msgctxt "view:stock.configuration:"
 msgid "Sequence"
 msgstr "Reeks"
@@ -3751,10 +3913,6 @@ msgstr "Leverancier retourzending reeks"
 msgctxt "view:stock.configuration:"
 msgid "Supplier Sequence"
 msgstr "Leveranciers zending reeks"
-
-msgctxt "view:stock.move:"
-msgid "Cost"
-msgstr "Kosten"
 
 msgctxt "view:stock.move:"
 msgid "Move"

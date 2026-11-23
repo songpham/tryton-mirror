@@ -66,6 +66,9 @@ class BOM(DeactivableMixin, ModelSQL, ModelView):
             })
     output_products = fields.Many2Many('production.bom.output',
         'bom', 'product', 'Output Products')
+    tolerance = fields.Float(
+        "Tolerance",
+        help="The percentage tolerance that is accepted for production.")
 
     @classmethod
     def order_code(cls, tables):
@@ -376,6 +379,8 @@ class BOMTree(ModelView):
     def tree(cls, product, quantity, unit, bom=None):
         Input = Pool().get('production.bom.input')
 
+        if not product and bom is None:
+            raise ValueError("'bom' must be provided if 'product' is empty")
         result = []
         if bom is None:
             pbom = product.get_bom()
@@ -386,20 +391,24 @@ class BOMTree(ModelView):
         factor = bom.compute_factor(product, quantity, unit)
         for input_ in bom.inputs:
             quantity = Input.compute_quantity(input_, factor)
-            childs = cls.tree(input_.product, quantity, input_.unit)
-            values = {
-                'product': input_.product.id,
-                'product.': {
-                    'rec_name': input_.product.rec_name,
-                    },
-                'quantity': quantity,
-                'unit': input_.unit.id,
-                'unit.': {
-                    'rec_name': input_.unit.rec_name,
-                    },
-                'childs': childs,
-            }
-            result.append(values)
+            if input_.phantom_bom:
+                result.extend(cls.tree(
+                        None, quantity, input_.unit, bom=input_.phantom_bom))
+            else:
+                childs = cls.tree(input_.product, quantity, input_.unit)
+                values = {
+                    'product': input_.product.id,
+                    'product.': {
+                        'rec_name': input_.product.rec_name,
+                        },
+                    'quantity': quantity,
+                    'unit': input_.unit.id,
+                    'unit.': {
+                        'rec_name': input_.unit.rec_name,
+                        },
+                    'childs': childs,
+                }
+                result.append(values)
         return result
 
 

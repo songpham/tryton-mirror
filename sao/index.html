@@ -9,22 +9,22 @@ this repository contains the full copyright notices and license terms. -->
         <title>Tryton</title>
         <link rel="icon" type="image/png" href="images/tryton-icon.png">
 
-        <script type="text/javascript" src="bower_components/jquery/dist/jquery.js"></script>
-        <script type="text/javascript" src="bower_components/bootstrap/dist/js/bootstrap.js"></script>
-        <script type="text/javascript" src="bower_components/moment/moment.js"></script>
-        <script type="text/javascript" src="bower_components/moment/min/locales.js"></script>
-        <script type="text/javascript" src="bower_components/gettext.js/dist/gettext.iife.js"></script>
-        <script type="text/javascript" src="bower_components/d3/d3.js"></script>
-        <script type="text/javascript" src="bower_components/c3/c3.js"></script>
-        <script type="text/javascript" src="bower_components/papaparse/papaparse.js"></script>
-        <script type="text/javascript" src="bower_components/fullcalendar/dist/fullcalendar.js"></script>
-        <script type="text/javascript" src="bower_components/fullcalendar/dist/locale-all.js"></script>
-        <script type="text/javascript" src="bower_components/mousetrap/mousetrap.js"></script>
-        <script type="text/javascript" src="bower_components/mousetrap/plugins/pause/mousetrap-pause.js"></script>
-        <script type="text/javascript" src="bower_components/Sortable/Sortable.js"></script>
+        <script type="text/javascript" src="node_modules/jquery/dist/jquery.js"></script>
+        <script type="text/javascript" src="node_modules/bootstrap/dist/js/bootstrap.js"></script>
+        <script type="text/javascript" src="node_modules/moment/moment.js"></script>
+        <script type="text/javascript" src="node_modules/moment/min/locales.js"></script>
+        <script type="text/javascript" src="node_modules/gettext.js/dist/gettext.iife.js"></script>
+        <script type="text/javascript" src="node_modules/d3/dist/d3.js"></script>
+        <script type="text/javascript" src="node_modules/billboard.js/dist/billboard.js"></script>
+        <script type="text/javascript" src="node_modules/papaparse/papaparse.js"></script>
+        <script type="text/javascript" src="node_modules/fullcalendar/dist/fullcalendar.js"></script>
+        <script type="text/javascript" src="node_modules/fullcalendar/dist/locale-all.js"></script>
+        <script type="text/javascript" src="node_modules/mousetrap/mousetrap.js"></script>
+        <script type="text/javascript" src="node_modules/mousetrap/plugins/pause/mousetrap-pause.js"></script>
+        <script type="text/javascript" src="node_modules/sortablejs/Sortable.js"></script>
 
-        <link rel="stylesheet" href="bower_components/c3/c3.css">
-        <link rel="stylesheet" href="bower_components/fullcalendar/dist/fullcalendar.css">
+        <link rel="stylesheet" href="node_modules/billboard.js/dist/billboard.css">
+        <link rel="stylesheet" href="node_modules/fullcalendar/dist/fullcalendar.css">
 
         <script type="text/javascript" src="dist/tryton-sao.js"></script>
         <link rel="stylesheet" type="text/css" href="dist/tryton-sao.css" media="screen"/>
@@ -58,18 +58,6 @@ this repository contains the full copyright notices and license terms. -->
                         </form>
                         <ul class="nav navbar-nav navbar-right flip">
                             <li id="user-preferences" class="dropdown"></li>
-                            <li id="user-logout">
-                                <a href="#">
-                                    <span class="icon hidden-xs">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-                                            <path d="M0 0h24v24H0z" fill="none"/>
-                                            <path d="M10.09 15.59L11.5 17l5-5-5-5-1.41 1.41L12.67 11H3v2h9.67l-2.58 2.59zM19 3H5c-1.11 0-2 .9-2 2v4h2V5h14v14H5v-4H3v4c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/>
-                                        </svg>
-                                    </span>
-                                    <span class="visible-xs">
-                                    </span>
-                                </a>
-                            </li>
                         </ul>
                         <ul id="tablist" class="nav navbar-nav nav-pills" role="tablist">
                         </ul>

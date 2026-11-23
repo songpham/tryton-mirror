@@ -18,6 +18,7 @@
                 'class': 'hidden-lg',
             }).appendTo(this.name_el);
             this.view_prm = jQuery.when();
+            this._action_running = false;
         },
         menu_def: function() {
             return [
@@ -62,27 +63,27 @@
                 }, {
                     id: 'delete_',
                     icon: 'tryton-delete',
-                    label: Sao.i18n.gettext('Delete'),
+                    label: Sao.i18n.gettext("Delete..."),
                 }, null, {
                     id: 'logs',
                     icon: 'tryton-log',
                     label: Sao.i18n.gettext('View Logs...'),
                 }, {
                     id: (this.screen &&
-                        Sao.common.MODELHISTORY.contains(this.screen.model_name)) ?
+                        Sao.common.MODELHISTORY.includes(this.screen.model_name)) ?
                         'revision': null,
                     icon: 'tryton-history',
                     label: Sao.i18n.gettext('Show revisions...'),
                 }, null, {
                     id: 'attach',
                     icon: 'tryton-attach',
-                    label: Sao.i18n.gettext('Attachment'),
+                    label: Sao.i18n.gettext("Attachments..."),
                     tooltip: Sao.i18n.gettext('Add an attachment to the record'),
                     dropdown: true,
                 }, {
                     id: 'note',
                     icon: 'tryton-note',
-                    label: Sao.i18n.gettext('Note'),
+                    label: Sao.i18n.gettext("Notes..."),
                     tooltip: Sao.i18n.gettext('Add a note to the record'),
                 }, {
                     id: (this.screen &&
@@ -94,15 +95,15 @@
                 }, {
                     id: 'action',
                     icon: 'tryton-launch',
-                    label: Sao.i18n.gettext('Action'),
+                    label: Sao.i18n.gettext("Actions..."),
                 }, null, {
                     id: 'relate',
                     icon: 'tryton-link',
-                    label: Sao.i18n.gettext('Relate'),
+                    label: Sao.i18n.gettext("Relate..."),
                 }, {
                     id: 'print',
                     icon: 'tryton-print',
-                    label: Sao.i18n.gettext('Print'),
+                    label: Sao.i18n.gettext("Print..."),
                 }, {
                     id: 'email',
                     icon: 'tryton-email',
@@ -111,11 +112,11 @@
                 }, null, {
                     id: 'export',
                     icon: 'tryton-export',
-                    label: Sao.i18n.gettext('Export'),
+                    label: Sao.i18n.gettext("Export..."),
                 }, {
                     id: 'import',
                     icon: 'tryton-import',
-                    label: Sao.i18n.gettext('Import'),
+                    label: Sao.i18n.gettext("Import..."),
                 }, null, {
                     id: 'close',
                     icon: 'tryton-close',
@@ -128,10 +129,10 @@
                 'class': 'panel panel-default ' + this.class_,
             });
 
-            var toolbar = this.create_toolbar().appendTo(this.el);
-            this.title = toolbar.find('.title');
-            this.title_short = toolbar.find('.title-short');
-            this.title_long = toolbar.find('.title-long');
+            this.toolbar = this.create_toolbar().appendTo(this.el);
+            this.title = this.toolbar.find('.title');
+            this.title_short = this.toolbar.find('.title-short');
+            this.title_long = this.toolbar.find('.title-long');
 
             this.main = jQuery('<div/>', {
                 'class': 'panel-body',
@@ -141,6 +142,14 @@
             if (this.info_bar) {
                 this.el.append(this.info_bar.el);
             }
+
+            this._chat = null;
+        },
+        disable_toolbar: function() {
+            this.toolbar.get(0).inert = true;
+        },
+        enable_toolbar: function() {
+            this.toolbar.get(0).inert = false;
         },
         set_menu: function(menu) {
             var previous;
@@ -165,8 +174,13 @@
                     this.menu_buttons[item.id] = menuitem;
                     link.click(evt => {
                         evt.preventDefault();
-                        if (!menuitem.hasClass('disabled')) {
-                            this[item.id]();
+                        if (!menuitem.hasClass('disabled')
+                            && !this._action_running) {
+                            this._action_running = true;
+                            (this[item.id]() || jQuery.when())
+                                .always(() => {
+                                    this._action_running = false;
+                                });
                         }
                     });
                 } else if (!item && previous) {
@@ -270,17 +284,14 @@
                 }
                 this.buttons[item.id].click(item, event => {
                     var item = event.data;
-                    var button = this.buttons[item.id];
-                    // Use data instead of disabled prop because the action may
-                    // actually disable the button.
-                    if (button.data('disabled')) {
+                    if (this._action_running) {
                         event.preventDefault();
                         return;
                     }
-                    button.data('disabled', true);
+                    this._action_running = true;
                     (this[item.id](this) || jQuery.when())
-                        .always(function() {
-                            button.data('disabled', false);
+                        .always(() => {
+                            this._action_running = false;
                         });
                 });
             };
@@ -350,6 +361,9 @@
                 tabs.trigger('ready');
                 if (this._chat) {
                     this._chat.unregister();
+                    let chat = this.sidebar_content.find('.chat');
+                    chat.remove();
+                    this._chat = null;
                 }
             });
         },
@@ -393,7 +407,7 @@
         if (Sao.Tab.tabs.length) {
             var tab = Sao.Tab.tabs[0];
             return tab.close().then(function() {
-                if (!~Sao.Tab.tabs.indexOf(tab)) {
+                if (!Sao.Tab.tabs.includes(tab)) {
                     return Sao.Tab.tabs.close();
                 } else {
                     return jQuery.Deferred().reject();
@@ -554,7 +568,9 @@
                 }
             };
 
+            this.disable_toolbar();
             this.view_prm = this.screen.switch_view().done(() => {
+                this.enable_toolbar();
                 this.set_buttons_sensitive();
                 this.content.append(screen.screen_container.el);
                 if (attributes.res_id) {
@@ -571,8 +587,8 @@
                     if (screen.current_view.view_type == 'form') {
                         screen.new_();
                     }
-                    if (~['tree', 'graph', 'calendar'].indexOf(
-                            screen.current_view.view_type)) {
+                    if (['tree', 'graph', 'calendar']
+                        .includes(screen.current_view.view_type)) {
                         screen.search_filter();
                     }
                 }
@@ -802,7 +818,7 @@
 
             this.sidebar = jQuery('<div/>', {
                 'class': 'sidebar',
-            }).hide().appendTo(this.main);
+            }).sao_hide().appendTo(this.main);
             this.sidebar_content = jQuery('<div/>', {
                 'class': 'sidebar-content',
             }).appendTo(jQuery('<div/>', {
@@ -819,11 +835,14 @@
             }
             var compare = Sao.common.compare;
             return (
-                (this.screen.view_index === 0) &&
+                (this.screen.view_index <= 0) &&
                 (this.screen.model_name === attributes.model) &&
                 (this.attributes.res_id === attributes.res_id) &&
                 (compare(
                     this.attributes.domain || [], attributes.domain || [])) &&
+                (compare(
+                    this.attributes.context_domain || [],
+                    attributes.context_domain || [])) &&
                 (compare(
                     this.attributes.view_ids || [],
                     attributes.view_ids || [])) &&
@@ -904,7 +923,7 @@
             } else {
                 prm = jQuery.when();
             }
-            prm.then(() => {
+            return prm.then(() => {
                 var access = Sao.common.MODELACCESS.get(this.screen.model_name);
                 if (this.screen.readonly || !(access.write || access.create)) {
                     return jQuery.Deferred().reject();
@@ -922,12 +941,16 @@
             });
         },
         switch_: function() {
-            return this.modified_save().then(() => this.screen.switch_view());
+            this.disable_toolbar();
+            return this.modified_save().then(
+                () => this.screen.switch_view(),
+                (result) => result ? this.screen.switch_view() : null)
+                .always(() => this.enable_toolbar());
         },
         reload: function(test_modified=true) {
+            this.disable_toolbar();
             const reload = () => {
                 return this.screen.cancel_current().then(() => {
-                    var set_cursor = false;
                     var record_id = null;
                     if (this.screen.current_record) {
                         record_id = this.screen.current_record.id;
@@ -939,32 +962,36 @@
                                 for (const record of this.screen.group) {
                                     if (record.id == record_id) {
                                         this.screen.current_record = record;
-                                        set_cursor = true;
                                     }
                                 }
-                                return set_cursor;
                             });
+                    } else {
+                        this.refresh_resources(true);
                     }
-                    return set_cursor;
                 })
-                .then(set_cursor => {
-                    return this.screen.display(set_cursor).then(() => {
+                .then(() => {
+                    // Always set the cursor as the screen loose the cursor due
+                    // to inert
+                    return this.screen.display(true).then(() => {
                         this.info_bar.clear();
                         this.set_buttons_sensitive();
                         this.screen.count_tab_domain();
                     });
                 });
             };
+            let prm;
             if (test_modified) {
-                return this.modified_save().then(reload);
+                prm = this.modified_save();
             } else {
-                return this.screen.save_tree_state(false).then(reload);
+                prm = this.screen.save_tree_state(false);
             }
+            return prm.then(reload).always(() => this.enable_toolbar());
         },
         copy: function() {
             if (!Sao.common.MODELACCESS.get(this.screen.model_name).create) {
                 return jQuery.when();
             }
+            this.disable_toolbar();
             return this.modified_save().then(() => {
                 return this.screen.copy().then(() => {
                     this.info_bar.add(
@@ -973,20 +1000,24 @@
                             'info');
                     this.screen.count_tab_domain(true);
                 });
-            });
+            }).always(() => this.enable_toolbar());
         },
         delete_: function() {
             if (!Sao.common.MODELACCESS.get(this.screen.model_name)['delete']
                 || !this.screen.deletable) {
                 return jQuery.when();
             }
-            var msg;
+            let size;
             if (this.screen.current_view.view_type == 'form') {
-                msg = Sao.i18n.gettext('Are you sure to remove this record?');
+                size = 1;
             } else {
-                msg = Sao.i18n.gettext('Are you sure to remove those records?');
+                size = this.screen.selected_records.length;
             }
+            let msg = Sao.i18n.ngettext(
+                "Are you sure you want to delete this record?",
+                "Are you sure you want to delete these %1 records?", size, size);
             return Sao.common.sur.run(msg).then(() => {
+                this.disable_toolbar();
                 return this.screen.remove(true, false, true).then(
                     () => {
                         this.info_bar.add(
@@ -997,24 +1028,26 @@
                         this.info_bar.add(
                             Sao.i18n.gettext("Records not removed."),
                             'danger');
-                    });
+                    }).always(() => this.enable_toolbar());
             });
         },
         previous: function() {
             return this.modified_save().then(() => {
-                var prm = this.screen.display_previous();
-                this.info_bar.clear();
-                this.set_buttons_sensitive();
-                return prm;
-            });
+                this.disable_toolbar();
+                return this.screen.display_previous().then(() => {
+                    this.info_bar.clear();
+                    this.set_buttons_sensitive();
+                });
+            }).always(() => this.enable_toolbar());
         },
         next: function() {
             return this.modified_save().then(() => {
-                var prm = this.screen.display_next();
-                this.info_bar.clear();
-                this.set_buttons_sensitive();
-                return prm;
-            });
+                this.disable_toolbar();
+                return this.screen.display_next().then(() => {
+                    this.info_bar.clear();
+                    this.set_buttons_sensitive();
+                });
+            }).always(() => this.enable_toolbar());
         },
         search: function() {
             return this.modified_save().then(() => {
@@ -1174,6 +1207,7 @@
             var record = this.screen.current_record;
             var menu = dropdown.find('.dropdown-menu');
             menu.empty();
+            let access = Sao.common.MODELACCESS.get(this.screen.model_name);
             return Sao.Window.Attachment.get_attachments(record)
                 .then(function(attachments) {
                     attachments.forEach(function(value) {
@@ -1200,25 +1234,27 @@
                     menu.append(jQuery('<li/>', {
                         'class': 'divider',
                     }));
-                    menu.append(jQuery('<li/>', {
-                        'role': 'presentation',
-                        'class': 'input-file',
-                    }).append(jQuery('<input/>', {
-                        'type': 'file',
-                        'role': 'menuitem',
-                        'multiple': true,
-                        'tabindex': -1,
-                    }).change(function() {
-                        var attachment = window_();
-                        Sao.common.get_input_data(
-                            jQuery(this), function(data, filename) {
-                                attachment.add_data(data, filename);
-                            });
-                    })).append(jQuery('<a/>', {
-                        'role': 'menuitem',
-                        'href': '#',
-                        'tabindex': -1,
-                    }).text(Sao.i18n.gettext('Add...'))));
+                    if (access.write) {
+                        menu.append(jQuery('<li/>', {
+                            'role': 'presentation',
+                            'class': 'input-file',
+                        }).append(jQuery('<input/>', {
+                            'type': 'file',
+                            'role': 'menuitem',
+                            'multiple': true,
+                            'tabindex': -1,
+                        }).change(function() {
+                            var attachment = window_();
+                            Sao.common.get_input_data(
+                                jQuery(this), function(data, filename) {
+                                    attachment.add_data(data, filename);
+                                });
+                        })).append(jQuery('<a/>', {
+                            'role': 'menuitem',
+                            'href': '#',
+                            'tabindex': -1,
+                        }).text(Sao.i18n.gettext('Add...'))));
+                    }
                     menu.append(jQuery('<li/>', {
                         'role': 'presentation',
                     }).append(jQuery('<a/>', {
@@ -1383,10 +1419,9 @@
                 return;
             }
             var record = this.screen.current_record;
-            if (!record) {
-                return;
-            }
-            var resource = record.model.name + ',' + record.id;
+            var resource = (
+                record ? record.model.name + ',' + record.id :
+                this.screen.model_name + ',-1');
             var domain = [
                 ['resource', '=', resource],
                 ['type', '=', 'data'],
@@ -1407,6 +1442,8 @@
             let chat = this.sidebar_content.find('.chat');
             if (chat.length) {
                 chat.remove();
+                this._chat.unregister()
+                this._chat = null;
             } else {
                 if (this.screen.current_reference) {
                     this._chat = new Sao.Chat(this.screen.current_reference);
@@ -1504,7 +1541,9 @@
             if (count > 99) {
                 badge = '99+';
             }
-            var title= Sao.i18n.gettext("Attachment (%1)", count);
+            var title= Sao.i18n.ngettext(
+                "Attachment (%1)", "Attachments (%1)",
+                Math.max(count, 1), count);
             update('attach', title, badge, 1);
 
             count = resources.note_count || 0;
@@ -1523,7 +1562,9 @@
                     badge = unread + '/' + badge;
                 }
             }
-            title = Sao.i18n.gettext("Note (%1/%2)", unread, count);
+            title = Sao.i18n.ngettext(
+                "Note (%1/%2)", "Notes (%1/%2)",
+                Math.max(count, 1), unread, count);
             update('note', title, badge, color);
         },
         record_message: function(position, size, max_size, record_id) {
@@ -1571,9 +1612,8 @@
                 }
                 set_sensitive(button_id, sensitive && can_be_sensitive);
             }
-            for (let button_id of ['reload', 'action']) {
-                set_sensitive(button_id, sensitive);
-            }
+            set_sensitive('action', sensitive);
+            set_sensitive('reload', sensitive || (view_type != 'form'))
             set_sensitive(
                 'switch_',
                 (position || (view_type == 'form') || (next_view_type != 'form')) &&
@@ -1595,8 +1635,18 @@
                 msg = name + '/' + Sao.common.humanize(size);
             }
             this.status_label.text(msg).attr('title', msg);
-            this.info_bar.clear();
             this.set_buttons_sensitive();
+        },
+        record_modified: function() {
+            this.set_buttons_sensitive();
+            this.info_bar.refresh();
+        },
+        record_saved: function() {
+            this.set_buttons_sensitive();
+            this.refresh_resources();
+        },
+        record_changed: function() {
+            this.info_bar.clear();
             this.refresh_attachment_preview();
 
             if (this._chat) {
@@ -1610,14 +1660,6 @@
                 }
                 this.update_sidebar();
             }
-        },
-        record_modified: function() {
-            this.set_buttons_sensitive();
-            this.info_bar.refresh();
-        },
-        record_saved: function() {
-            this.set_buttons_sensitive();
-            this.refresh_resources();
         },
         action: function() {
             window.setTimeout(() => {

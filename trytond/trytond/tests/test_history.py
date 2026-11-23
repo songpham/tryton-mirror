@@ -6,18 +6,13 @@ import unittest
 from trytond import backend
 from trytond.model.exceptions import AccessError
 from trytond.pool import Pool
-from trytond.tests.test_tryton import (
-    TestCase, activate_module, with_transaction)
+from trytond.tests.test_tryton import DBTestCase, with_transaction
 from trytond.transaction import Transaction
 
 
-class HistoryTestCase(TestCase):
+class HistoryTestCase(DBTestCase):
     'Test History'
-
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        activate_module('tests')
+    module = 'tests'
 
     @with_transaction()
     def tearDown(self):
@@ -237,6 +232,30 @@ class HistoryTestCase(TestCase):
         History.restore_history([history_id], first)
         history = History(history_id)
         self.assertEqual(history.dico, {'a': 1})
+
+    @with_transaction()
+    def test_restore_history_with_deletion(self):
+        "Test restoring records when some should be deleted"
+        pool = Pool()
+        History = pool.get('test.history')
+        transaction = Transaction()
+
+        history = History(value=1)
+        history.save()
+        first = history.create_date
+
+        transaction.commit()
+
+        history_2 = History(value=2)
+        history_2.save()
+
+        transaction.commit()
+
+        History.restore_history([history.id, history_2.id], first)
+        History.read([history.id], {'value'})
+
+        with self.assertRaises(AccessError):
+            History.read([history_2.id], ['value'])
 
     @with_transaction()
     def test_restore_history_before(self):
@@ -541,54 +560,51 @@ class HistoryTestCase(TestCase):
             [l.name for l in history.lines_at_stamp], ['a', 'b'])
 
     @with_transaction()
-    def test_search_cursor_max(self):
-        'Test search with number of history entries at database.IN_MAX'
+    def test_search_large_number(self):
+        'Test search with large number of history entries'
         pool = Pool()
         History = pool.get('test.history')
         transaction = Transaction()
-        database = transaction.database
 
         history = History(value=-1)
         history.save()
 
-        for history.value in range(database.IN_MAX + 1):
+        for history.value in range(1_000 + 1):
             history.save()
 
         with transaction.set_context(_datetime=datetime.datetime.max):
             record, = History.search([])
 
-            self.assertEqual(record.value, database.IN_MAX)
+            self.assertEqual(record.value, 1_000)
 
     @with_transaction()
-    def test_search_cursor_max_entries(self):
-        'Test search for skipping first history entries at database.IN_MAX'
+    def test_search_large_number_entries(self):
+        'Test search for skipping first history entries of large number'
         pool = Pool()
         History = pool.get('test.history')
         transaction = Transaction()
-        database = transaction.database
 
         for i in range(0, 2):
             history = History(value=-1)
             history.save()
 
-            for history.value in range(database.IN_MAX + 1):
+            for history.value in range(1_000 + 1):
                 history.save()
 
         with transaction.set_context(_datetime=datetime.datetime.max):
             records = History.search([])
 
-            self.assertEqual({r.value for r in records}, {database.IN_MAX})
+            self.assertEqual({r.value for r in records}, {1_000})
             self.assertEqual(len(records), 2)
 
     @with_transaction()
-    def test_search_cursor_max_histories(self):
-        'Test search with number of histories at database.IN_MAX'
+    def test_search_large_number_histories(self):
+        'Test search with large number of histories'
         pool = Pool()
         History = pool.get('test.history')
         transaction = Transaction()
-        database = transaction.database
 
-        n = database.IN_MAX + 1
+        n = 1_000
         History.create([{'value': 1}] * n)
 
         with transaction.set_context(_datetime=datetime.datetime.max):

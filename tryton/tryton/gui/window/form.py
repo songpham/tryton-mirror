@@ -31,6 +31,7 @@ from tryton.gui.window.win_import import WinImport
 from .tabcontent import TabContent
 
 _ = gettext.gettext
+N_ = gettext.ngettext
 
 
 class Form(TabContent):
@@ -121,6 +122,8 @@ class Form(TabContent):
             and self.model == model
             and self.res_id == attributes.get('res_id')
             and self.attributes.get('domain') == attributes.get('domain')
+            and (self.attributes.get('context_domain')
+                == attributes.get('context_domain'))
             and self.attributes.get('view_ids') == attributes.get('view_ids')
             and (attributes.get('view_ids')
                 or (self.attributes.get('mode') or ['tree', 'form']) == (
@@ -165,6 +168,7 @@ class Form(TabContent):
         def activate(widget, callback):
             callback()
 
+        access = common.MODELACCESS[self.model]
         button = self.buttons['attach']
         if widget != button:
             if button.props.sensitive:
@@ -177,9 +181,10 @@ class Form(TabContent):
             item.connect('activate', activate, callback)
             menu.add(item)
         menu.add(Gtk.SeparatorMenuItem())
-        add_item = Gtk.MenuItem(label=_("Add..."))
-        add_item.connect('activate', add_file)
-        menu.add(add_item)
+        if access['write']:
+            add_item = Gtk.MenuItem(label=_("Add..."))
+            add_item.connect('activate', add_file)
+            menu.add(add_item)
         preview_item = Gtk.CheckMenuItem(label=_("Preview"))
         preview_item.set_active(bool(
                 self.attachment_preview.get_children()))
@@ -243,9 +248,9 @@ class Form(TabContent):
         if not self.attachment_screen:
             return
         record = self.screen.current_record
-        if not record:
-            return
-        resource = '%s,%s' % (record.model_name, record.id)
+        resource = '%s,%s' % (
+            (record.model_name, record.id) if record
+            else (self.screen.model_name, -1))
         domain = [
             ('resource', '=', resource),
             ('type', '=', 'data'),
@@ -307,7 +312,9 @@ class Form(TabContent):
 
         attachment_count = resources.get('attachment_count', 0)
         badge = 1 if attachment_count else None
-        label = _("Attachment (%s)") % attachment_count
+        label = N_(
+            "Attachment (%d)", "Attachments (%d)",
+            max(attachment_count, 1)) % attachment_count
         update('attach', label, 'tryton-attach', badge)
 
         note_count = resources.get('note_count', 0)
@@ -318,11 +325,13 @@ class Form(TabContent):
             badge = 1
         else:
             badge = None
-        label = _("Note (%d/%d)") % (note_unread, note_count)
+        label = N_("Note (%d/%d)", "Notes (%d/%d)",
+            max(note_count, 1)) % (note_unread, note_count)
         update('note', label, 'tryton-note', badge)
 
     def sig_switch(self, widget=None):
-        if not self.modified_save():
+        result = self.modified_save()
+        if not result and result is not None:
             return
         self.screen.switch_view()
 
@@ -413,9 +422,15 @@ class Form(TabContent):
                 or not self.screen.deletable):
             return
         if self.screen.current_view.view_type == 'form':
-            msg = _('Are you sure to remove this record?')
+            size = 1
         else:
-            msg = _('Are you sure to remove those records?')
+            size = len(self.screen.selected_records)
+        msg = N_(
+            "Are you sure you want to delete this record?",
+            "Are you sure you want to delete these %(size)d records?",
+            size) % {
+                'size': size,
+                }
         if sur(msg):
             if not self.screen.remove(delete=True, force_remove=True):
                 self.info_bar_add(
@@ -537,6 +552,8 @@ class Form(TabContent):
                     self.screen.current_record = record
                     set_cursor = True
                     break
+        else:
+            self.refresh_resources(True)
         self.screen.display(set_cursor=set_cursor)
         self.info_bar_clear()
         self.set_buttons_sensitive()
@@ -629,8 +646,8 @@ class Form(TabContent):
                     b.attrs.get('keyword', 'action') == action_type
                     for b in self.screen.get_buttons())
             set_sensitive(button_id, sensitive and can_be_sensitive)
-        for button_id in ['reload', 'action']:
-            set_sensitive(button_id, sensitive)
+        set_sensitive('action', sensitive)
+        set_sensitive('reload', sensitive or (view_type != 'form'))
         set_sensitive(
             'switch',
             (position or view_type == 'form' or next_view_type != 'form')
@@ -647,19 +664,7 @@ class Form(TabContent):
         else:
             msg = "%s/%s" % (name, common.humanize(size))
         self.status_label.set_text(msg)
-        self.info_bar_clear()
         self.set_buttons_sensitive()
-        self.refresh_attachment_preview()
-        if self._chat:
-            self._chat.unregister()
-            self.chat.remove(self._chat.widget)
-            if self.screen.current_reference:
-                self._chat = Chat(self.screen.current_reference)
-                self.chat.add(self._chat.widget)
-                self.chat.show_all()
-                self._chat.refresh()
-            else:
-                self.buttons['chat'].set_active(False)
 
     def record_modified(self):
         def _record_modified():
@@ -673,6 +678,20 @@ class Form(TabContent):
     def record_saved(self):
         self.set_buttons_sensitive()
         self.refresh_resources()
+
+    def record_changed(self):
+        self.info_bar_clear()
+        self.refresh_attachment_preview()
+        if self._chat:
+            self._chat.unregister()
+            self.chat.remove(self._chat.widget)
+            if self.screen.current_reference:
+                self._chat = Chat(self.screen.current_reference)
+                self.chat.add(self._chat.widget)
+                self.chat.show_all()
+                self._chat.refresh()
+            else:
+                self.buttons['chat'].set_active(False)
 
     def modified_save(self):
         self.screen.save_tree_state()

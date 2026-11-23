@@ -9,6 +9,12 @@ this repository contains the full copyright notices and license terms. -->
             sequence="20"
             id="menu_invoices"/>
 
+        <menuitem
+            name="Invoice Payments"
+            parent="account.menu_account_configuration"
+            sequence="50"
+            id="menu_payments_configuration"/>
+
         <record model="ir.action.wizard" id="wizard_pay">
             <field name="name">Pay Invoice</field>
             <field name="wiz_name">account.invoice.pay</field>
@@ -187,6 +193,60 @@ this repository contains the full copyright notices and license terms. -->
             <field name="action" ref="act_invoice_relate"/>
         </record>
 
+        <record model="ir.action.act_window" id="act_invoice_relate_period">
+            <field name="name">Invoices</field>
+            <field name="res_model">account.invoice</field>
+            <field name="domain"
+                eval="[
+                If(Eval('active_model') == 'account.period',
+                ('move.period', 'in', Eval('active_ids', [])), ()),
+                If(Eval('active_model') == 'account.fiscalyear',
+                ('move.period.fiscalyear', 'in', Eval('active_ids', [])), ()),
+                ]"
+                pyson="1"/>
+        </record>
+        <record model="ir.action.act_window.view" id="act_invoice_relate_period_view1">
+            <field name="sequence" eval="10"/>
+            <field name="view" ref="invoice_view_tree"/>
+            <field name="act_window" ref="act_invoice_relate_period"/>
+        </record>
+        <record model="ir.action.act_window.view" id="act_invoice_relate_period_view2">
+            <field name="sequence" eval="20"/>
+            <field name="view" ref="invoice_view_form"/>
+            <field name="act_window" ref="act_invoice_relate_period"/>
+        </record>
+        <record model="ir.action.act_window.domain" id="act_invoice_relate_period_out">
+            <field name="name">Customer</field>
+            <field name="sequence" eval="10"/>
+            <field name="domain" eval="[('type', '=', 'out')]" pyson="1"/>
+            <field name="count" eval="True"/>
+            <field name="act_window" ref="act_invoice_relate_period"/>
+        </record>
+        <record model="ir.action.act_window.domain" id="act_invoice_relate_period_in">
+            <field name="name">Supplier</field>
+            <field name="sequence" eval="20"/>
+            <field name="domain" eval="[('type', '=', 'in')]" pyson="1"/>
+            <field name="count" eval="True"/>
+            <field name="act_window" ref="act_invoice_relate_period"/>
+        </record>
+        <record model="ir.action.act_window.domain" id="act_invoice_relate_period_all">
+            <field name="name">All</field>
+            <field name="sequence" eval="9999"/>
+            <field name="domain"></field>
+            <field name="count" eval="True"/>
+            <field name="act_window" ref="act_invoice_relate_period"/>
+        </record>
+        <record model="ir.action.keyword" id="act_invoice_relate_period_keyword_period">
+            <field name="keyword">form_relate</field>
+            <field name="model">account.period,-1</field>
+            <field name="action" ref="act_invoice_relate_period"/>
+        </record>
+        <record model="ir.action.keyword" id="act_invoice_relate_period_keyword_fiscalyear">
+            <field name="keyword">form_relate</field>
+            <field name="model">account.fiscalyear,-1</field>
+            <field name="action" ref="act_invoice_relate_period"/>
+        </record>
+
         <record model="ir.model.access" id="access_invoice">
             <field name="model">account.invoice</field>
             <field name="perm_read" eval="False"/>
@@ -333,11 +393,6 @@ this repository contains the full copyright notices and license terms. -->
             <field name="name">Invoice</field>
         </record>
         <record model="ir.sequence.type-res.group"
-            id="sequence_type_account_invoice_group_admin">
-            <field name="sequence_type" ref="sequence_type_account_invoice"/>
-            <field name="group" ref="res.group_admin"/>
-        </record>
-        <record model="ir.sequence.type-res.group"
             id="sequence_type_account_invoice_group_account_admin">
             <field name="sequence_type" ref="sequence_type_account_invoice"/>
             <field name="group" ref="account.group_account_admin"/>
@@ -397,6 +452,80 @@ this repository contains the full copyright notices and license terms. -->
             <field name="name">invoice_tax_tree_sequence</field>
         </record>
 
+        <record model="ir.ui.view" id="invoice_payment_mean_view_form">
+            <field name="model">account.invoice.payment.mean</field>
+            <field name="type">form</field>
+            <field name="name">invoice_payment_mean_form</field>
+        </record>
+
+        <record model="ir.ui.view" id="invoice_payment_mean_view_list">
+            <field name="model">account.invoice.payment.mean</field>
+            <field name="type">tree</field>
+            <field name="name">invoice_payment_mean_list</field>
+        </record>
+
+        <record model="ir.ui.view" id="invoice_payment_mean_rule_view_form">
+            <field name="model">account.invoice.payment.mean.rule</field>
+            <field name="type">form</field>
+            <field name="name">invoice_payment_mean_rule_form</field>
+        </record>
+
+        <record model="ir.ui.view" id="invoice_payment_mean_rule_view_list">
+            <field name="model">account.invoice.payment.mean.rule</field>
+            <field name="type">tree</field>
+            <field name="name">invoice_payment_mean_rule_list</field>
+        </record>
+
+        <record model="ir.action.act_window" id="act_invoice_payment_mean_rule_form">
+            <field name="name">Payment Means Rules</field>
+            <field name="res_model">account.invoice.payment.mean.rule</field>
+        </record>
+        <record model="ir.action.act_window.view" id="act_invoice_payment_mean_rule_form_view1">
+            <field name="sequence" eval="10"/>
+            <field name="view" ref="invoice_payment_mean_rule_view_list"/>
+            <field name="act_window" ref="act_invoice_payment_mean_rule_form"/>
+        </record>
+        <record model="ir.action.act_window.view" id="act_invoice_payment_mean_rule_form_view2">
+            <field name="sequence" eval="20"/>
+            <field name="view" ref="invoice_payment_mean_rule_view_form"/>
+            <field name="act_window" ref="act_invoice_payment_mean_rule_form"/>
+        </record>
+        <menuitem
+            parent="menu_payments_configuration"
+            action="act_invoice_payment_mean_rule_form"
+            sequence="30"
+            id="menu_invoice_payment_mean_rule"/>
+
+        <record model="ir.model.access" id="access_invoice_payment_mean_rule">
+            <field name="model">account.invoice.payment.mean.rule</field>
+            <field name="perm_read" eval="True"/>
+            <field name="perm_write" eval="False"/>
+            <field name="perm_create" eval="False"/>
+            <field name="perm_delete" eval="False"/>
+        </record>
+
+        <record model="ir.model.access" id="access_invoice_payment_mean_rule_account">
+            <field name="model">account.invoice.payment.mean.rule</field>
+            <field name="group" ref="account.group_account"/>
+            <field name="perm_read" eval="True"/>
+            <field name="perm_write" eval="True"/>
+            <field name="perm_create" eval="True"/>
+            <field name="perm_delete" eval="True"/>
+        </record>
+
+        <record model="ir.rule.group" id="rule_group_invoice_payment_mean_rule_companies">
+            <field name="name">User in companies</field>
+            <field name="model">account.invoice.payment.mean.rule</field>
+            <field name="global_p" eval="True"/>
+        </record>
+        <record model="ir.rule" id="rule_invoice_payment_mean_rule_companies">
+            <field
+                name="domain"
+                eval="[('company', 'in', Eval('companies', []))]"
+                pyson="1"/>
+            <field name="rule_group" ref="rule_group_invoice_payment_mean_rule_companies"/>
+        </record>
+
         <record model="ir.ui.view" id="pay_start_view_form">
             <field name="model">account.invoice.pay.start</field>
             <field name="type">form</field>
@@ -420,7 +549,7 @@ this repository contains the full copyright notices and license terms. -->
             <field name="name">payment_method_tree</field>
         </record>
         <record model="ir.action.act_window" id="act_payment_method_form">
-            <field name="name">Invoice Payment Methods</field>
+            <field name="name">Payment Methods</field>
             <field name="res_model">account.invoice.payment.method</field>
         </record>
         <record model="ir.action.act_window.view" id="act_payment_method_form_view1">
@@ -434,9 +563,9 @@ this repository contains the full copyright notices and license terms. -->
             <field name="act_window" ref="act_payment_method_form"/>
         </record>
         <menuitem
-            parent="account.menu_journal_configuration"
+            parent="menu_payments_configuration"
             action="act_payment_method_form"
-            sequence="50"
+            sequence="20"
             id="menu_payment_method_form"/>
 
         <record model="ir.rule.group" id="rule_group_payment_method_companies">

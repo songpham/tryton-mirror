@@ -76,12 +76,15 @@ def run(options):
                         })
 
     for db_name in options.database_names:
+        login = options.login
+        administrator = options.administrator or init[db_name]
         if options.email is not None:
             email = options.email
         elif init[db_name]:
             while True:
                 email = input(
-                    '"admin" email for "%s" (empty for none): ' % db_name)
+                    f'email for "{login}" of "{db_name}"'
+                    ' (empty for none): ')
                 if email:
                     try:
                         validate_email(email)
@@ -108,14 +111,17 @@ def run(options):
             if not password and not options.reset_password:
                 while True:
                     password = getpass(
-                        '"admin" password for "%s": ' % db_name)
-                    password2 = getpass('"admin" password confirmation: ')
+                        f'password for "{login}" of "{db_name}": ')
+                    password2 = getpass(
+                        f'password confirmation for "{login}": ')
                     if password != password2:
-                        sys.stderr.write('"admin" password confirmation '
-                            'doesn\'t match "admin" password.\n')
+                        sys.stderr.write(
+                            f'password confirmation for "{login}" '
+                            f'doesn\'t match "{login}" password.\n')
                         continue
                     if not password:
-                        sys.stderr.write('"admin" password is required.\n')
+                        sys.stderr.write(
+                            f'password for "{login}" is required.\n')
                         continue
                     break
 
@@ -130,19 +136,35 @@ def run(options):
                     configuration = Configuration(1)
                     if init[db_name]:
                         configuration.series = __series__
-
-                    with inactive_records():
-                        admin, = User.search([('login', '=', 'admin')])
-
-                    if email is not None:
-                        admin.email = email
-                    if init[db_name] or options.password:
                         configuration.language = main_lang
-                        if not options.reset_password:
-                            admin.password = password
-                    admin.save()
-                    if options.reset_password:
-                        User.reset_password([admin])
+
+                    if (init[db_name]
+                            or options.administrator is not None
+                            or options.email is not None
+                            or options.password
+                            or options.reset_password):
+                        with inactive_records():
+                            try:
+                                user, = User.search([
+                                        ('id', '!=', 0),
+                                        ('login', '=', login),
+                                        ])
+                            except ValueError:
+                                user = User(
+                                    login=login,
+                                    administrator=administrator,
+                                    active=True)
+                        if user.active != options.active:
+                            user.active = options.active
+                        if user.administrator != administrator:
+                            user.administrator = administrator
+                        if email is not None:
+                            user.email = email
+                        if password:
+                            user.password = password
+                        user.save()
+                        if options.reset_password:
+                            User.reset_password([user])
                     if options.hostname is not None:
                         configuration.hostname = options.hostname or None
                     if options.export_translations:
@@ -217,14 +239,13 @@ def validate(models, percentage=100):
     if not models:
         models = sorted([n for n, _ in pool.iterobject()])
     ratio = min(100, percentage) / 100
-    in_max = Transaction().database.IN_MAX
+    limit = 1_000
     for name in models:
         logger.info("validate: %s", name)
         Model = pool.get(name)
         if not issubclass(Model, ModelStorage):
             continue
         offset = 0
-        limit = in_max
         while True:
             records = Model.search(
                 [], order=[('id', 'ASC')], offset=offset, limit=limit)

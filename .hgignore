@@ -1,10 +1,11 @@
 syntax: glob
 *.py[cdo]
+*.mo
+*.rng
 *.egg-info
 dist/
 build/
 node_modules/
-bower_components/
 .tox/
 requirements.txt
 requirements-dev.txt

@@ -26,6 +26,8 @@ with, as a minimum, the :guilabel:`Admin API access scopes`:
 
    * :guilabel:`Orders`: ``write_orders``
 
+   * :guilabel:`Payment terms`: ``read_payment_terms``
+
    * :guilabel:`Product listings`: ``write_product_listings``
 
    * :guilabel:`Products`: ``write_products``
@@ -80,10 +82,27 @@ record based on the Shopify identifier.
 You can use these links to create an `admin link extension
 <https://shopify.dev/docs/apps/build/admin/admin-links>`_.
 
-   - ``GET`` ``/<database_name>/web_shop_shopify/products/<product id>``
+   - ``GET`` ``/<database_name>/r/web_shop_shopify/products/<product id>``
 
-   - ``GET`` ``/<database_name>/web_shop_shopify/products/<product id>/variants/<variant id>``
+   - ``GET`` ``/<database_name>/r/web_shop_shopify/products/<product id>/variants/<variant id>``
 
-   - ``GET`` ``/<database_name>/web_shop_shopify/customers/<customer id>``
+   - ``GET`` ``/<database_name>/r/web_shop_shopify/customers/<customer id>``
 
-   - ``GET`` ``/<database_name>/web_shop_shopify/orders/<order id>``
+   - ``GET`` ``/<database_name>/r/web_shop_shopify/orders/<order id>``
+
+.. _Setup Gift Cards:
+
+Setup Gift Cards
+================
+
+To use gift cards on Shopify, you must activate the :doc:`*Sale Gift Card
+Module* <sale_gift_card:index>`.
+`Products <sale_gift_card:concept-product>` defined as gift cards are also
+registered as such on Shopify.
+When a gift card is sold on Shopify, no `gift card
+<sale_gift_card:model-sale.gift_card>` is created by the corresponding `sale
+<sale_gift_card:model-sale.sale>` order as these are managed by Shopify.
+When a gift card is redeemed on Shopify, it appears as a payment from the
+``gift_card`` gateway.
+It is recommended that you use this criteria to setup a different `payment journal
+<account_payment:model-account.payment.journal>`.

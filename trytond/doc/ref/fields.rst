@@ -61,9 +61,14 @@ All are optional except :attr:`~Field.string`.
    A dictionary that defines dynamic states of the field and overrides the
    static one.
 
-   Possible keys are ``required``, ``readonly`` and ``invisible``.
+   Possible keys are ``required``, ``readonly``, ``editable`` and
+   ``invisible``.
    The values are :class:`~trytond.pyson.PYSON` statements that is evaluated
    with the values of the record.
+
+   .. note::
+
+      ``editable`` is not enforced but only used for the UI.
 
 .. attribute:: Field.on_change
 
@@ -191,9 +196,10 @@ Instance methods:
 
     Return the SQL expression with cast with the type of the field.
 
-.. method:: Field.sql_column(table)
+.. method:: Field.sql_column(tables, Model)
 
-    Return the Column instance based on table.
+    Return the Column or SQL expression instance for the field.
+    :ref:`tables <ref-tables>` could be updated to add new joins.
 
 .. method:: Field.set_rpc(model)
 
@@ -220,6 +226,17 @@ Default value
 =============
 
 See :ref:`default value <topics-fields_default_value>`
+
+Reading
+=======
+
+A class method could be defined for each field which must return a SQL
+expression as column instead of the default one.
+The method signature is::
+
+   column_<field name>(tables)
+
+Where ``tables`` is a nested dictionary, see :ref:`tables <ref-tables>`.
 
 Searching
 =========
@@ -289,6 +306,9 @@ Char
 
    The field is ordered using the similarity with the context value from the
    key ``<model name>.<field name>.order`` if it is set.
+
+Translated :class:`Char` accepts as written and created value a :py:class:`dict
+<dict>` with language code as key and translated string as value.
 
 :class:`Char` has some extra arguments:
 
@@ -540,8 +560,13 @@ Binary
    Name of the field that holds the data's filename.
 
    Default value is an empty string, which means the data has no filename (in
-   this case, the filename is hidden, and the "Open" button is hidden when the
-   widget is set to "image").
+   this case, the filename is hidden).
+
+.. attribute:: Binary.filename_ext
+
+   The extension to append to the :attr:`~Binary.filename`.
+
+   The default value is empty.
 
 .. attribute:: Binary.file_id
 
@@ -561,6 +586,11 @@ Binary
    The prefix to use with the ``FileStore``.
 
    Default value is ``None`` which means the database name is used.
+
+:class:`Binary` has extra method:
+
+.. method:: Binary.queue_for_removal(Model, name, ids)
+
 
 Selection
 ---------
@@ -1069,7 +1099,7 @@ Instance methods:
 Function
 --------
 
-.. class:: Function(field, getter[, setter[, searcher[, getter_with_context]]])
+.. class:: Function(field, [getter[, setter[, searcher[, getter_with_context]]]])
 
    A function field can emulate any other given :class:`field <Field>`.
 

@@ -1,6 +1,9 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
 
+from functools import wraps
+from itertools import groupby
+
 from sql.conditionals import NullIf
 from sql.operators import Equal
 
@@ -9,7 +12,7 @@ from trytond.model import (
     Exclude, MatchMixin, ModelSQL, ModelView, Workflow, dualmethod, fields,
     sequence_ordered)
 from trytond.pool import Pool
-from trytond.pyson import Eval, If
+from trytond.pyson import Eval, If, TimeDelta
 from trytond.transaction import Transaction
 
 from .exceptions import PeppolServiceError
@@ -20,6 +23,18 @@ if config.getboolean('edocument_peppol', 'filestore', default=True):
         'edocument_peppol', 'store_prefix', default=None)
 else:
     file_id = store_prefix = None
+
+
+def default_records(func):
+    @wraps(func)
+    def wrapper(cls, documents=None):
+        if documents is None:
+            documents = cls.search([
+                    ('direction', '=', 'out'),
+                    ('state', '=', 'processing'),
+                    ])
+        return func(cls, documents)
+    return wrapper
 
 
 class Peppol(Workflow, ModelSQL, ModelView):
@@ -84,6 +99,7 @@ class Peppol(Workflow, ModelSQL, ModelView):
         "Data",
         file_id=file_id, store_prefix=store_prefix,
         states={
+            'readonly': _states['readonly'],
             'invisible': (
                 (Eval('state') == 'draft')
                 & (Eval('direction') == 'out')),
@@ -181,13 +197,16 @@ class Peppol(Workflow, ModelSQL, ModelView):
     def submit(cls, documents):
         pool = Pool()
         Service = pool.get('edocument.peppol.service')
+        transaction = Transaction()
         for document in documents:
             if not document.service:
                 document.service = Service.get_service(document)
-            if document.direction == 'out':
-                document.data = document.render()
         cls.save(documents)
-        cls.__queue__.process(documents)
+        for process_after, sub_documents in groupby(
+                documents, lambda d: d.service.process_after):
+            with transaction.set_context(
+                    queue_scheduled_at=process_after):
+                cls.__queue__.process(documents)
 
     def get_service_pattern(self):
         return {
@@ -207,11 +226,15 @@ class Peppol(Workflow, ModelSQL, ModelView):
     @Workflow.transition('processing')
     def process(cls, documents):
         cls.lock(documents)
+        # write state before calling _process
+        cls.write(documents, {'state': 'processing'})
         for document in documents:
             if document.direction == 'out':
+                document.data = document.render()
                 cls.__queue__._process(document)
             else:
                 document._process()
+        cls.save(documents)
 
     def _process(self):
         pool = Pool()
@@ -236,13 +259,9 @@ class Peppol(Workflow, ModelSQL, ModelView):
                 self.succeed()
 
     @classmethod
+    @default_records
     @ModelView.button
-    def update_status(cls, documents=None):
-        if documents is None:
-            documents = cls.search([
-                    ('direction', '=', 'out'),
-                    ('state', '=', 'processing'),
-                    ])
+    def update_status(cls, documents):
         for document in documents:
             document._update_status()
         cls.save(documents)
@@ -296,6 +315,15 @@ class PeppolService(sequence_ordered(), MatchMixin, ModelSQL, ModelView):
     types = fields.MultiSelection(
         'get_peppol_types', "Types",
         help="The types of document supported by the service provider.")
+    process_after = fields.TimeDelta(
+        "Process Document after",
+        domain=['OR',
+            ('process_after', '=', None),
+            ('process_after', '>=', TimeDelta()),
+            ],
+        help="The time taken to process a document "
+        "after it has been submitted.\n"
+        "Applied if a worker queue is activated.")
 
     @classmethod
     def default_company(cls):

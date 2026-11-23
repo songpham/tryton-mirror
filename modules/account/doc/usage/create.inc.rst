@@ -36,8 +36,8 @@ One-off entries
 For entries that are only needed once, for example to set an account's
 initial opening balance, you can manually create an *Account Move*.
 
-The [:menuselection:`Financial --> Entries --> Open Journal`] main menu item
-provides another way of entering the details of an account move.
+The [:menuselection:`Financial --> Entries --> Lines`] main menu item provides
+another way of entering the details of an account move.
 It provides a list of individual
 `Account Move Lines <model-account.move.line>`, which can be added to as
 required.
@@ -52,6 +52,7 @@ happen more than once is to use an
 You must first create the *Account Move Template* and set it up to ask for the
 things that might change each time it is used.
 
-You then run the
-`Create Move from Template <wizard-account.move.template.create>` wizard to
-create account moves based on a template of your choice.
+You then run the `Create Move from Template
+<wizard-account.move.template.create>` wizard from [:menuselection:`Financial
+--> Entries --> Create Move from Template`] to create account moves based on a
+template of your choice.

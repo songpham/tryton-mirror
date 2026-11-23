@@ -59,6 +59,11 @@ msgctxt "field:account.move.line,payments:"
 msgid "Payments"
 msgstr "betalingen"
 
+#, fuzzy
+msgctxt "field:account.move.line.create_direct_debit.start,companies:"
+msgid "Companies"
+msgstr "Bedrijf"
+
 msgctxt "field:account.move.line.create_direct_debit.start,date:"
 msgid "Date"
 msgstr "Datum"
@@ -225,7 +230,7 @@ msgstr "Automatische incasso"
 
 msgctxt "field:party.party,payment_direct_debits:"
 msgid "Direct Debits"
-msgstr "Automatische incasso"
+msgstr "Automatische incasso's"
 
 msgctxt "field:party.party,payment_identical_parties:"
 msgid "Identical Parties"
@@ -233,7 +238,7 @@ msgstr "Identieke Relaties"
 
 msgctxt "field:party.party,reception_direct_debits:"
 msgid "Direct Debits"
-msgstr "Automatische incasso"
+msgstr "Automatische incasso's"
 
 msgctxt "field:party.party.payment_direct_debit,company:"
 msgid "Company"
@@ -278,6 +283,10 @@ msgstr "Vink aan als de factuur per automatische incasso wordt betaald."
 msgctxt "help:account.move.line,payment_direct_debit:"
 msgid "Check if the line will be paid by direct debit."
 msgstr "Vink aan als de regel via automatische incasso wordt betaald."
+
+msgctxt "help:account.move.line.create_direct_debit.start,companies:"
+msgid "Limit to lines from these companies."
+msgstr ""
 
 msgctxt "help:account.move.line.create_direct_debit.start,date:"
 msgid "Create direct debit for lines due up to this date."
@@ -405,8 +414,8 @@ msgid "Payment Groups"
 msgstr "Betalingsgroepen"
 
 msgctxt "model:ir.action,name:act_payment_journal_form"
-msgid "Payment Journals"
-msgstr "Betalingsdagboeken"
+msgid "Journals"
+msgstr "Dagboeken"
 
 msgctxt "model:ir.action,name:act_process_payments"
 msgid "Process Payments"
@@ -510,6 +519,10 @@ msgstr ""
 "U kunt relatie \"%(party)s\" niet verwijderen terwijl ze betalingen open "
 "hebben staan bij bedrijf \"%(company)s\"."
 
+msgctxt "model:ir.message,text:msg_invoice_payment_mean_direct_debit"
+msgid "Direct debit"
+msgstr "Automatische incasso"
+
 #, python-format
 msgctxt "model:ir.message,text:msg_move_cancel_payments"
 msgid ""
@@ -561,11 +574,29 @@ msgstr ""
 "regel \"%(line)s\"."
 
 #, python-format
+msgctxt "model:ir.message,text:msg_pay_line_overpay"
+msgid ""
+"The payment of %(payment_amount)s for lines \"%(names)s\" exceeds the amount"
+" for %(party)s, which is %(amount)s."
+msgstr ""
+"De betaling van %(payment_amount)s voor de regels \"%(names)s\" overschrijdt"
+" het bedrag voor %(party)s, dat %(amount)s is."
+
+#, python-format
 msgctxt "model:ir.message,text:msg_payment_delete_draft"
 msgid "To delete payment \"%(payment)s\" you must reset it to draft state."
 msgstr ""
 "Om betaling \"%(payment)s\" te verwijderen, moet u het terugzetten naar de "
 "conceptstatus."
+
+#, python-format
+msgctxt "model:ir.message,text:msg_payment_means"
+msgid ""
+"The journal \"%(journal)s\" of payment \"%(payment)s\" is not valid with the"
+" payment means of invoice \"%(invoice)s\"."
+msgstr ""
+"Het dagboek \"%(journal)s\" van betaling \"%(payment)s\" is niet geldig voor"
+" de manier van betalen van factuur \"%(invoice)s\"."
 
 #, python-format
 msgctxt "model:ir.message,text:msg_payment_overpay"
@@ -690,8 +721,8 @@ msgid "Payment Groups"
 msgstr "Betalingsgroepen"
 
 msgctxt "model:ir.ui.menu,name:menu_payment_journal_form"
-msgid "Payment Journals"
-msgstr "Betalingsdagboeken"
+msgid "Journals"
+msgstr "Dagboeken"
 
 msgctxt "model:ir.ui.menu,name:menu_payments"
 msgid "Payments"

@@ -49,7 +49,7 @@
                     description = data.error[1][2];
                     Sao.common.userwarning.run(description, msg)
                         .then(function(result) {
-                            if (!~['always', 'ok'].indexOf(result)) {
+                            if (!['always', 'ok'].includes(result)) {
                                 dfd.reject();
                                 return;
                             }
@@ -119,11 +119,6 @@
         };
 
         var ajax_error = function(query, status_, error) {
-            if (!process_exception) {
-                console.debug(`RPC error calling ${args}: ${status_}: ${error}.`);
-                dfd.reject();
-                return;
-            }
             if (query.status == 503) {
                 this.retries++;
                 if (this.retries < 5) {
@@ -149,8 +144,7 @@
                     }
                     return;
                 }
-            }
-            if (query.status == 401) {
+            } else if (query.status == 401) {
                 //Try to relog
                 Sao.Session.renew(session).then(function() {
                     if (async) {
@@ -160,6 +154,10 @@
                         dfd.resolve();
                     }
                 }, dfd.reject);
+            } else if (!process_exception) {
+                console.debug(`RPC error calling ${args}: ${status_}: ${error}.`);
+                dfd.reject();
+                return;
             } else {
                 var err_msg = `[${query.status}] ${error}`;
                 Sao.common.message.run(
@@ -171,9 +169,6 @@
 
         jQuery.ajax({
             'async': async,
-            'headers': {
-                'Authorization': 'Session ' + session.get_auth()
-            },
             'contentType': 'application/json',
             'data': JSON.stringify(Sao.rpc.prepareObject({
                 'id': id_,
@@ -181,7 +176,7 @@
                 'params': params
             })),
             'dataType': 'json',
-            'url': '/' + (session.database || '') + '/',
+            'url': (session.database || '.') + '/rpc/#' + args.method,
             'type': 'post',
             'complete': [function() {
                 Sao.common.processing.hide(timeoutID);

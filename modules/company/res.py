@@ -85,7 +85,9 @@ class User(metaclass=PoolMeta):
     def __setup__(cls):
         super().__setup__()
         cls._context_fields.insert(0, 'company')
+        cls._context_fields.insert(0, 'companies')
         cls._context_fields.insert(0, 'employee')
+        cls._context_fields.insert(0, 'employees')
         cls._context_fields.insert(0, 'company_filter')
 
     @classmethod
@@ -149,20 +151,15 @@ class User(metaclass=PoolMeta):
             self.employee, = employees
 
     @classmethod
-    def _get_preferences(cls, user, context_only=False):
-        res = super()._get_preferences(user,
-            context_only=context_only)
-        if not context_only:
-            res['companies'] = [c.id for c in user.companies]
-            res['employees'] = [e.id for e in user.employees]
-        return res
-
-    @classmethod
     def get_companies(cls):
         '''
         Return an ordered tuple of company ids for the user
         '''
         transaction = Transaction()
+
+        if '_companies' in transaction.context:
+            return transaction.context['_companies']
+
         user_id = transaction.user
         companies = cls._get_companies_cache.get(user_id)
         if companies is not None:

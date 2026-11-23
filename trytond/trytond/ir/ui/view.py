@@ -1,15 +1,22 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
+
+import copy
 import json
 import logging
 import os
+from collections import defaultdict
+from pathlib import Path
 
 from lxml import etree
 from sql import Literal, Null
+from sql.conditionals import Coalesce
+from sql.operators import Equal
 
 from trytond.cache import Cache, MemoryCache
 from trytond.i18n import gettext
-from trytond.model import Index, ModelSQL, ModelView, fields, sequence_ordered
+from trytond.model import (
+    Exclude, Index, ModelSQL, ModelView, Unique, fields, sequence_ordered)
 from trytond.model.exceptions import ValidationError
 from trytond.pool import Pool
 from trytond.pyson import PYSON, Bool, Eval, If, PYSONDecoder
@@ -107,7 +114,7 @@ class View(
     domain = fields.Char('Domain', states={
             'invisible': ~Eval('inherit'),
             }, depends=['inherit'])
-    _get_rng_cache = MemoryCache('ir_ui_view.get_rng', context=False)
+    _get_validator_cache = MemoryCache('ir_ui_view.validator', context=False)
     _view_get_cache = Cache('ir_ui_view.view_get')
     __module_index = None
 
@@ -190,23 +197,27 @@ class View(
     def show(cls, views):
         pass
 
+    def validator(self):
+        return self._validator(self.real_type)
+
     @classmethod
-    def get_rng(cls, type_):
-        key = (cls.__name__, type_)
-        rng = cls._get_rng_cache.get(key)
-        if rng is None:
-            if type_ == 'list-form':
-                type_ = 'form'
-            rng_name = os.path.join(os.path.dirname(__file__), type_ + '.rng')
-            with open(rng_name, 'rb') as fp:
-                rng = etree.fromstring(fp.read())
-            rng = cls._get_rng_cache.set(key, rng)
-        return rng
+    def _validator(cls, type):
+        key = (cls.__name__, type)
+        validator = cls._get_validator_cache.get(key)
+        if validator is None:
+            if type == 'list-form':
+                type = 'form'
+            filepath = Path(os.path.dirname(__file__), f'{type}.rng')
+            if not filepath.exists():
+                filepath = filepath.with_suffix('.rnc')
+            validator = etree.RelaxNG(file=str(filepath))
+            validator = cls._get_validator_cache.set(key, validator)
+        return validator
 
     @property
-    def rng_type(self):
+    def real_type(self):
         if self.inherit:
-            return self.inherit.rng_type
+            return self.inherit.real_type
         return self.type
 
     @classmethod
@@ -225,14 +236,13 @@ class View(
                 continue
             tree = etree.fromstring(xml)
 
-            if hasattr(etree, 'RelaxNG'):
-                validator = etree.RelaxNG(etree=cls.get_rng(view.rng_type))
-                if not validator.validate(tree):
-                    error_log = '\n'.join(map(str,
-                            validator.error_log.filter_from_errors()))
-                    raise XMLError(
-                        gettext('ir.msg_view_invalid_xml', name=view.rec_name),
-                        error_log)
+            validator = view.validator()
+            if not validator.validate(tree):
+                error_log = '\n'.join(map(str,
+                        validator.error_log.filter_from_errors()))
+                raise XMLError(
+                    gettext('ir.msg_view_invalid_xml', name=view.rec_name),
+                    error_log)
             root_element = tree.getroottree().getroot()
 
             # validate pyson attributes
@@ -334,7 +344,7 @@ class View(
             self._translate(root, model, Transaction().language)
         arch = etree.tostring(tree, encoding='utf-8').decode('utf-8')
         result = {
-            'type': self.rng_type,
+            'type': self.real_type,
             'view_id': self.id,
             'arch': arch,
             'field_childs': self.field_childs,
@@ -456,10 +466,25 @@ class ViewTreeWidth(
     __name__ = 'ir.ui.view_tree_width'
     model = fields.Char('Model', required=True)
     field = fields.Char('Field', required=True)
+    occurrence = fields.Integer(
+        "Occurrence", required=True,
+        domain=[
+            ('occurrence', '>', 0),
+            ])
     user = fields.Many2One('res.user', 'User', required=True,
         ondelete='CASCADE')
-    screen_width = fields.Integer("Screen Width")
-    width = fields.Integer('Width', required=True)
+    screen_width = fields.Integer(
+        "Screen Width",
+        domain=['OR',
+            ('screen_width', '>=', 0),
+            ('screen_width', '=', None),
+            ])
+    width = fields.Integer(
+        "Width",
+        domain=['OR',
+            ('width', '=', None),
+            ('width', '>=', 0),
+            ])
 
     @classmethod
     def __setup__(cls):
@@ -469,12 +494,36 @@ class ViewTreeWidth(
                 'set_width': RPC(readonly=False),
                 'reset_width': RPC(readonly=False),
                 })
+        cls._sql_constraints += [
+            ('field_occurrence_user_unique',
+                Exclude(table,
+                    (table.model, Equal),
+                    (table.field, Equal),
+                    (table.occurrence, Equal),
+                    (table.user, Equal),
+                    (Coalesce(table.screen_width, -1), Equal)),
+                'ir.msg_view_tree_width_field_occurrence_user_unique'),
+            ]
         cls._sql_indexes.add(
             Index(
                 table,
                 (table.user, Index.Range()),
                 (table.model, Index.Equality()),
-                (table.field, Index.Equality())))
+                (table.field, Index.Equality()),
+                (table.occurrence, Index.Equality())))
+
+    @classmethod
+    def __register__(cls, module):
+        table_h = cls.__table_handler__(module)
+
+        super().__register__(module)
+
+        # Migration from 7.8: remove required on width
+        table_h.not_null_action('width', 'remove')
+
+    @classmethod
+    def default_occurrence(cls):
+        return 1
 
     def get_rec_name(self, name):
         return f'{self.field_ref.rec_name} @ {self.model_ref.rec_name}'
@@ -498,18 +547,22 @@ class ViewTreeWidth(
 
     @classmethod
     def get_width(cls, model, width):
-        for screen_width in WIDTH_BREAKPOINTS:
-            if width >= screen_width:
-                break
+        if width is None:
+            screen_width = None
         else:
-            screen_width = 0
+            for screen_width in WIDTH_BREAKPOINTS:
+                if width >= screen_width:
+                    break
+            else:
+                screen_width = None
 
         user = Transaction().user
         records = cls.search([
             ('user', '=', user),
             ('model', '=', model),
             ('screen_width', '=', screen_width),
-            ])
+            ],
+            order=[('occurrence', 'ASC')])
 
         if not records:
             records = cls.search([
@@ -522,58 +575,70 @@ class ViewTreeWidth(
                 ],
                 order=[
                     ('screen_width', 'DESC NULLS LAST'),
+                    ('occurrence', 'ASC'),
                     ])
-        widths = {}
+        screen_width = None
+        widths = defaultdict(list)
         for width in records:
-            if width.field not in widths:
-                widths[width.field] = width.width
+            if screen_width is None:
+                screen_width = width.screen_width
+            if screen_width != width.screen_width:
+                break
+            if len(widths[width.field]) + 1 < width.occurrence:
+                for _ in range(
+                        width.occurrence - len(widths[width.field]) - 1):
+                    widths[width.field].append(None)
+            widths[width.field].insert(width.occurrence, width.width)
         return widths
 
     @classmethod
     def set_width(cls, model, fields, width):
         '''
         Set width for the current user on the model.
-        fields is a dictionary with key: field name and value: width.
+        fields is dictionary with field name as key and a list of widths
+        as value.
+        width is the screen width.
         '''
-        for screen_width in WIDTH_BREAKPOINTS:
-            if width >= screen_width:
-                break
+        if width is None:
+            screen_width = None
         else:
-            screen_width = 0
+            for screen_width in WIDTH_BREAKPOINTS:
+                if width >= screen_width:
+                    break
+            else:
+                screen_width = None
 
         user_id = Transaction().user
         records = cls.search([
                 ('user', '=', user_id),
                 ('model', '=', model),
                 ('field', 'in', list(fields.keys())),
-                ['OR',
-                    ('screen_width', '=', screen_width),
-                    ('screen_width', '=', None),
-                    ],
-                ])
+                ('screen_width', '=', screen_width),
+                ],
+            order=[('occurrence', 'DESC')])
 
-        fields = fields.copy()
-        to_save, to_delete = [], []
-        for tree_width in records:
-            if tree_width.screen_width == screen_width:
-                if tree_width.field in fields:
-                    tree_width.width = fields.pop(tree_width.field)
-                    to_save.append(tree_width)
-                else:
-                    to_delete.append(tree_width)
+        fields = copy.deepcopy(fields)
+        with cls.bulk_save() as save:
+            for tree_width in records:
+                if tree_width.screen_width == screen_width:
+                    index = tree_width.occurrence - 1
+                    if index < len(fields[tree_width.field]):
+                        width = fields[tree_width.field][index]
+                        fields[tree_width.field][index] = None
+                        if width is not None:
+                            tree_width.width = width
+                            save.push(tree_width)
 
-        for name, width in fields.items():
-            to_save.append(cls(
-                    user=user_id,
-                    model=model,
-                    field=name,
-                    screen_width=screen_width,
-                    width=width))
-
-        if to_save:
-            cls.save(to_save)
-        if to_delete:
-            cls.delete(to_delete)
+            for name, widths in fields.items():
+                for occurrence, width in enumerate(widths, start=1):
+                    if width is not None:
+                        save.push(cls(
+                                user=user_id,
+                                model=model,
+                                field=name,
+                                occurrence=occurrence,
+                                screen_width=screen_width,
+                                width=width))
 
     @classmethod
     def reset_width(cls, model, width):
@@ -581,7 +646,7 @@ class ViewTreeWidth(
             if width >= screen_width:
                 break
         else:
-            screen_width = 0
+            screen_width = None
 
         user_id = Transaction().user
         records = cls.search([
@@ -614,6 +679,11 @@ class ViewTreeOptional(
         'res.user', "User", required=True, ondelete='CASCADE')
     model = fields.Char("Model", required=True)
     field = fields.Char("Field", required=True)
+    occurrence = fields.Integer(
+        "Occurrence", required=True,
+        domain=[
+            ('occurrence', '>', 0),
+            ])
     value = fields.Boolean("Value")
 
     @classmethod
@@ -623,6 +693,12 @@ class ViewTreeOptional(
                 'set_optional': RPC(readonly=False),
                 })
         table = cls.__table__()
+        cls._sql_constraints += [
+            ('model_field_occurrence_user_unique',
+                Unique(table,
+                    table.view, table.field, table.occurrence, table.user),
+                'ir.msg_view_tree_optional_field_occurrence_user_unique'),
+            ]
         cls._sql_indexes.add(
             Index(
                 table,
@@ -650,6 +726,10 @@ class ViewTreeOptional(
                 where=table.model == Null))
 
     @classmethod
+    def default_occurrence(cls):
+        return 1
+
+    @classmethod
     def validate_fields(cls, records, fields_names):
         super().validate_fields(records, fields_names)
         cls.check_view(records, fields_names)
@@ -659,7 +739,7 @@ class ViewTreeOptional(
         if fields_names and 'view' not in fields_names:
             return
         for record in records:
-            if record.view and record.view.rng_type != 'tree':
+            if record.view and record.view.real_type != 'tree':
                 raise ViewError(gettext(
                         'ir.msg_view_tree_optional_type',
                         view=record.view.rec_name))
@@ -670,8 +750,33 @@ class ViewTreeOptional(
         ModelView._fields_view_get_cache.clear()
 
     @classmethod
+    def get_optional(cls, view_id):
+        user = Transaction().user
+
+        records = cls.search([
+                ('view', '=', view_id),
+                ('user', '=', user),
+                ],
+            order=[('occurrence', 'ASC')])
+
+        optionals = defaultdict(list)
+        for optional in records:
+            if len(optionals[optional.field]) + 1 < optional.occurrence:
+                for _ in range(
+                        optional.occurrence
+                        - len(optionals[optional.field]) - 1):
+                    optionals[optional.field].append(None)
+            optionals[optional.field].insert(
+                optional.occurrence, optional.value)
+        return optionals
+
+    @classmethod
     def set_optional(cls, view_id, fields):
-        "Store optional field that must be displayed"
+        '''
+        Store optional fields that must be displayed.
+        fields is dictionary with field name as key and a list of boolean as
+        value.
+        '''
         pool = Pool()
         View = pool.get('ir.ui.view')
         user = Transaction().user
@@ -679,20 +784,30 @@ class ViewTreeOptional(
         records = cls.search([
                 ('view', '=', view.id),
                 ('user', '=', user),
-                ('field', 'in', list(fields)),
-                ])
-        cls.delete(records)
-        to_create = []
-        for field, value in fields.items():
-            to_create.append({
-                    'view': view,
-                    'user': user,
-                    'model': view.model,
-                    'field': field,
-                    'value': bool(value),
-                    })
-        if to_create:
-            cls.create(to_create)
+                ('field', 'in', list(fields.keys())),
+                ],
+            order=[('occurrence', 'DESC')])
+
+        fields = copy.deepcopy(fields)
+
+        with cls.bulk_save() as save:
+            for tree_optional in records:
+                index = tree_optional.occurrence - 1
+                if index < len(fields[tree_optional.field]):
+                    tree_optional.value = fields[tree_optional.field][index]
+                    fields[tree_optional.field][index] = None
+                    save.push(tree_optional)
+
+            for name, optionals in fields.items():
+                for occurrence, optional in enumerate(optionals, start=1):
+                    if optional is not None:
+                        save.push(cls(
+                                view=view,
+                                user=user,
+                                model=view.model,
+                                field=name,
+                                occurrence=occurrence,
+                                value=optional))
 
 
 class ViewTreeState(
@@ -731,7 +846,7 @@ class ViewTreeState(
                 table,
                 (table.user, Index.Range()),
                 (table.model, Index.Equality()),
-                (table.child_name, Index.Equality()),
+                (Coalesce(table.child_name, ''), Index.Equality()),
                 (table.domain, Index.Equality())))
 
     @staticmethod

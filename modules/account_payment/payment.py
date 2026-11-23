@@ -21,14 +21,13 @@ from trytond.modules.currency.fields import Monetary
 from trytond.pool import Pool, PoolMeta
 from trytond.pyson import Eval, If
 from trytond.rpc import RPC
-from trytond.tools import (
-    cursor_dict, grouped_slice, reduce_ids, sortable_values,
-    sqlite_apply_types)
+from trytond.tools import sortable_values, sqlite_apply_types
 from trytond.transaction import Transaction
 from trytond.wizard import StateAction, Wizard
 
 from .exceptions import (
-    OverpayWarning, PaymentValidationError, ReconciledWarning)
+    OverpayWarning, PaymentMeanWarning, PaymentValidationError,
+    ReconciledWarning)
 
 KINDS = [
     ('payable', 'Payable'),
@@ -183,7 +182,7 @@ class Group(ModelSQL, ModelView, ChatMixin):
     def get_payment_aggregated(cls, groups, names):
         pool = Pool()
         Payment = pool.get('account.payment')
-        cursor = Transaction().connection.cursor()
+        connection = Transaction().connection
 
         payment = Payment.__table__()
 
@@ -201,31 +200,31 @@ class Group(ModelSQL, ModelView, ChatMixin):
                 ).as_('payment_not_complete'),
             ]
 
-        for sub_ids in grouped_slice(groups):
-            query = payment.select(*columns,
-                where=reduce_ids(payment.group, sub_ids),
-                group_by=payment.group)
-            if backend.name == 'sqlite':
-                sqlite_apply_types(
-                    query, [None, None, 'NUMERIC', 'NUMERIC', None])
-            cursor.execute(*query)
-            for row in cursor_dict(cursor):
-                group = cls(row['group_id'])
+        query = payment.select(*columns,
+            where=fields.SQL_OPERATORS['in'](
+                payment.group, map(int, groups)),
+            group_by=payment.group)
+        if backend.name == 'sqlite':
+            sqlite_apply_types(
+                query, [None, None, 'NUMERIC', 'NUMERIC', None])
+        cursor = connection.cursor(row_factory=backend.namedtuple_row)
+        cursor.execute(*query)
+        for row in cursor:
+            group = cls(row.group_id)
 
-                result['payment_count'][group.id] = row['payment_count']
-                result['payment_complete'][group.id] = \
-                    not row['payment_not_complete']
+            result['payment_count'][group.id] = row.payment_count
+            result['payment_complete'][group.id] = not row.payment_not_complete
 
-                amount = row['payment_amount']
-                succeeded = row['payment_amount_succeeded']
+            amount = row.payment_amount
+            succeeded = row.payment_amount_succeeded
 
-                if amount is not None and backend.name == 'sqlite':
-                    amount = group.company.currency.round(amount)
-                result['payment_amount'][group.id] = amount
+            if amount is not None and backend.name == 'sqlite':
+                amount = group.company.currency.round(amount)
+            result['payment_amount'][group.id] = amount
 
-                if succeeded is not None and backend.name == 'sqlite':
-                    succeeded = group.company.currency.round(succeeded)
-                result['payment_amount_succeeded'][group.id] = succeeded
+            if succeeded is not None and backend.name == 'sqlite':
+                succeeded = group.company.currency.round(succeeded)
+            result['payment_amount_succeeded'][group.id] = succeeded
 
         for key in list(result.keys()):
             if key not in names:
@@ -304,7 +303,14 @@ class Payment(Workflow, ModelSQL, ModelView, ChatMixin):
     date = fields.Date('Date', required=True, states=_STATES)
     amount = Monetary(
         "Amount", currency='currency', digits='currency', required=True,
-        domain=[('amount', '>=', 0)],
+        domain=[
+            If(Eval('state').in_(
+                    If(Eval('process_method') == 'manual',
+                        ['draft', 'processing'],
+                        ['draft'])),
+                ('amount', '>', 0),
+                ('amount', '>=', 0)),
+            ],
         states={
             'readonly': ~Eval('state').in_(
                 If(Eval('process_method') == 'manual',
@@ -547,7 +553,7 @@ class Payment(Workflow, ModelSQL, ModelView, ChatMixin):
     def order_amount(cls, tables):
         table, _ = tables[None]
         context = Transaction().context
-        column = cls.amount.sql_column(table)
+        column = cls.amount.sql_column(tables, cls)
         if isinstance(context.get('amount_order'), Decimal):
             return [Abs(column - abs(context['amount_order']))]
         else:
@@ -825,6 +831,35 @@ class Payment_Invoice(metaclass=PoolMeta):
             elif self.kind == 'receivable':
                 reference = invoice.customer_payment_reference
         return reference
+
+    @classmethod
+    @ModelView.button
+    @Workflow.transition('submitted')
+    def submit(cls, payments):
+        super().submit(payments)
+        cls._check_payment_means(payments)
+
+    @classmethod
+    def _check_payment_means(cls, payments):
+        pool = Pool()
+        Warning = pool.get('res.user.warning')
+        Invoice = pool.get('account.invoice')
+        for payment in payments:
+            if (payment.line
+                    and isinstance(payment.line.move.origin, Invoice)):
+                invoice = payment.line.move.origin
+                if invoice.payment_means:
+                    if not any(
+                            mean.is_valid_with_payment(payment)
+                            for mean in invoice.payment_means):
+                        key = Warning.format('payment_means', [payment])
+                        if Warning.check(key):
+                            raise PaymentMeanWarning(
+                                key, gettext(
+                                    'account_payment.msg_payment_means',
+                                    journal=payment.journal.rec_name,
+                                    payment=payment.rec_name,
+                                    invoice=invoice.rec_name))
 
 
 class ProcessPayment(Wizard):

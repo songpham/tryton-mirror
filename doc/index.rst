@@ -3,7 +3,7 @@ Tryton Documentation
 ====================
 
 Main
-----
+====
 
 :doc:`Server <trytond:index>`
    The main application.
@@ -17,17 +17,20 @@ Main
 :doc:`Scripting Client <proteus:index>`
    The library to access models, wizards and reports like a client.
 
+:doc:`REST Client <naiad:index>`
+   The library to access REST API.
+
 Backend
--------
+=======
 
 :doc:`GIS <trytond_gis:index>`
    Adds GIS support.
 
 Modules
--------
+=======
 
 Operational
-^^^^^^^^^^^
+-----------
 
 :ref:`Financial Accounting <index-accounting>`
    Reports all transactions of your chart of accounts.
@@ -78,7 +81,7 @@ Operational
    Tracks time spend.
 
 Referential
-^^^^^^^^^^^
+-----------
 
 :doc:`Banking <bank:index>`
    Adds bank and account.
@@ -101,9 +104,6 @@ Referential
 :doc:`Dashboard <dashboard:index>`
    Customized dashboard.
 
-:doc:`Google Maps <google_maps:index>`
-   Links address to Google map.
-
 :doc:`Incoterm <incoterm:index>`
    Defines incoterms.
 
@@ -114,7 +114,7 @@ Referential
    Manages products.
 
 Administration
-^^^^^^^^^^^^^^
+--------------
 
 :ref:`Document Incoming <index-document-incoming>`
    Process incoming document.

@@ -21,8 +21,7 @@ from trytond.pool import Pool
 from trytond.pyson import Bool, Eval, If, PYSONEncoder
 from trytond.report import Report
 from trytond.rpc import RPC
-from trytond.tools import (
-    firstline, grouped_slice, reduce_ids, sqlite_apply_types)
+from trytond.tools import firstline, sqlite_apply_types
 from trytond.transaction import Transaction, check_access
 from trytond.wizard import (
     Button, StateAction, StateTransition, StateView, Wizard)
@@ -356,38 +355,40 @@ class Move(DescriptionOriginMixin, ModelSQL, ModelView):
         '''
         pool = Pool()
         MoveLine = pool.get('account.move.line')
+        Currency = pool.get('currency.currency')
         line = MoveLine.__table__()
         transaction = Transaction()
         cursor = transaction.connection.cursor()
+        cast = Currency.rounding.sql_cast
 
         for company, moves in groupby(moves, key=lambda m: m.company):
             currency = company.currency
-            for sub_moves in grouped_slice(list(moves)):
-                red_sql = reduce_ids(line.move, [m.id for m in sub_moves])
+            where = fields.SQL_OPERATORS['in'](
+                line.move, [m.id for m in moves])
 
-                valid_move_query = line.select(
-                    line.move,
-                    where=red_sql,
-                    group_by=line.move,
-                    having=Abs(Round(
-                            Sum(line.debit - line.credit),
-                            currency.digits)) < abs(currency.rounding))
-                cursor.execute(*line.update(
-                        [line.state],
-                        ['valid'],
-                        where=line.move.in_(valid_move_query)))
+            valid_move_query = line.select(
+                line.move,
+                where=where,
+                group_by=line.move,
+                having=Abs(Round(
+                        Sum(line.debit - line.credit),
+                        currency.digits)) < cast(abs(currency.rounding)))
+            cursor.execute(*line.update(
+                    [line.state],
+                    ['valid'],
+                    where=line.move.in_(valid_move_query)))
 
-                draft_move_query = line.select(
-                    line.move,
-                    where=red_sql,
-                    group_by=line.move,
-                    having=Abs(Round(
-                            Sum(line.debit - line.credit),
-                            currency.digits)) >= abs(currency.rounding))
-                cursor.execute(*line.update(
-                        [line.state],
-                        ['draft'],
-                        where=line.move.in_(draft_move_query)))
+            draft_move_query = line.select(
+                line.move,
+                where=where,
+                group_by=line.move,
+                having=Abs(Round(
+                        Sum(line.debit - line.credit),
+                        currency.digits)) >= cast(abs(currency.rounding)))
+            cursor.execute(*line.update(
+                    [line.state],
+                    ['draft'],
+                    where=line.move.in_(draft_move_query)))
 
         Transaction().counter += 1
         for cache in Transaction().cache.values():
@@ -460,49 +461,49 @@ class Move(DescriptionOriginMixin, ModelSQL, ModelView):
                 today = Date.today()
             currency = company.currency
             c_moves = list(c_moves)
-            for sub_moves in grouped_slice(c_moves):
-                sub_moves_ids = [m.id for m in sub_moves]
+            moves_ids = [m.id for m in moves]
 
-                cursor.execute(*move.select(
-                        move.id,
-                        where=reduce_ids(move.id, sub_moves_ids)
-                        & ~Exists(line.select(
-                                line.move,
-                                where=line.move == move.id))))
-                try:
-                    move_id, = cursor.fetchone()
-                except TypeError:
-                    pass
-                else:
-                    raise PostError(
-                        gettext('account.msg_post_empty_move',
-                            move=cls(move_id).rec_name))
+            cursor.execute(*move.select(
+                    move.id,
+                    where=fields.SQL_OPERATORS['in'](move.id, moves_ids)
+                    & ~Exists(line.select(
+                            line.move,
+                            where=line.move == move.id))))
+            try:
+                move_id, = cursor.fetchone()
+            except TypeError:
+                pass
+            else:
+                raise PostError(
+                    gettext('account.msg_post_empty_move',
+                        move=cls(move_id).rec_name))
 
-                cursor.execute(*line.select(
-                        line.move,
-                        where=reduce_ids(line.move, sub_moves_ids),
-                        group_by=line.move,
-                        having=Abs(Round(
-                                Sum(line.debit - line.credit),
-                                currency.digits)) >= abs(currency.rounding)))
-                try:
-                    move_id, = cursor.fetchone()
-                except TypeError:
-                    pass
-                else:
-                    raise PostError(
-                        gettext('account.msg_post_unbalanced_move',
-                            move=cls(move_id).rec_name))
+            cursor.execute(*line.select(
+                    line.move,
+                    where=fields.SQL_OPERATORS['in'](line.move, moves_ids),
+                    group_by=line.move,
+                    having=Abs(Round(
+                            Sum(line.debit - line.credit),
+                            currency.digits)) >= abs(currency.rounding)))
+            try:
+                move_id, = cursor.fetchone()
+            except TypeError:
+                pass
+            else:
+                raise PostError(
+                    gettext('account.msg_post_unbalanced_move',
+                        move=cls(move_id).rec_name))
 
-                cursor.execute(*line.select(
-                        line.id,
-                        where=reduce_ids(line.move, sub_moves_ids)
-                        & (line.debit == Decimal(0))
-                        & (line.credit == Decimal(0))
-                        & ((line.amount_second_currency == Null)
-                            | (line.amount_second_currency == Decimal(0)))
-                        ))
-                to_reconcile.extend(l for l, in cursor)
+            cursor.execute(*line.select(
+                    line.id,
+                    where=fields.SQL_OPERATORS['in'](line.move, moves_ids)
+                    & (line.debit == Decimal(0))
+                    & (line.credit == Decimal(0))
+                    & (line.reconciliation == Null)
+                    & ((line.amount_second_currency == Null)
+                        | (line.amount_second_currency == Decimal(0)))
+                    ))
+            to_reconcile.extend(l for l, in cursor)
 
             missing_number = defaultdict(list)
             for move in c_moves:
@@ -828,61 +829,62 @@ class MoveLineMixin:
         date = Coalesce(line.maturity_date, move.date)
 
         for company, lines in groupby(lines, lambda l: l.company):
-            for sub_lines in grouped_slice(lines):
-                sub_lines = list(sub_lines)
-                id2currency = {
-                    l.id: l.second_currency or company.currency
-                    for l in sub_lines}
-                where = account.company == company.id
-                where_type = Literal(False)
-                if context.get('receivable', True):
-                    where_type |= account_type.receivable
-                if context.get('payable', True):
-                    where_type |= account_type.payable
-                where &= where_type
-                if not context.get('reconciled'):
-                    if hasattr(cls, 'reconciliation'):
-                        where &= line.reconciliation == Null
-                    elif hasattr(cls, 'reconciled'):
-                        where &= ~line.reconciled
+            lines = list(lines)
+            id2currency = {
+                l.id: l.second_currency or company.currency
+                for l in lines}
+            where = account.company == company.id
+            where_type = Literal(False)
+            if context.get('receivable', True):
+                where_type |= account_type.receivable
+            if context.get('payable', True):
+                where_type |= account_type.payable
+            where &= where_type
+            if not context.get('reconciled'):
+                if hasattr(cls, 'reconciliation'):
+                    where &= line.reconciliation == Null
+                elif hasattr(cls, 'reconciled'):
+                    where &= ~line.reconciled
 
-                currency = Coalesce(line.second_currency, company.currency.id)
-                sign = Case(
-                    (account_type.statement == 'income', -1),
-                    else_=1)
-                balance = sign * Case(
-                    (line.amount_second_currency != Null,
-                        line.amount_second_currency),
-                    else_=line.debit - line.credit)
-                balance = Sum(balance,
-                    window=Window(
-                        [line.party, currency],
-                        order_by=[date.asc.nulls_first, line.id.desc]))
+            currency = Coalesce(line.second_currency, company.currency.id)
+            sign = Case(
+                (account_type.statement == 'income', -1),
+                else_=1)
+            balance = sign * Case(
+                (line.amount_second_currency != Null,
+                    line.amount_second_currency),
+                else_=line.debit - line.credit)
+            balance = Sum(balance,
+                window=Window(
+                    [line.party, currency],
+                    order_by=[date.asc.nulls_first, line.id.desc]))
 
-                party_where = Literal(False)
-                parties = {l.party for l in sub_lines}
-                if None in parties:
-                    party_where |= line.party == parties.discard(None)
-                party_where |= reduce_ids(line.party, map(int, parties))
-                where &= party_where
+            party_where = Literal(False)
+            parties = {l.party for l in lines}
+            if None in parties:
+                party_where |= line.party == parties.discard(None)
+            party_where |= fields.SQL_OPERATORS['in'](
+                line.party, map(int, parties))
+            where &= party_where
 
-                query = (line
-                    .join(move, condition=line.move == move.id)
-                    .join(account, condition=line.account == account.id)
-                    .join(
-                        account_type,
-                        condition=account.type == account_type.id)
-                    .select(
-                        line.id.as_('id'), balance.as_('balance'),
-                        where=where))
-                query = query.select(
-                    query.id, query.balance.as_('balance'),
-                    where=reduce_ids(query.id, [l.id for l in sub_lines]))
-                if backend.name == 'sqlite':
-                    sqlite_apply_types(query, [None, 'NUMERIC'])
-                cursor.execute(*query)
-                balances.update(
-                    (i, id2currency[i].round(a)) for (i, a) in cursor)
+            query = (line
+                .join(move, condition=line.move == move.id)
+                .join(account, condition=line.account == account.id)
+                .join(
+                    account_type,
+                    condition=account.type == account_type.id)
+                .select(
+                    line.id.as_('id'), balance.as_('balance'),
+                    where=where))
+            query = query.select(
+                query.id, query.balance.as_('balance'),
+                where=fields.SQL_OPERATORS['in'](
+                    query.id, [l.id for l in lines]))
+            if backend.name == 'sqlite':
+                sqlite_apply_types(query, [None, 'NUMERIC'])
+            cursor.execute(*query)
+            balances.update(
+                (i, id2currency[i].round(a)) for (i, a) in cursor)
         return balances
 
     def get_rec_name(self, name):
@@ -906,18 +908,10 @@ class Line(DescriptionOriginMixin, MoveLineMixin, ModelSQL, ModelView):
 
     debit = Monetary(
         "Debit", currency='currency', digits='currency', required=True,
-        states=_states,
-        domain=[
-            If(Eval('credit', 0), ('debit', '=', 0), ()),
-            ],
-        depends={'credit', 'tax_lines', 'journal'})
+        states=_states)
     credit = Monetary(
         "Credit", currency='currency', digits='currency', required=True,
-        states=_states,
-        domain=[
-            If(Eval('debit', 0), ('credit', '=', 0), ()),
-            ],
-        depends={'debit', 'tax_lines', 'journal'})
+        states=_states)
     account = fields.Many2One('account.account', 'Account', required=True,
         domain=[
             ('company', '=', Eval('company', -1)),
@@ -942,8 +936,9 @@ class Line(DescriptionOriginMixin, MoveLineMixin, ModelSQL, ModelView):
         ondelete='CASCADE',
         states={
             'required': False,
-            'readonly': (((Eval('state') == 'valid') | _states['readonly'])
-                & Bool(Eval('move'))),
+            'readonly': (
+                ((Eval('state') == 'valid') | _states['readonly'])
+                & (Eval('move') & (Eval('id', -1) >= 0))),
             })
     journal = fields.Function(fields.Many2One(
             'account.journal', 'Journal',
@@ -1079,7 +1074,7 @@ class Line(DescriptionOriginMixin, MoveLineMixin, ModelSQL, ModelView):
         cls._check_modify_exclude = {
             'maturity_date', 'reconciliation', 'tax_lines'}
         cls._reconciliation_modify_disallow = {
-            'account', 'debit', 'credit', 'party',
+            'account', 'debit', 'credit', 'party', 'maturity_date',
             }
         table = cls.__table__()
         cls._sql_constraints += [
@@ -1124,34 +1119,42 @@ class Line(DescriptionOriginMixin, MoveLineMixin, ModelSQL, ModelView):
                 })
 
     @classmethod
+    def _last_move_line(cls):
+        "Last move line created by the current user"
+        transaction = Transaction()
+        context = transaction.context
+        domain = [
+            ('company', '=', context.get('company')),
+            ('create_uid', '=', transaction.user),
+            ('state', '=', 'draft'),
+            ]
+        if context.get('journal') is not None:
+            domain.append(('move.journal', '=', context['journal']))
+        if context.get('period') is not None:
+            domain.append(('move.period', '=', context['period']))
+        lines = cls.search(domain, order=[('id', 'DESC')], limit=1)
+        if lines:
+            line, = lines
+            return line
+
+    @classmethod
     def default_date(cls):
-        '''
-        Return the date of the last line for journal, period
-        or the starting date of the period
-        or today
-        '''
         pool = Pool()
         Period = pool.get('account.period')
         Date = pool.get('ir.date')
         context = Transaction().context
 
         date = Date.today()
-        lines = cls.search([
-                ('company', '=', context.get('company')),
-                ('journal', '=', context.get('journal')),
-                ('period', '=', context.get('period')),
-                ],
-            order=[('date', 'DESC')], limit=1)
-        if lines:
-            line, = lines
+        if (context.get('default_last_move_line')
+                and (line := cls._last_move_line())):
             date = line.date
-        elif context.get('period'):
+        elif context.get('period') is not None:
             period = Period(context['period'])
             if period.start_date >= date:
                 date = period.start_date
             else:
                 date = period.end_date
-        if context.get('date'):
+        elif context.get('date'):
             date = context['date']
         return date
 
@@ -1159,21 +1162,15 @@ class Line(DescriptionOriginMixin, MoveLineMixin, ModelSQL, ModelView):
     def default_move(cls):
         transaction = Transaction()
         context = transaction.context
-        if context.get('journal') and context.get('period'):
-            lines = cls.search([
-                    ('company', '=', context.get('company')),
-                    ('move.journal', '=', context['journal']),
-                    ('move.period', '=', context['period']),
-                    ('create_uid', '=', transaction.user),
-                    ('state', '=', 'draft'),
-                    ], order=[('id', 'DESC')], limit=1)
-            if lines:
-                line, = lines
-                return line.move.id
+        if context.get('default_last_move_line'):
+            if line := cls._last_move_line():
+                return line.move
 
     @fields.depends(
         'move', 'debit', 'credit',
-        '_parent_move.lines', '_parent_move.company')
+        'company', 'period', 'journal',
+        '_parent_move.lines',
+        '_parent_move.company', '_parent_move.period', '_parent_move.journal')
     def on_change_move(self):
         if self.move:
             if not self.debit and not self.credit:
@@ -1182,10 +1179,20 @@ class Line(DescriptionOriginMixin, MoveLineMixin, ModelSQL, ModelView):
                 self.debit = -total if total < 0 else Decimal(0)
                 self.credit = total if total > 0 else Decimal(0)
             self.company = self.move.company
+            self.period = self.move.period
+            self.journal = self.move.journal
 
     @classmethod
     def default_company(cls):
         return Transaction().context.get('company')
+
+    @classmethod
+    def default_journal(cls):
+        return Transaction().context.get('journal')
+
+    @classmethod
+    def default_period(cls):
+        return Transaction().context.get('period')
 
     @staticmethod
     def default_state():
@@ -1400,7 +1407,7 @@ class Line(DescriptionOriginMixin, MoveLineMixin, ModelSQL, ModelView):
 
     @classmethod
     def validate_fields(cls, lines, field_names):
-        super().validate(lines)
+        super().validate_fields(lines, field_names)
         cls.check_account(lines, field_names)
 
     @classmethod
@@ -1444,16 +1451,13 @@ class Line(DescriptionOriginMixin, MoveLineMixin, ModelSQL, ModelView):
                         }])
 
     @classmethod
-    def check_modification(cls, mode, lines, values=None, external=False):
+    def on_modification(cls, mode, lines, field_names=None):
         pool = Pool()
         Move = pool.get('account.move')
 
-        super().check_modification(
-            mode, lines, values=values, external=external)
+        super().on_modification(mode, lines, field_names=field_names)
 
-        if (mode in {'create', 'delete'}
-                or (mode == 'write'
-                    and values.keys() - cls._check_modify_exclude)):
+        if field_names is None or (field_names - cls._check_modify_exclude):
             journal_period_done = set()
             for line in lines:
                 if line.move.state == 'posted':
@@ -1474,7 +1478,8 @@ class Line(DescriptionOriginMixin, MoveLineMixin, ModelSQL, ModelView):
                             'account.msg_delete_line_reconciled',
                             line=line.rec_name))
         if (mode == 'write'
-                and values.keys() & cls._reconciliation_modify_disallow):
+                and field_names is not None
+                and field_names & cls._reconciliation_modify_disallow):
             for line in lines:
                 if line.reconciliation:
                     raise AccessError(gettext(
@@ -1502,6 +1507,10 @@ class Line(DescriptionOriginMixin, MoveLineMixin, ModelSQL, ModelView):
             attributes.append(
                 ('/tree', 'visual',
                     If(Bool(Eval('reconciliation')), 'muted', '')))
+        else:
+            attributes.append(
+                ('/tree', 'visual',
+                    If(Eval('state') != 'valid', 'muted', '')))
         return attributes
 
     @classmethod
@@ -1551,9 +1560,10 @@ class Line(DescriptionOriginMixin, MoveLineMixin, ModelSQL, ModelView):
             default = {}
         else:
             default = default.copy()
+        default.setdefault('state', 'draft')
         default.setdefault('move', None)
         default.setdefault('reconciliation', None)
-        default.setdefault('reconciliations_delegated', [])
+        default.setdefault('reconciliations_delegated')
         return super().copy(lines, default=default)
 
     @classmethod
@@ -1565,16 +1575,14 @@ class Line(DescriptionOriginMixin, MoveLineMixin, ModelSQL, ModelView):
 
         # Add a wizard entry for each templates
         context = Transaction().context
-        company = context.get('company')
-        journal = context.get('journal')
-        period = context.get('period')
-        if company and journal and period:
+        if context.get('default_last_move_line'):
             templates = Template.search([
-                    ('company', '=', company),
-                    ('journal', '=', journal),
+                    ('company', '=', context.get('company')),
+                    ('journal', '=', context.get('journal')),
                     ])
+            toolbar = dict(toolbar)
+            action = list(toolbar['action'])
             for template in templates:
-                action = toolbar['action']
                 # Use template id for action id to auto-select the template
                 action.append({
                         'name': template.name,
@@ -1582,6 +1590,7 @@ class Line(DescriptionOriginMixin, MoveLineMixin, ModelSQL, ModelView):
                         'wiz_name': 'account.move.template.create',
                         'id': template.id,
                         })
+            toolbar['action'] = action
         return toolbar
 
     @classmethod
@@ -1600,82 +1609,82 @@ class Line(DescriptionOriginMixin, MoveLineMixin, ModelSQL, ModelView):
         delegate_to = delegate_to.id if delegate_to else None
 
         reconciliations = []
-        to_post = []
-        for lines in lines_list:
-            if not lines:
-                continue
-            for line in lines:
-                if line.reconciliation:
-                    raise AccessError(
-                        gettext('account.msg_line_already_reconciled',
-                            line=line.rec_name))
+        with Move.bulk_func('post', auto=False) as post:
+            for lines in lines_list:
+                if not lines:
+                    continue
+                for line in lines:
+                    if line.reconciliation:
+                        raise AccessError(
+                            gettext('account.msg_line_already_reconciled',
+                                line=line.rec_name))
 
-            lines = list(lines)
-            reconcile_account = None
-            reconcile_party = None
-            amount = Decimal(0)
-            amount_second_currency = Decimal(0)
-            second_currencies = set()
-            posted = True
-            for line in lines:
-                posted &= line.move.state == 'posted'
-                amount += line.debit - line.credit
-                if not reconcile_account:
-                    reconcile_account = line.account
-                if not reconcile_party:
-                    reconcile_party = line.party
-                if line.amount_second_currency is not None:
-                    amount_second_currency += line.amount_second_currency
-                second_currencies.add(line.second_currency)
-            company = reconcile_account.company
+                lines = list(lines)
+                reconcile_account = None
+                reconcile_party = None
+                amount = Decimal(0)
+                amount_second_currency = Decimal(0)
+                second_currencies = set()
+                posted = True
+                for line in lines:
+                    posted &= line.move.state == 'posted'
+                    amount += line.debit - line.credit
+                    if not reconcile_account:
+                        reconcile_account = line.account
+                    if not reconcile_party:
+                        reconcile_party = line.party
+                    if line.amount_second_currency is not None:
+                        amount_second_currency += line.amount_second_currency
+                    second_currencies.add(line.second_currency)
+                company = reconcile_account.company
 
-            try:
-                second_currency, = second_currencies
-            except ValueError:
-                amount_second_currency = None
-                second_currency = None
-            if second_currency:
-                writeoff_amount = amount_second_currency
-                writeoff_currency = second_currency
-            else:
-                writeoff_amount = amount
-                writeoff_currency = company.currency
-            if writeoff_amount:
-                if not writeoff:
-                    raise ReconciliationError(gettext(
-                            'account.msg_reconciliation_write_off_missing',
-                            amount=lang.currency(
-                                writeoff_amount, writeoff_currency)))
-                move = cls._get_writeoff_move(
-                    reconcile_account, reconcile_party,
-                    writeoff_amount, writeoff_currency,
-                    writeoff, date=date, description=description)
-                move.save()
-                if posted:
-                    to_post.append(move)
-                for line in move.lines:
-                    if line.account == reconcile_account:
-                        lines.append(line)
-                        amount += line.debit - line.credit
-            if second_currency and amount:
-                move = cls._get_exchange_move(
-                    reconcile_account, reconcile_party, amount, date)
-                move.save()
-                if posted:
-                    to_post.append(move)
-                for line in move.lines:
-                    if line.account == reconcile_account:
-                        lines.append(line)
-                        amount += line.debit - line.credit
-            assert not amount, f"{amount} must be zero"
-            reconciliations.append({
-                    'company': reconcile_account.company,
-                    'lines': [('add', [x.id for x in lines])],
-                    'date': max(l.date for l in lines),
-                    'delegate_to': delegate_to,
-                    })
-        if to_post:
-            Move.post(to_post)
+                try:
+                    second_currency, = second_currencies
+                except ValueError:
+                    amount_second_currency = None
+                    second_currency = None
+                if second_currency:
+                    writeoff_amount = amount_second_currency
+                    writeoff_currency = second_currency
+                else:
+                    writeoff_amount = amount
+                    writeoff_currency = company.currency
+                if writeoff_amount:
+                    if not writeoff:
+                        raise ReconciliationError(gettext(
+                                'account.msg_reconciliation_write_off_missing',
+                                amount=lang.currency(
+                                    writeoff_amount, writeoff_currency)))
+                    move = cls._get_writeoff_move(
+                        reconcile_account, reconcile_party,
+                        writeoff_amount, writeoff_currency,
+                        writeoff, date=date, description=description)
+                    move.save()
+                    if posted:
+                        post.push(move)
+                    for line in move.lines:
+                        if line.account == reconcile_account:
+                            lines.append(line)
+                            amount += line.debit - line.credit
+                if second_currency and amount:
+                    move = cls._get_exchange_move(
+                        reconcile_account, reconcile_party, amount, date)
+                    move.save()
+                    if posted:
+                        post.push(move)
+                    for line in move.lines:
+                        if line.account == reconcile_account:
+                            lines.append(line)
+                            amount += line.debit - line.credit
+                assert not amount, f"{amount} must be zero"
+                reconciliations.append({
+                        'company': reconcile_account.company,
+                        'lines': [('add', [x.id for x in lines])],
+                        'date': max(filter(None,
+                                (d for l in lines
+                                    for d in (l.maturity_date, l.date)))),
+                        'delegate_to': delegate_to,
+                        })
         return Reconciliation.create(reconciliations)
 
     @classmethod
@@ -1865,19 +1874,34 @@ class Line(DescriptionOriginMixin, MoveLineMixin, ModelSQL, ModelView):
         return self.maturity_date or self.date
 
     @classmethod
-    def reconcile_automatic(cls, data=None):
+    def reconcile_automatic(cls):
         pool = Pool()
         Reconcile = pool.get('account.reconcile', type='wizard')
+        transaction = Transaction()
+        context = transaction.context
 
-        data = data.copy() if data is not None else {}
-        data['start'] = {
-            'automatic': True,
-            'only_balanced': True,
-            }
+        company_id = context.get('company')
 
-        session_id, _, _ = Reconcile.create()
-        Reconcile.execute(session_id, data, 'setup')
-        Reconcile.delete(session_id)
+        def lines_to_reconcile(account, party, currency):
+            lines, _ = cls.find_best_reconciliation(
+                Reconcile.to_reconcile(account, party, currency),
+                currency)
+            return lines
+
+        accounts = Reconcile.accounts_to_reconcile(company=company_id)
+        for account in accounts:
+            if account.party_required:
+                parties = Reconcile.parties_to_reconcile(account)
+            else:
+                parties = [None]
+            for party in parties:
+                currencies = Reconcile.currencies_to_reconcile(
+                    account, party)
+                for currency in currencies:
+                    while lines := lines_to_reconcile(
+                            account, party, currency):
+                        Line.reconcile(lines)
+                        transaction.commit()
 
 
 class LineReceivablePayableContext(ModelView):
@@ -1940,15 +1964,16 @@ class WriteOff(DeactivableMixin, ModelSQL, ModelView):
         return Transaction().context.get('company')
 
 
-class OpenJournalAsk(ModelView):
-    __name__ = 'account.move.open_journal.ask'
+class LineContext(ModelView):
+    __name__ = 'account.move.line.context'
     company = fields.Many2One('company.company', "Company", required=True)
     journal = fields.Many2One(
-        'account.journal', 'Journal', required=True,
+        'account.journal', "Journal",
         context={
             'company': Eval('company', None),
             })
-    period = fields.Many2One('account.period', 'Period', required=True,
+    period = fields.Many2One(
+        'account.period', "Period",
         domain=[
             ('company', '=', Eval('company', -1)),
             ('state', '!=', 'closed'),
@@ -1959,84 +1984,20 @@ class OpenJournalAsk(ModelView):
         return Transaction().context.get('company')
 
     @classmethod
+    def default_journal(cls):
+        return Transaction().context.get('journal')
+
+    @classmethod
     def default_period(cls):
         pool = Pool()
         Period = pool.get('account.period')
-        if company := cls.default_company():
+        if period := Transaction().context.get('period'):
+            return period
+        elif company := cls.default_company():
             try:
-                period = Period.find(company)
+                return Period.find(company)
             except PeriodNotFoundError:
-                return None
-            return period.id
-
-
-class OpenJournal(Wizard):
-    __name__ = 'account.move.open_journal'
-    _readonly = True
-    start = StateTransition()
-    ask = StateView('account.move.open_journal.ask',
-        'account.open_journal_ask_view_form', [
-            Button('Cancel', 'end', 'tryton-cancel'),
-            Button('Open', 'open_', 'tryton-ok', default=True),
-            ])
-    open_ = StateAction('account.act_move_line_form')
-
-    def transition_start(self):
-        if (self.model
-                and self.model.__name__ == 'account.journal.period'
-                and self.record):
-            return 'open_'
-        return 'ask'
-
-    def default_ask(self, fields):
-        if (self.model
-                and self.model.__name__ == 'account.journal.period'
-                and self.record):
-            return {
-                'company': self.record.company.id,
-                'journal': self.record.journal.id,
-                'period': self.record.period.id,
-                }
-        return {}
-
-    def do_open_(self, action):
-        JournalPeriod = Pool().get('account.journal.period')
-
-        if (self.model
-                and self.model.__name__ == 'account.journal.period'
-                and self.record):
-            journal = self.record.journal
-            period = self.record.period
-        else:
-            journal = self.ask.journal
-            period = self.ask.period
-        journal_periods = JournalPeriod.search([
-                ('journal', '=', journal.id),
-                ('period', '=', period.id),
-                ], limit=1)
-        if not journal_periods:
-            journal_period, = JournalPeriod.create([{
-                        'journal': journal.id,
-                        'period': period.id,
-                        }])
-        else:
-            journal_period, = journal_periods
-
-        action['name'] += ' (%s)' % journal_period.rec_name
-        action['pyson_domain'] = PYSONEncoder().encode([
-            ('journal', '=', journal.id),
-            ('period', '=', period.id),
-            ('company', '=', period.company.id),
-            ])
-        action['pyson_context'] = PYSONEncoder().encode({
-            'journal': journal.id,
-            'period': period.id,
-            'company': period.company.id,
-            })
-        return action, {}
-
-    def transition_open_(self):
-        return 'end'
+                pass
 
 
 class OpenAccount(Wizard):
@@ -2121,13 +2082,15 @@ class ReconcileLines(Wizard):
 
     @classmethod
     def check_access(cls, models=None):
+        pool = Pool()
+        User = pool.get('res.user')
         transaction = Transaction()
-        if transaction.user:
+        if not User.is_administrator():
             context = transaction.context
             models = set() if models is None else models.copy()
             models.update({'account.move.line', 'account.general_ledger.line'})
             model = context.get('active_model')
-            if model and model not in models:
+            if not model or model not in models:
                 raise AccessError(gettext(
                         'ir.msg_access_wizard_model_error',
                         wizard=cls.__name__,
@@ -2189,13 +2152,15 @@ class UnreconcileLines(Wizard):
 
     @classmethod
     def check_access(cls, models=None):
+        pool = Pool()
+        User = pool.get('res.user')
         transaction = Transaction()
-        if transaction.user:
+        if not User.is_administrator():
             context = transaction.context
             models = set() if models is None else models.copy()
             models.update({'account.move.line', 'account.general_ledger.line'})
             model = context.get('active_model')
-            if model and model not in models:
+            if not model or model not in models:
                 raise AccessError(gettext(
                         'ir.msg_access_wizard_model_error',
                         wizard=cls.__name__,
@@ -2234,8 +2199,8 @@ class Reconcile(Wizard):
             ])
     reconcile = StateTransition()
 
-    def get_accounts(self):
-        'Return a list of account id to reconcile'
+    @classmethod
+    def accounts_to_reconcile(cls, company=None, with_rule=False):
         pool = Pool()
         Rule = pool.get('ir.rule')
         Line = pool.get('account.move.line')
@@ -2244,25 +2209,25 @@ class Reconcile(Wizard):
         AccountType = pool.get('account.account.type')
         account = Account.__table__()
         account_type = AccountType.__table__()
-        cursor = Transaction().connection.cursor()
-        account_rule = Rule.query_get(Account.__name__)
-
-        if self.model and self.model.__name__ == 'account.move.line':
-            lines = [l for l in self.records if not l.reconciliation]
-            return list({l.account for l in lines if l.account.reconcile})
+        transaction = Transaction()
+        cursor = transaction.connection.cursor()
 
         balance = line.debit - line.credit
-        cursor.execute(*line.join(account,
+        query = (line
+            .join(account,
                 condition=line.account == account.id)
             .join(account_type, condition=account.type == account_type.id)
             .select(
                 account.id,
-                where=((line.reconciliation == Null)
+                where=(
+                    (line.reconciliation == Null)
                     & (line.state == 'valid')
-                    & account.reconcile
-                    & account.id.in_(account_rule)),
-                group_by=[account.id,
-                    account_type.receivable, account_type.payable],
+                    & account.reconcile),
+                group_by=[
+                    account.id,
+                    account_type.receivable,
+                    account_type.payable,
+                    ],
                 having=((
                         Sum(Case((balance > 0, 1), else_=0)) > 0)
                     & (Sum(Case((balance < 0, 1), else_=0)) > 0)
@@ -2275,74 +2240,112 @@ class Reconcile(Wizard):
                             Sum(balance) > 0),
                         else_=False)
                     )))
-        return [a for a, in cursor]
+        if with_rule:
+            account_rule = Rule.query_get(Account.__name__)
+            query.where &= account.id.in_(account_rule)
+        if company:
+            query.where &= account.company == int(company)
+        cursor.execute(*query)
+        return Account.browse([a for a, in cursor])
 
-    def get_parties(self, account, party=None):
-        'Return a list party to reconcile for the account'
+    @classmethod
+    def parties_to_reconcile(cls, account):
         pool = Pool()
+        Party = pool.get('party.party')
         Line = pool.get('account.move.line')
         line = Line.__table__()
-        cursor = Transaction().connection.cursor()
+        transaction = Transaction()
+        cursor = transaction.connection.cursor()
 
-        if self.model and self.model.__name__ == 'account.move.line':
-            lines = [l for l in self.records if not l.reconciliation]
-            return list({
-                    l.party for l in lines
-                    if l.account == account and l.party})
-
-        where = ((line.reconciliation == Null)
-            & (line.state == 'valid')
-            & (line.account == account.id))
-        if party:
-            where &= (line.party == party.id)
-        else:
-            where &= (line.party != Null)
-        cursor.execute(*line.select(line.party,
-                where=where,
+        query = (line
+            .select(line.party,
+                where=(
+                    (line.reconciliation == Null)
+                    & (line.state == 'valid')
+                    & (line.account == int(account))
+                    & (line.party != Null)),
                 group_by=line.party))
-        return [p for p, in cursor]
+        cursor.execute(*query)
+        return Party.browse([p for p, in cursor])
 
-    def get_currencies(self, account, party, currency=None, _balanced=False):
-        "Return a list of currencies to reconcile for the account and party"
+    @classmethod
+    def currencies_to_reconcile(cls, account, party, _balanced=False):
         pool = Pool()
+        Currency = pool.get('currency.currency')
         Line = pool.get('account.move.line')
         line = Line.__table__()
-        cursor = Transaction().connection.cursor()
-
-        if self.model and self.model.__name__ == 'account.move.line':
-            lines = [l for l in self.records if not l.reconciliation]
-            return list({
-                    (l.second_currency or l.currency).id
-                    for l in lines
-                    if l.account == account and l.party == party})
+        transaction = Transaction()
+        cursor = transaction.connection.cursor()
 
         balance = Case(
             (line.second_currency != Null, line.amount_second_currency),
             else_=line.debit - line.credit)
+        currency_expr = Coalesce(line.second_currency, account.currency.id)
+        query = (line
+            .select(
+                currency_expr,
+                where=((line.reconciliation == Null)
+                    & (line.state == 'valid')
+                    & (line.account == int(account))
+                    & (line.party == (int(party) if party else None))),
+                group_by=line.second_currency))
         if _balanced:
-            having = Sum(balance) == 0
+            query.having = Sum(balance) == 0
         else:
-            having = ((
+            query.having = ((
                     Sum(Case((balance > 0, 1), else_=0)) > 0)
                 & (Sum(Case((balance < 0, 1), else_=0)) > 0)
                 | Case((account.type.receivable, Sum(balance) < 0),
                     else_=False)
                 | Case((account.type.payable, Sum(balance) > 0),
-                    else_=False)
-                )
-        where = ((line.reconciliation == Null)
-            & (line.state == 'valid')
-            & (line.account == account.id)
-            & (line.party == (party.id if party else None)))
-        currency_expr = Coalesce(line.second_currency, account.currency.id)
-        if currency:
-            where &= (currency_expr == currency.id)
-        cursor.execute(*line.select(
-                currency_expr,
-                where=where,
-                group_by=line.second_currency,
-                having=having))
-        return [p for p, in cursor]
+                    else_=False))
+        cursor.execute(*query)
+        return Currency.browse([p for p, in cursor])
+
+    @classmethod
+    def to_reconcile(cls, account, party, currency):
+        pool = Pool()
+        Line = pool.get('account.move.line')
+        return Line.search([
+                ('account', '=', account),
+                ('party', '=', party),
+                ('reconciliation', '=', None),
+                ['OR',
+                    [
+                        ('currency', '=', currency),
+                        ('second_currency', '=', None),
+                        ],
+                    ('second_currency', '=', currency),
+                    ],
+                ('state', '=', 'valid'),
+                ],
+            order=[])
+
+    def get_accounts(self):
+        'Return a list of account id to reconcile'
+        if self.model and self.model.__name__ == 'account.move.line':
+            lines = [l for l in self.records if not l.reconciliation]
+            return list({l.account for l in lines if l.account.reconcile})
+        return self.accounts_to_reconcile(with_rule=True)
+
+    def get_parties(self, account, party=None):
+        'Return a list party to reconcile for the account'
+        if self.model and self.model.__name__ == 'account.move.line':
+            lines = [l for l in self.records if not l.reconciliation]
+            return list({
+                    l.party for l in lines
+                    if l.account == account and l.party})
+        return self.parties_to_reconcile(account)
+
+    def get_currencies(self, account, party):
+        "Return a list of currencies to reconcile for the account and party"
+        if self.model and self.model.__name__ == 'account.move.line':
+            lines = [l for l in self.records if not l.reconciliation]
+            return list({
+                    l.second_currency or l.currency
+                    for l in lines
+                    if l.account == account and l.party == party})
+        return self.currencies_to_reconcile(account, party)
 
     def transition_setup(self):
         return self.transition_next_(first=True)
@@ -2436,29 +2439,6 @@ class Reconcile(Wizard):
             defaults['date'] = Date.today()
         return defaults
 
-    def _all_lines(self):
-        'Return all lines to reconcile for the current state'
-        pool = Pool()
-        Line = pool.get('account.move.line')
-        return Line.search([
-                ('account', '=', self.show.account.id),
-                ('party', '=',
-                    self.show.party.id if self.show.party else None),
-                ('reconciliation', '=', None),
-                ['OR',
-                    [
-                        ('currency', '=', self.show.currency.id),
-                        ('second_currency', '=', None),
-                        ],
-                    ('second_currency', '=', self.show.currency.id),
-                    ],
-                ('state', '=', 'valid'),
-                ],
-            order=[])
-
-    def _line_sort_key(self, line):
-        return [line.maturity_date or line.date]
-
     def _default_lines(self):
         'Return the larger list of lines which can be reconciled'
         pool = Pool()
@@ -2472,10 +2452,13 @@ class Reconcile(Wizard):
                 and (l.second_currency or l.currency) == self.show.currency}
         else:
             requested = []
+
+        account = self.show.account
         currency = self.show.currency
+        party = self.show.party
 
         lines, remaining = Line.find_best_reconciliation(
-            self._all_lines(), currency)
+            self.to_reconcile(account, party, currency), currency)
         if remaining:
             return requested
         else:
@@ -2544,6 +2527,7 @@ class ReconcileShow(ModelView):
                     ],
                 ('second_currency', '=', Eval('currency', -1)),
                 ],
+            ('state', '=', 'valid'),
             ])
 
     _write_off_states = {
@@ -2931,7 +2915,7 @@ class RescheduleLines(Wizard):
             if self.start.amount:
                 interval = self.start.interval
                 amount = self.start.amount.copy_sign(remaining)
-                while remaining - amount > 0:
+                while abs(remaining) > abs(amount):
                     terms.append({
                             'date': date,
                             'amount': amount,

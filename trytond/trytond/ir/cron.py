@@ -10,7 +10,7 @@ from collections import defaultdict
 from itertools import groupby
 
 from dateutil.relativedelta import relativedelta
-from sql import Literal
+from sql import Literal, Select
 from sql.conditionals import Case, Coalesce
 from sql.functions import CurrentTimestamp, Extract
 
@@ -22,7 +22,6 @@ from trytond.model import (
 from trytond.pool import Pool
 from trytond.pyson import Eval
 from trytond.status import processing
-from trytond.tools import grouped_slice, reduce_ids
 from trytond.tools import timezone as tz
 from trytond.transaction import Transaction, TransactionError
 from trytond.worker import run_task
@@ -37,7 +36,7 @@ def str2bigint(s):
 class Cron(DeactivableMixin, ModelSQL, ModelView):
     __name__ = "ir.cron"
     _states = {
-        'readonly': Eval('running', False),
+        'editable': ~Eval('running', False),
         }
     interval_number = fields.Integer(
         "Interval Number", required=True, states=_states)
@@ -54,7 +53,7 @@ class Cron(DeactivableMixin, ModelSQL, ModelView):
             [('minute', '>=', 0), ('minute', '<=', 59)],
             ],
         states={
-            'readonly': _states['readonly'],
+            'editable': _states['editable'],
             'invisible': Eval('interval_type').in_(['minutes']),
             },
         depends=['interval_type'])
@@ -64,14 +63,14 @@ class Cron(DeactivableMixin, ModelSQL, ModelView):
             [('hour', '>=', 0), ('hour', '<=', 23)],
             ],
         states={
-            'readonly': _states['readonly'],
+            'editable': _states['editable'],
             'invisible': Eval('interval_type').in_(['minutes', 'hours']),
             },
         depends=['interval_type'])
     weekday = fields.Many2One(
         'ir.calendar.day', "Day of Week",
         states={
-            'readonly': _states['readonly'],
+            'editable': _states['editable'],
             'invisible': Eval('interval_type').in_(
                 ['minutes', 'hours', 'days']),
             },
@@ -82,7 +81,7 @@ class Cron(DeactivableMixin, ModelSQL, ModelView):
             ('day', '>=', 0),
             ],
         states={
-            'readonly': _states['readonly'],
+            'editable': _states['editable'],
             'invisible': Eval('interval_type').in_(
                 ['minutes', 'hours', 'days', 'weeks']),
             },
@@ -94,13 +93,18 @@ class Cron(DeactivableMixin, ModelSQL, ModelView):
         fields.Boolean("Running"), 'get_running')
     method = fields.Selection([
             ('ir.trigger|trigger_time', "Run On Time Triggers"),
+            ('ir.queue|retry', "Retry Queued Tasks"),
             ('ir.queue|clean', "Clean Task Queue"),
             ('ir.error|clean', "Clean Errors"),
             ('ir.cron.log|clean', "Clean Cron Logs"),
+            ('ir.filestore.queue|remove', "Remove Deleted Binaries"),
             ('ir.model|refresh_materialized', "Refresh Materialized Models"),
+            ('ir.translation|sync_local', "Synchronize Local Translations"),
             ], "Method", required=True, states=_states)
+    method_string = method.translated('method')
 
-    logs = fields.One2Many('ir.cron.log', 'cron', "Logs", readonly=True)
+    logs = fields.One2Many(
+        'ir.cron.log', 'cron', "Logs", readonly=True, order=[('id', 'DESC')])
 
     del _states
 
@@ -134,21 +138,27 @@ class Cron(DeactivableMixin, ModelSQL, ModelView):
         running = defaultdict(bool)
         if database.has_select_for():
             # Avoid concurrent locking read
-            database.lock_id(str2bigint(f'{cls.__name__},running'))
+            cursor = transaction.connection.cursor()
+            cursor.execute(*Select([
+                        database.lock_id(
+                            str2bigint(f'{cls.__name__},running'),
+                            True)]))
             with transaction.new_transaction() as transaction:
                 cursor = transaction.connection.cursor()
                 For = database.get_select_for_skip_locked()
-                for sub_crons in grouped_slice(crons):
-                    ids = [c.id for c in sub_crons]
-                    query = table.select(
-                        table.id,
-                        where=reduce_ids(table.id, ids),
-                        for_=For('UPDATE'))
-                    cursor.execute(*query)
-                    not_running = {i for i, in cursor}
-                    running.update(
-                        (i, True) for i in ids if i not in not_running)
+                ids = [c.id for c in crons]
+                query = table.select(
+                    table.id,
+                    where=fields.SQL_OPERATORS['in'](table.id, ids),
+                    for_=For('UPDATE'))
+                cursor.execute(*query)
+                not_running = {i for i, in cursor}
+                running.update(
+                    (i, True) for i in ids if i not in not_running)
         return running
+
+    def get_rec_name(self, name):
+        return f'{self.method_string} ({self.id})'
 
     @classmethod
     def notifications(cls):

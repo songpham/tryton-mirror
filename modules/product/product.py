@@ -20,7 +20,7 @@ from trytond.model.exceptions import AccessError
 from trytond.modules.company.model import (
     CompanyMultiValueMixin, CompanyValueMixin)
 from trytond.pool import Pool
-from trytond.pyson import Eval, Get, If
+from trytond.pyson import Bool, Eval, Get, If
 from trytond.tools import is_full_text, lstrip_wildcard
 from trytond.transaction import Transaction, inactive_records
 from trytond.wizard import Button, StateTransition, StateView, Wizard
@@ -33,7 +33,9 @@ except ImportError:
 from .exceptions import InvalidIdentifierCode
 from .ir import price_decimal
 
-__all__ = ['price_digits', 'round_price', 'TemplateFunction']
+__all__ = [
+    'price_digits', 'round_price', 'TemplateFunction',
+    'copy_template_filtered', 'copy_product_filtered']
 logger = logging.getLogger(__name__)
 
 TYPES = [
@@ -57,7 +59,74 @@ def round_price(value, rounding=None):
         Decimal(1) / 10 ** price_digits[1], rounding=rounding)
 
 
+def copy_template_filtered(
+        field_name, template_name='template', product_name='product'):
+    class TemplateCopyFiltered:
+        __slots__ = ()
+
+        @classmethod
+        def copy(cls, templates, default=None):
+            Target = getattr(cls, field_name).get_target()
+            assert (getattr(Target, template_name).model_name
+                == 'product.template')
+            assert (getattr(Target, product_name).model_name
+                == 'product.product')
+            default = default.copy() if default is not None else {}
+            copy_field = field_name not in default
+            default.setdefault(field_name)
+            new_templates = super().copy(templates, default=default)
+            if copy_field:
+                old2new, to_copy = {}, []
+                for template, new_template in zip(templates, new_templates):
+                    to_copy.extend(
+                        l for l in getattr(template, field_name)
+                        if not getattr(l, product_name))
+                    old2new[template.id] = new_template.id
+                if to_copy:
+                    Target.copy(to_copy, {
+                            template_name: lambda d: old2new[d[template_name]],
+                            })
+            return new_templates
+    return TemplateCopyFiltered
+
+
+def copy_product_filtered(
+        field_name, template_name='template', product_name='product'):
+    class ProductCopyFiltered:
+        __slots__ = ()
+
+        @classmethod
+        def copy(cls, products, default=None):
+            Target = getattr(cls, field_name).get_target()
+            assert (getattr(Target, template_name).model_name
+                == 'product.template')
+            assert (getattr(Target, product_name).model_name
+                == 'product.product')
+            default = default.copy() if default is not None else {}
+            copy_field = field_name not in default
+            default.setdefault(field_name)
+            new_products = super().copy(products, default=default)
+            if copy_field:
+                template2new, product2new, to_copy = {}, {}, []
+                for product, new_product in zip(products, new_products):
+                    if targets := getattr(product, field_name):
+                        to_copy.extend(targets)
+                        template2new[product.template.id] = (
+                            new_product.template.id)
+                        product2new[product.id] = new_product.id
+                if to_copy:
+                    Target.copy(to_copy, {
+                            product_name: lambda d: product2new[
+                                d[product_name]],
+                            template_name: lambda d: template2new[
+                                d[template_name]],
+                            })
+            return new_products
+    return ProductCopyFiltered
+
+
 class Template(
+        copy_template_filtered('list_prices'),
         DeactivableMixin, ModelSQL, ModelView, CompanyMultiValueMixin):
     __name__ = "product.template"
     name = fields.Char(
@@ -67,7 +136,7 @@ class Template(
     code = fields.Char(
         "Code", strip='leading',
         states={
-            'readonly': Eval('code_readonly', False),
+            'editable': ~Eval('code_readonly', False),
             })
     type = fields.Selection(TYPES, "Type", required=True)
     consumable = fields.Boolean('Consumable',
@@ -84,7 +153,7 @@ class Template(
     list_price = fields.MultiValue(fields.Numeric(
             "List Price", digits=price_digits,
             states={
-                'readonly': ~Eval('context', {}).get('company'),
+                'editable': Bool(Eval('context', {}).get('company', None)),
                 },
             help="The standard price the product is sold at."))
     list_prices = fields.One2Many(
@@ -132,7 +201,8 @@ class Template(
         super().__setup__()
         t = cls.__table__()
         cls._sql_indexes.update({
-                Index(t, (t.code, Index.Similarity())),
+                Index(t, (Coalesce(t.code, ''), Index.Equality())),
+                Index(t, (Coalesce(t.code, ''), Index.Similarity())),
                 })
         cls._order.insert(0, ('rec_name', 'ASC'))
 
@@ -302,9 +372,10 @@ class Template(
 
 class TemplateFunction(fields.Function):
 
-    def __init__(self, field):
+    def __init__(self, field, searchable=True):
         super().__init__(
-            field, 'get_template', searcher='search_template')
+            field, 'get_template',
+            searcher='search_template' if searchable else None)
         # Disable on_change as it is managed by on_change_template
         self.on_change = set()
         self.on_change_with = set()
@@ -407,6 +478,7 @@ class _One2ManyWithInactive(fields.One2Many):
 
 
 class Product(
+        copy_product_filtered('list_prices'),
         TemplateDeactivatableMixin, tree('replaced_by'), ModelSQL, ModelView,
         CompanyMultiValueMixin):
     __name__ = "product.product"
@@ -428,7 +500,7 @@ class Product(
     suffix_code = fields.Char(
         "Suffix Code", strip='trailing',
         states={
-            'readonly': Eval('code_readonly', False),
+            'editable': ~Eval('code_readonly', False),
             },
         help="The unique identifier for the product (aka SKU).")
     code = fields.Char(
@@ -443,7 +515,7 @@ class Product(
     list_price = fields.MultiValue(fields.Numeric(
             "List Price", digits=price_digits,
             states={
-                'readonly': ~Eval('context', {}).get('company'),
+                'editable': Bool(Eval('context', {}).get('company', None)),
                 },
             help="The standard price the variant is sold at.\n"
             "Leave empty to use the list price of the product."))
@@ -456,7 +528,7 @@ class Product(
     cost_price = fields.MultiValue(fields.Numeric(
             "Cost Price", digits=price_digits,
             states={
-                'readonly': ~Eval('context', {}).get('company'),
+                'editable': Bool(Eval('context', {}).get('company', None)),
                 },
             help="The amount it costs to purchase or make the variant, "
             "or carry out the service."))
@@ -517,12 +589,17 @@ class Product(
                     & (t.code != '')),
                 'product.msg_product_code_unique'),
             ]
-        cls._sql_indexes.add(
-            Index(t, (t.code, Index.Similarity(cardinality='high'))))
-        cls._sql_indexes.add(
-            Index(t,
-                (t.position, Index.Range(order='ASC NULLS FIRST')),
-                (t.id, Index.Range(order='ASC'))))
+        cls._sql_indexes.update({
+                Index(t,
+                    (Coalesce(t.code, ''),
+                        Index.Equality(cardinality='high'))),
+                Index(t,
+                    (Coalesce(t.code, ''),
+                        Index.Similarity(cardinality='high'))),
+                Index(t,
+                    (t.position, Index.Range(order='ASC NULLS FIRST')),
+                    (t.id, Index.Range(order='ASC'))),
+                })
 
         for attr in dir(Template):
             tfield = getattr(Template, attr)
@@ -543,7 +620,9 @@ class Product(
                     tfield.states['invisible'] |= invisible_state
                 else:
                     tfield.states['invisible'] = invisible_state
-                setattr(cls, attr, TemplateFunction(tfield))
+                searchable = tfield.searchable(Template)
+                setattr(
+                    cls, attr, TemplateFunction(tfield, searchable=searchable))
                 order_method = getattr(cls, 'order_%s' % attr, None)
                 if (not order_method
                         and not isinstance(tfield, (
@@ -554,6 +633,7 @@ class Product(
                     setattr(cls, 'order_%s' % attr, order_method)
                 if isinstance(tfield, fields.One2Many):
                     getattr(cls, attr).setter = '_set_template_function'
+                    getattr(cls, attr)._field.readonly = False
 
     @classmethod
     def _set_template_function(cls, products, name, value):

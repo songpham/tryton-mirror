@@ -13,7 +13,6 @@ from trytond.model import ModelView, Workflow, fields
 from trytond.modules.account.exceptions import AccountMissing
 from trytond.pool import Pool, PoolMeta
 from trytond.pyson import Bool, Eval, If, TimeDelta
-from trytond.tools import grouped_slice, reduce_ids
 from trytond.transaction import Transaction
 from trytond.wizard import Button, StateTransition, StateView, Wizard
 
@@ -80,34 +79,30 @@ def cancel_clearing_move(func):
 
         result = func(cls, payments, *args, **kwargs)
 
-        to_delete = []
-        to_reconcile = defaultdict(lambda: defaultdict(list))
-        to_unreconcile = []
-        for payment in payments:
-            if payment.clearing_move:
-                if payment.clearing_move.state == 'draft':
-                    to_delete.append(payment.clearing_move)
-                    for line in payment.clearing_move.lines:
-                        if line.reconciliation:
-                            to_unreconcile.append(line.reconciliation)
-                else:
-                    cancel_move = payment.clearing_move.cancel()
-                    for line in (payment.clearing_move.lines
-                            + cancel_move.lines):
-                        if line.reconciliation:
-                            to_unreconcile.append(line.reconciliation)
-                        if line.account.reconcile:
-                            to_reconcile[payment.party][line.account].append(
-                                line)
+        with Move.bulk_delete(auto=False) as delete:
+            to_reconcile = defaultdict(lambda: defaultdict(list))
+            with Reconciliation.bulk_delete(auto=False) as unreconcile:
+                for payment in payments:
+                    if payment.clearing_move:
+                        if payment.clearing_move.state == 'draft':
+                            delete.push(payment.clearing_move)
+                            for line in payment.clearing_move.lines:
+                                if line.reconciliation:
+                                    unreconcile.push(line.reconciliation)
+                        else:
+                            cancel_move = payment.clearing_move.cancel()
+                            for line in (payment.clearing_move.lines
+                                    + cancel_move.lines):
+                                if line.reconciliation:
+                                    unreconcile.push(line.reconciliation)
+                                if line.account.reconcile:
+                                    to_reconcile[payment.party][
+                                        line.account].append(line)
 
-        # Remove clearing_move before delete
-        # in case reconciliation triggers use it.
-        cls.write(payments, {'clearing_move': None})
+                # Remove clearing_move before delete
+                # in case reconciliation triggers use it.
+                cls.write(payments, {'clearing_move': None})
 
-        if to_unreconcile:
-            Reconciliation.delete(to_unreconcile)
-        if to_delete:
-            Move.delete(to_delete)
         for party in to_reconcile:
             for lines in to_reconcile[party].values():
                 Line.reconcile(lines)
@@ -444,12 +439,12 @@ class Group(metaclass=PoolMeta):
             column = Min(column)
         else:
             column = BoolAnd(column)
-        for sub_groups in grouped_slice(groups):
-            cursor.execute(*payment.select(
-                    payment.group, column,
-                    where=reduce_ids(payment.group, sub_groups),
-                    group_by=payment.group))
-            result.update(cursor)
+        cursor.execute(*payment.select(
+                payment.group, column,
+                where=fields.SQL_OPERATORS['in'](
+                    payment.group, map(int, groups)),
+                group_by=payment.group))
+        result.update(cursor)
         return result
 
     @classmethod

@@ -17,7 +17,7 @@ from trytond.model.exceptions import AccessError
 from trytond.modules.product import price_digits, round_price
 from trytond.pool import Pool, PoolMeta
 from trytond.pyson import Bool, Eval, If, PYSONEncoder
-from trytond.tools import decistmt, grouped_slice, reduce_ids
+from trytond.tools import decistmt
 from trytond.tools import timezone as tz
 from trytond.transaction import Transaction, without_check_access
 from trytond.wizard import (
@@ -35,14 +35,11 @@ def _find_moves(cls, records):
         field = 'product.template'
     else:
         field = 'product'
-    for sub_records in grouped_slice(records):
-        moves = Move.search([
-                (field, 'in', list(map(int, sub_records))),
-                ],
-            limit=1, order=[])
-        if moves:
-            return moves
-    return False
+    moves = Move.search([
+            (field, 'in', list(map(int, records))),
+            ],
+        limit=1, order=[])
+    return bool(moves)
 
 
 def _check_no_stock(cls, records):
@@ -91,10 +88,9 @@ def _check_no_stock(cls, records):
     locations = Location.search([('type', '=', 'storage')])
     location_ids = list(map(int, locations))
     for company in Company.search([]):
-        for sub_records in grouped_slice(records):
-            record2locations = get_record_locations(
-                company, location_ids, sub_records, grouping)
-            raise_warning(cls, company, record2locations)
+        record2locations = get_record_locations(
+            company, location_ids, records, grouping)
+        raise_warning(cls, company, record2locations)
 
 
 class Template(metaclass=PoolMeta):
@@ -116,8 +112,6 @@ class Template(metaclass=PoolMeta):
         'sum_product')
 
     def sum_product(self, name):
-        if name not in ('quantity', 'forecast_quantity', 'cost_value'):
-            raise Exception('Bad argument')
         sum_ = 0. if name != 'cost_value' else Decimal(0)
         for product in self.products:
             sum_ += getattr(product, name) or 0
@@ -279,9 +273,9 @@ class Product(StockMixin, object, metaclass=PoolMeta):
         pool = Pool()
         Move = pool.get('stock.move')
         deactivated = super().deactivate_replaced(products=products)
-        for sub_products in grouped_slice(deactivated):
+        if deactivated:
             moves = Move.search([
-                    ('product', 'in', list(map(int, sub_products))),
+                    ('product', 'in', list(map(int, deactivated))),
                     ('state', 'in', ['staging', 'draft']),
                     ])
             Move.delete(moves)
@@ -367,16 +361,14 @@ class Product(StockMixin, object, metaclass=PoolMeta):
             cost = round_price(cost)
             costs[cost].append(product)
 
-        updated = []
-        for sub_products in grouped_slice(products):
-            domain = [
-                ('unit_price_updated', '=', True),
-                cls._domain_moves_cost(),
-                ('product', 'in', [p.id for p in sub_products]),
-                ]
-            if start:
-                domain.append(('effective_date', '>=', start))
-            updated += Move.search(domain, order=[])
+        domain = [
+            ('unit_price_updated', '=', True),
+            cls._domain_moves_cost(),
+            ('product', 'in', products),
+            ]
+        if start:
+            domain.append(('effective_date', '>=', start))
+        updated = Move.search(domain, order=[])
         if updated:
             Move.write(updated, {'unit_price_updated': False})
 
@@ -675,11 +667,8 @@ class ProductQuantitiesByWarehouse(ModelSQL, ModelView):
             product = Product.__table__()
             from_ = move.join(product, condition=move.product == product.id)
             if product_template:
-                if len(product_template) > transaction.database.IN_MAX:
-                    raise AccessError(gettext(
-                            'stock.msg_product_quantities_max',
-                            max=transaction.database.IN_MAX))
-                product_clause = reduce_ids(product.template, product_template)
+                product_clause = fields.SQL_OPERATORS['in'](
+                    product.template, product_template)
             else:
                 product_clause = product.template == Null
             product_column = Concat('product.template,', product.template)
@@ -691,11 +680,8 @@ class ProductQuantitiesByWarehouse(ModelSQL, ModelView):
             if isinstance(product, int):
                 product = [product]
             if product:
-                if len(product) > transaction.database.IN_MAX:
-                    raise AccessError(gettext(
-                            'stock.msg_product_quantities_max',
-                            max=transaction.database.IN_MAX))
-                product_clause = reduce_ids(move.product, product)
+                product_clause = fields.SQL_OPERATORS['in'](
+                    move.product, product)
             else:
                 product_clause = move.product == Null
             product_column = Concat('product.product,', move.product)
@@ -730,7 +716,11 @@ class ProductQuantitiesByWarehouse(ModelSQL, ModelView):
                             warehouse.select(warehouse.id))))
                 & ((date_column < today) & (move.state == 'done')
                     | (date_column > today)),
-                group_by=(date_column, product_column, move.company),
+                group_by=[
+                    date_column.as_('date'),
+                    product_column.as_('product'),
+                    move.company.as_('company'),
+                    ],
                 with_=warehouse))
         for model, id_ in products:
             gap = ['product.template', 'product.product'].index(model) + 1
@@ -937,11 +927,8 @@ class ProductQuantitiesByWarehouseMove(ModelSQL, ModelView):
             product = Product.__table__()
             from_ = move.join(product, condition=move.product == product.id)
             if product_template:
-                if len(product_template) > transaction.database.IN_MAX:
-                    raise AccessError(gettext(
-                            'stock.msg_product_quantities_max',
-                            max=transaction.database.IN_MAX))
-                product_clause = reduce_ids(product.template, product_template)
+                product_clause = fields.SQL_OPERATORS['in'](
+                    product.template, product_template)
             else:
                 product_clause = product.template == Null
             product_column = Concat('product.template,', product.template)
@@ -952,11 +939,8 @@ class ProductQuantitiesByWarehouseMove(ModelSQL, ModelView):
             if isinstance(product, int):
                 product = [product]
             if product:
-                if len(product) > transaction.database.IN_MAX:
-                    raise AccessError(gettext(
-                            'stock.msg_product_quantities_max',
-                            max=transaction.database.IN_MAX))
-                product_clause = reduce_ids(move.product, product)
+                product_clause = fields.SQL_OPERATORS['in'](
+                    move.product, product)
             else:
                 product_clause = move.product == Null
             product_column = Concat('product.product,', move.product)
@@ -1131,17 +1115,16 @@ class RecomputeCostPrice(Wizard):
             products = []
 
         from_ = None
-        for sub_products in grouped_slice(products):
-            moves = Move.search([
-                    ('unit_price_updated', '=', True),
-                    Product._domain_moves_cost(),
-                    ('product', 'in', [p.id for p in sub_products]),
-                    ],
-                order=[('effective_date', 'ASC')],
-                limit=1)
-            if moves:
-                move, = moves
-                from_ = min(from_ or datetime.date.max, move.effective_date)
+        moves = Move.search([
+                ('unit_price_updated', '=', True),
+                Product._domain_moves_cost(),
+                ('product', 'in', products),
+                ],
+            order=[('effective_date', 'ASC')],
+            limit=1)
+        if moves:
+            move, = moves
+            from_ = min(from_ or datetime.date.max, move.effective_date)
         return {'from_': from_}
 
     def transition_recompute(self):

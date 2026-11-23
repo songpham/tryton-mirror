@@ -10,6 +10,7 @@ import threading
 import time
 import urllib.parse
 import warnings
+from collections import namedtuple
 from decimal import Decimal
 from sqlite3 import DatabaseError
 from sqlite3 import IntegrityError as DatabaseIntegrityError
@@ -32,7 +33,8 @@ from trytond.transaction import Transaction
 __all__ = [
     'Database',
     'DatabaseIntegrityError', 'DatabaseDataError', 'DatabaseOperationalError',
-    'DatabaseTimeoutError']
+    'DatabaseTimeoutError',
+    'dict_row', 'namedtuple_row', 'scalar_row']
 logger = logging.getLogger(__name__)
 
 _default_name = config.get('database', 'default_name', default=':memory:')
@@ -218,6 +220,30 @@ def _date_trunc_interval(field, source):
     return adapt_timedelta(value)
 
 
+def age(timestamp1, timestamp2=None):
+    def convert(value):
+        for fromisoformat in [
+                dt.date.fromisoformat,
+                dt.datetime.fromisoformat,
+                ]:
+            try:
+                value = fromisoformat(value)
+            except ValueError:
+                continue
+            break
+        else:
+            raise ValueError
+        if not isinstance(value, dt.datetime):
+            value = dt.datetime.combine(value, dt.time())
+        return value
+    timestamp1 = convert(timestamp1)
+    if timestamp2 is None:
+        timestamp2 = dt.datetime.combine(dt.date.today(), dt.time())
+    else:
+        timestamp1, timestamp2 = convert(timestamp2), timestamp1
+    return adapt_timedelta(timestamp2 - timestamp1)
+
+
 def split_part(text, delimiter, count):
     if text is None:
         return None
@@ -391,7 +417,11 @@ def div(a, b):
     return a // b
 
 
-def trunc(value, digits):
+def trunc(value, digits=0):
+    if isinstance(value, bytes):
+        value = value.decode()
+    if isinstance(value, str):
+        value = Decimal(value)
     return math.trunc(value * 10 ** digits) / 10 ** digits
 
 
@@ -427,8 +457,25 @@ class SQLiteCursor(sqlite.Cursor):
 
 class SQLiteConnection(sqlite.Connection):
 
-    def cursor(self):
-        return super().cursor(SQLiteCursor)
+    def cursor(self, *, row_factory=None):
+        cursor = super().cursor(SQLiteCursor)
+        cursor.row_factory = row_factory
+        return cursor
+
+
+def dict_row(cursor, row):
+    fields = [column[0] for column in cursor.description]
+    return {key: value for key, value in zip(fields, row)}
+
+
+def namedtuple_row(cursor, row):
+    fields = [column[0] for column in cursor.description]
+    cls = namedtuple("Row", fields)
+    return cls._make(row)
+
+
+def scalar_row(cursor, row):
+    return row[0]
 
 
 class Database(DatabaseInterface):
@@ -440,7 +487,6 @@ class Database(DatabaseInterface):
     flavor = Flavor(
         paramstyle='qmark', function_mapping=MAPPING,
         max_limit=-1, filter_=True)
-    IN_MAX = 200
 
     TYPES_MAPPING = {
         'BIGINT': SQLType('INTEGER', 'INTEGER'),
@@ -470,6 +516,8 @@ class Database(DatabaseInterface):
             factory=SQLiteConnection)
         self._conn.create_function('extract', 2, SQLiteExtract.extract)
         self._conn.create_function('date_trunc', 2, date_trunc)
+        self._conn.create_function('age', 1, age)
+        self._conn.create_function('age', 2, age)
         self._conn.create_function('split_part', 3, split_part)
         self._conn.create_function('to_char', 2, to_char)
         self._conn.create_function('now', 0, now)
@@ -493,7 +541,7 @@ class Database(DatabaseInterface):
         self._conn.create_function('radians', 1, math.radians)
         self._conn.create_function('sign', 1, sign)
         self._conn.create_function('sqrt', 1, math.sqrt)
-        self._conn.create_function('trunc', 1, math.trunc)
+        self._conn.create_function('trunc', 1, trunc)
         self._conn.create_function('trunc', 2, trunc)
 
         # Trigonomentric functions
@@ -544,7 +592,8 @@ class Database(DatabaseInterface):
             db_path = safe_join(
                 config.get('database', 'path'), self.name + '.sqlite')
             if not os.path.isfile(db_path):
-                raise IOError("Database '%s' doesn't exist!" % db_path)
+                raise DatabaseOperationalError(
+                    f"Database '{db_path}' doesn't exist!")
             db_uri = base_uri._replace(path=db_path)
 
         # Use unparse before replacing sqlite with file because SQLite accepts
@@ -563,16 +612,12 @@ class Database(DatabaseInterface):
             self._conn.isolation_level = 'IMMEDIATE'
         return self._conn
 
-    def put_connection(self, connection=None, close=False):
+    def put_connection(self, connection=None):
         assert connection == self._conn or self._conn is None
-        if self.name == ':memory:':
-            if (self._local.memory_database._conn is None
-                    and connection and close):
-                connection.close()
-                self._conn = None
-        elif close:
+        if (self.name == ':memory:'
+                and connection
+                and self._local.memory_database._conn is None):
             connection.close()
-            self._conn = None
 
     def close(self):
         if self.name == ':memory:':
@@ -594,8 +639,8 @@ class Database(DatabaseInterface):
             path = os.path.join(config.get('database', 'path'),
                     database_name + '.sqlite')
         with sqlite.connect(path) as conn:
-            cursor = conn.cursor()
-            cursor.close()
+            conn.cursor()
+        conn.close()
         cls._list_cache.clear()
 
     @classmethod
@@ -742,7 +787,7 @@ class Database(DatabaseInterface):
 
     def estimated_count(self, connection, table):
         cursor = connection.cursor()
-        cursor.execute(*table.select(Count(Literal('*'))))
+        cursor.execute(*table.select(Count()))
         return cursor.fetchone()[0]
 
     @classmethod

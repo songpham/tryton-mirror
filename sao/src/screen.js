@@ -52,7 +52,7 @@
                 'aria-label': Sao.i18n.gettext("Clear Search"),
                 'title': Sao.i18n.gettext("Clear Search"),
             }).append(Sao.common.ICONFACTORY.get_icon_img('tryton-clear'));
-            but_clear.hide();
+            but_clear.sao_hide();
             but_clear.click(() => {
                 this.search_entry.val('').change();
                 this.do_search();
@@ -60,9 +60,9 @@
 
             this.search_entry.on('keyup change', () => {
                 if (this.search_entry.val()) {
-                    but_clear.show();
+                    but_clear.sao_show();
                 } else {
-                    but_clear.hide();
+                    but_clear.sao_hide();
                 }
                 this.bookmark_match();
             });
@@ -226,6 +226,12 @@
             window.setTimeout(() => {
                 this.search_entry.focus();
             }, 0);
+        },
+        disable: function() {
+            this.el.get(0).inert = true;
+        },
+        enable: function() {
+            this.el.get(0).inert = false;
         },
         set_text: function(value) {
             this.search_entry.val(value);
@@ -400,15 +406,15 @@
             this.but_bookmark.prop(
                 'disabled', jQuery.isEmptyObject(this.bookmarks()));
             this.bookmark_match();
-            this.filter_box.show();
+            this.filter_box.sao_show();
             if (this.tab) {
-                this.tab.show();
+                this.tab.sao_show();
             }
         },
         hide_filter: function() {
-            this.filter_box.hide();
+            this.filter_box.sao_hide();
             if (this.tab) {
-                this.tab.hide();
+                this.tab.sao_hide();
             }
         },
         set: function(widget) {
@@ -464,7 +470,7 @@
                 for (var f in domain_parser.fields) {
                     const field = domain_parser.fields[f];
                     if ((field.searchable || field.searchable === undefined) &&
-                        !field.name.contains('.')) {
+                        !field.name.includes('.')) {
                         fields.push(field);
                     }
                 }
@@ -501,8 +507,14 @@
                             break;
                         case 'selection':
                         case 'multiselection':
+                            var selection = jQuery.extend([], field.selection);
+                            if (field.sort === undefined || field.sort) {
+                                selection.sort(function(a, b) {
+                                    return a[1].localeCompare(b[1]);
+                                });
+                            }
                             entry = new Sao.ScreenContainer.Selection(
-                                    field.selection, prefix + field.name);
+                                    selection, prefix + field.name);
                             input = entry.el;
                             input.prop('size', field.selection.length);
                             break;
@@ -736,9 +748,9 @@
             build_entry: function(placeholder, el) {
                 var entry = Sao.ScreenContainer.Times._super.build_entry.call(
                     this, placeholder, el);
-                if (~navigator.userAgent.indexOf("Firefox")) {
+                if (navigator.userAgent.includes("Firefox")) {
                     // time input on Firefox does not have a pop-up
-                    entry.find('.icon-input').hide();
+                    entry.find('.icon-input').sao_hide();
                 }
                 return entry;
             },
@@ -754,7 +766,7 @@
                 'class': 'form-control input-sm',
                 'type': 'number',
                 'step': 'any',
-                'lang': Sao.i18n.getlang(),
+                'lang': Sao.i18n.BC47(Sao.i18n.getlang()),
             }).appendTo(el);
             return entry;
         },
@@ -830,10 +842,12 @@
             this._current_domain = [];
             this.offset = 0;
             this.order = this.default_order = attributes.order;
-            this.readonly = this.attributes.readonly || false;
+            this.screen_readonly = this.attributes.readonly || false;
             var access = Sao.common.MODELACCESS.get(model_name);
             if (!(access.write || access.create)) {
                 this.readonly = true;
+            } else {
+                this.readonly = this.screen_readonly;
             }
             this.search_count = 0;
             this.new_group(attributes.context || {});
@@ -983,7 +997,7 @@
             if (this.current_view) {
                 this.current_view.set_value();
                 if (this.current_record &&
-                        !~this.current_record.group.indexOf(
+                        !this.current_record.group.includes(
                             this.current_record)) {
                     this.current_record = null;
                 }
@@ -1011,8 +1025,8 @@
                     result &= this.current_view.creatable == creatable;
                 }
                 if (searchable !== null) {
-                    result &= Boolean(~['tree', 'graph', 'calendar'].indexOf(
-                        this.current_view.view_type)) == searchable;
+                    result &= ['tree', 'graph', 'calendar'].includes(
+                        this.current_view.view_type) == searchable;
                 }
                 return result;
             };
@@ -1350,9 +1364,13 @@
             });
         },
         get current_record() {
+            if (this.__current_record && this.__current_record.destroyed) {
+                this.__current_record = null;
+            }
             return this.__current_record;
         },
         set current_record(record) {
+            let changed = this.__current_record !== record;
             this.__current_record = record;
             var pos = null;
             var record_id = null;
@@ -1368,15 +1386,22 @@
             this.record_message(
                 pos || 0, this.group.length + this.offset, this.search_count,
                 record_id);
-            if (this.switch_callback) {
-                this.switch_callback();
-            }
-            if (this.has_update_resources()) {
-                if (record) {
-                    record.get_resources().always(
-                        this.update_resources.bind(this));
-                } else {
-                    this.update_resources();
+            if (changed) {
+                for (let window_ of this.windows) {
+                    if (window_.record_changed) {
+                        window_.record_changed();
+                    }
+                }
+                if (this.switch_callback) {
+                    this.switch_callback();
+                }
+                if (this.has_update_resources()) {
+                    if (record) {
+                        record.get_resources().always(
+                            this.update_resources.bind(this));
+                    } else {
+                        this.update_resources();
+                    }
                 }
             }
         },
@@ -1392,8 +1417,8 @@
             var deferreds = [];
             if (this.views && this.current_view) {
                 var search_prm = this.search_active(
-                        ~['tree', 'graph', 'calendar'].indexOf(
-                            this.current_view.view_type));
+                    ['tree', 'graph', 'calendar'].includes(
+                        this.current_view.view_type));
                 deferreds.push(search_prm);
                 for (const view of this.views) {
                     if (view &&
@@ -1406,18 +1431,19 @@
                     let view_tree = this.fields_view_tree[
                         this.current_view.view_id] || {};
                     if ('active' in view_tree.fields) {
-                        this.screen_container.but_active.show();
+                        this.screen_container.but_active.sao_show();
                     } else {
-                        this.screen_container.but_active.hide();
+                        this.screen_container.but_active.sao_hide();
                     }
                 } else {
-                    this.screen_container.but_active.hide();
+                    this.screen_container.but_active.sao_hide();
                 }
             }
             return jQuery.when.apply(jQuery, deferreds).then(
                 () => this.set_tree_state().then(() => {
                     var record = this.current_record
                     this.current_record = record;
+                    this.screen_container.enable();
                     // set_cursor must be called after set_tree_state because
                     // set_tree_state redraws the tree
                     if (set_cursor) {
@@ -1428,7 +1454,7 @@
         _get_next_record: function() {
             var view = this.current_view;
             if (view &&
-                ~['tree', 'form', 'list-form'].indexOf(view.view_type) &&
+                ['tree', 'form', 'list-form'].includes(view.view_type) &&
                 this.current_record && this.current_record.group) {
                 var group = this.current_record.group;
                 var record = this.current_record;
@@ -1457,19 +1483,23 @@
                 (next_record !== this.current_record);
         },
         display_next: function() {
+            this.screen_container.disable();
             var view = this.current_view;
             if (view) {
                 view.set_value();
             }
             this.set_cursor(false, false);
             this.current_record = this._get_next_record();
-            this.set_cursor(false, false);
-            return view ? view.display() : jQuery.when();
+            return (view ? view.display() : jQuery.when()).then(
+                () => {
+                    this.screen_container.enable();
+                    this.set_cursor(false, false);
+                });
         },
         _get_previous_record: function() {
             var view = this.current_view;
             if (view &&
-                ~['tree', 'form', 'list-form'].indexOf(view.view_type) &&
+                ['tree', 'form', 'list-form'].includes(view.view_type) &&
                 this.current_record && this.current_record.group) {
                 var group = this.current_record.group;
                 var record = this.current_record;
@@ -1498,14 +1528,18 @@
                 (previous_record !== this.current_record);
         },
         display_previous: function() {
+            this.screen_container.disable();
             var view = this.current_view;
             if (view) {
                 view.set_value();
             }
             this.set_cursor(false, false);
             this.current_record = this._get_previous_record();
-            this.set_cursor(false, false);
-            return view ? view.display() : jQuery.when();
+            return (view ? view.display() : jQuery.when()).then(
+                () => {
+                    this.screen_container.enable();
+                    this.set_cursor(false, false);
+                });
         },
         get selected_records() {
             if (this.current_view) {
@@ -1522,7 +1556,7 @@
         },
         get listed_records() {
             if (this.current_view &&
-                ~['tree', 'calendar', 'list-form'].indexOf(
+                ['tree', 'calendar', 'list-form'].includes(
                     this.current_view.view_type)) {
                 return this.current_view.listed_records;
             } else if (this.current_record) {
@@ -1569,7 +1603,7 @@
                 return this.current_record.id;
             }
         },
-        new_: function(default_=true, defaults=null) {
+        new_: function(default_=true, defaults=null, display=true) {
             var previous_view = this.current_view;
             var prm = jQuery.when();
             if (this.current_view &&
@@ -1602,10 +1636,14 @@
                     if (previous_view.view_type == 'calendar') {
                         previous_view.set_default_date(record, selected_date);
                     }
-                    return this.display().then(() => {
-                        this.set_cursor(true, true);
+                    if (display) {
+                        return this.display().then(() => {
+                            this.set_cursor(true, true);
+                            return record;
+                        });
+                    } else {
                         return record;
-                    });
+                    }
                 });
             });
         },
@@ -1637,19 +1675,20 @@
         },
         set_on_write: function(name) {
             if(name) {
-                if (!~this.group.on_write.indexOf(name)) {
+                if (!this.group.on_write.includes(name)) {
                     this.group.on_write.push(name);
                 }
             }
         },
         cancel_current: function(initial_value) {
+            this.screen_container.disable();
             var prms = [];
             if (this.current_record) {
                 this.current_record.cancel();
                 if (this.current_record.id < 0) {
                     if (initial_value) {
                         this.current_record.reset(initial_value);
-                        this.display();
+                        prms.push(this.display());
                     } else {
                         prms.push(this.remove(
                             false, false, false, [this.current_record]));
@@ -1675,6 +1714,7 @@
                 this.current_view.set_value();
                 var fields = this.current_view.get_fields();
             }
+            this.screen_container.disable();
             var path = current_record.get_path(this.group);
             var prm = jQuery.Deferred();
             if (this.current_view && (this.current_view.view_type == 'tree')) {
@@ -1683,6 +1723,7 @@
                 prm = current_record.save().then(() => current_record);
             } else if (this.current_view) {
                 return this.current_view.display().then(() => {
+                    this.screen_container.enable();
                     this.set_cursor();
                     return jQuery.Deferred().reject();
                 });
@@ -1709,8 +1750,8 @@
         set_cursor: function(new_, reset_view) {
             if (!this.current_view) {
                 return;
-            } else if (~['tree', 'form', 'list-form'].indexOf(
-                    this.current_view.view_type)) {
+            } else if (['tree', 'form', 'list-form']
+                .includes(this.current_view.view_type)) {
                 this.current_view.set_cursor(new_, reset_view);
             }
         },
@@ -1767,11 +1808,11 @@
                         if (record.group.parent) {
                             prms.push(record.group.parent.save(false));
                         }
-                        if (~record.group.record_deleted.indexOf(record)) {
+                        if (record.group.record_deleted.includes(record)) {
                             record.group.record_deleted.splice(
                                 record.group.record_deleted.indexOf(record), 1);
                         }
-                        if (~record.group.record_removed.indexOf(record)) {
+                        if (record.group.record_removed.includes(record)) {
                             record.group.record_removed.splice(
                                 record.group.record_removed.indexOf(record), 1);
                         }
@@ -1994,6 +2035,7 @@
             return this.current_record.get_on_change_value();
         },
         reload: function(ids, written) {
+            this.screen_container.disable();
             this.group.reload(ids);
             var promises = [];
             if (written) {
@@ -2003,13 +2045,13 @@
                 promises.push(this.group.parent.root_parent.reload());
             }
             return jQuery.when.apply(jQuery, promises).then(() => {
-                return this.display();
+                return this.display(true);
             });
         },
         get_buttons: function() {
             var selected_records = (
                 this.current_view ? this.current_view.selected_records : []);
-            if (jQuery.isEmptyObject(selected_records)) {
+            if (jQuery.isEmptyObject(selected_records) || this.screen_readonly) {
                 return [];
             }
             var buttons = (
@@ -2035,14 +2077,13 @@
                     });
                 }
                 else if (action) {
-                    return Sao.Action.execute(action, {
+                    Sao.Action.execute(action, {
                         model: this.model_name,
                         id: this.current_record.id,
                         ids: ids
-                    }, null, this.context, true).always(() => {
-                        return this.reload(ids, true)
-                            .always(() => this.record_saved());
-                    });
+                    }, null, this.context, true);
+                    return this.reload(ids, true)
+                        .always(() => this.record_saved());
                 } else {
                     return this.reload(ids, true)
                         .always(() => this.record_saved());
@@ -2106,6 +2147,8 @@
                             .fail(() => this.reload(ids, true));
                     });
                 }
+            }, () => {
+                this.display();
             });
         },
         client_action: function(action) {
@@ -2138,9 +2181,9 @@
                 return this.switch_view.apply(this, action.split(' ', 3).slice(1));
             } else if (action == 'reload') {
                 if (this.current_view && 
-                    ~['tree', 'graph', 'calendar'].indexOf(this.current_view.view_type) &&
+                    ['tree', 'graph', 'calendar'].includes(this.current_view.view_type) &&
                     !this.group.parent) {
-                    return this.search_filter();
+                    return this.search_filter(this.screen_container.get_text());
                 }
             } else if (action == 'reload menu') {
                 return Sao.Session.current_session.reload_context()
@@ -2158,6 +2201,10 @@
             var query_string = [];
             if (!jQuery.isEmptyObject(this.domain)) {
                 query_string.push(['domain', dumps(this.domain)]);
+            }
+            if (!jQuery.isEmptyObject(this.context_domain)) {
+                query_string.push(
+                    ['context_domain', this.context_domain]);
             }
             var context = this.local_context;  // Avoid rpc context
             if (!jQuery.isEmptyObject(context)) {
@@ -2245,7 +2292,7 @@
                             view.children_field || null] = [
                                 [], [[this.current_record.id]]];
                     }
-                } else if (~['tree', 'list-form'].indexOf(view.view_type)) {
+                } else if (['tree', 'list-form'].includes(view.view_type)) {
                     var paths;
                     if (view.view_type == 'tree') {
                         view.save_width();
@@ -2298,18 +2345,18 @@
             if (!view) {
                 return jQuery.when();
             }
-            if (!~['tree', 'form', 'list-form'].indexOf(view.view_type)) {
+            if (!['tree', 'form', 'list-form'].includes(view.view_type)) {
                 return jQuery.when();
             }
 
-            if (~this.tree_states_done.indexOf(view)) {
+            if (this.tree_states_done.includes(view)) {
                 return jQuery.when();
             }
             if (view.view_type == 'form' &&
                     !jQuery.isEmptyObject(this.tree_states_done)) {
                 return jQuery.when();
             }
-            if ((~['tree', 'list-form'].indexOf(view.view_type)) &&
+            if ((['tree', 'list-form'].includes(view.view_type)) &&
                 !parseInt(view.attributes.tree_state, 10)) {
                 this.tree_states_done.push(view);
             }

@@ -11,7 +11,7 @@ from tryton.common import get_toplevel_window
 from tryton.config import CONFIG, PIXMAPS_DIR
 
 COPYRIGHT = '''\
-Copyright (C) 2004-2025 Tryton.
+Copyright (C) 2004-2026 Tryton.
 '''
 AUTHORS = [
         'Bertrand Chenal <bertrand.chenal@b2ck.com>',
@@ -19,7 +19,7 @@ AUTHORS = [
         'Franz Wiesinger',
         'Hartmut Goebel',
         'Korbinian Preisler <info@virtual-things.biz>',
-        'Mathias Behrle <info@m9s.biz>',
+        'Mathias Behrle <mbehrle@m9s.biz>',
         'Maxime Richez <maxime.richez@saluc.com>',
         'Nicolas Évrard <nicolas.evrard@b2ck.com>',
         'Sednacom <contact@sednacom.fr>',

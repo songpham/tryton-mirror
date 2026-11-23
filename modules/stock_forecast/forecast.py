@@ -18,7 +18,6 @@ from trytond.pool import Pool
 from trytond.pyson import Bool, Eval, If
 from trytond.sql.functions import DateRange
 from trytond.sql.operators import RangeOverlap
-from trytond.tools import grouped_slice, reduce_ids
 from trytond.transaction import Transaction
 from trytond.wizard import Button, StateTransition, StateView, Wizard
 
@@ -33,7 +32,8 @@ class Forecast(Workflow, ModelSQL, ModelView, ChatMixin):
     warehouse = fields.Many2One(
         'stock.location', 'Location', required=True,
         domain=[('type', '=', 'warehouse')], states={
-            'readonly': (Eval('state') != 'draft') | Eval('lines', [0]),
+            'readonly': Eval('state') != 'draft',
+            'editable': ~Eval('lines', [0]),
             })
     destination = fields.Many2One(
         'stock.location', 'Destination', required=True,
@@ -50,7 +50,8 @@ class Forecast(Workflow, ModelSQL, ModelView, ChatMixin):
         'stock.forecast.line', 'forecast', 'Lines', states=_states)
     company = fields.Many2One(
         'company.company', 'Company', required=True, states={
-            'readonly': (Eval('state') != 'draft') | Eval('lines', [0]),
+            'readonly': Eval('state') != 'draft',
+            'editable': ~Eval('lines', [0]),
             })
     state = fields.Selection([
             ('draft', "Draft"),
@@ -220,12 +221,12 @@ class Forecast(Workflow, ModelSQL, ModelView, ChatMixin):
         'Create stock moves for the forecast ids'
         pool = Pool()
         Move = pool.get('stock.move')
-        to_save = []
-        for forecast in forecasts:
-            if forecast.state == 'done':
-                for line in forecast.lines:
-                    to_save.extend(line.get_moves())
-        Move.save(to_save)
+
+        with Move.bulk_save() as save:
+            for forecast in forecasts:
+                if forecast.state == 'done':
+                    for line in forecast.lines:
+                        save.extend(line.get_moves())
 
     @staticmethod
     def delete_moves(forecasts):
@@ -355,31 +356,30 @@ class ForecastLine(ModelSQL, ModelView):
         for forecast_id, lines in itertools.groupby(lines, key):
             forecast = Forecast(forecast_id)
             product2line = dict((line.product.id, line) for line in lines)
-            product_ids = product2line.keys()
-            for sub_ids in grouped_slice(product_ids):
-                red_sql = reduce_ids(move.product, sub_ids)
-                cursor.execute(*move.join(location_from,
-                        condition=move.from_location == location_from.id
-                        ).join(location_to,
-                        condition=move.to_location == location_to.id
-                        ).select(move.product, Sum(move.internal_quantity),
-                        where=red_sql
-                        & (location_from.left >= forecast.warehouse.left)
-                        & (location_from.right <= forecast.warehouse.right)
-                        & (location_to.left >= forecast.destination.left)
-                        & (location_to.right <= forecast.destination.right)
-                        & (move.state != 'cancelled')
-                        & (Coalesce(move.effective_date, move.planned_date)
-                            >= forecast.from_date)
-                        & (Coalesce(move.effective_date, move.planned_date)
-                            <= forecast.to_date)
-                        & ((move.origin == Null)
-                            | ~move.origin.like('stock.forecast.line,%')),
-                        group_by=move.product))
-                for product_id, quantity in cursor:
-                    line = product2line[product_id]
-                    result[line.id] = Uom.compute_qty(
-                        line.product.default_uom, quantity, line.unit)
+            where = fields.SQL_OPERATORS['in'](
+                move.product, product2line.keys())
+            cursor.execute(*move.join(location_from,
+                    condition=move.from_location == location_from.id
+                    ).join(location_to,
+                    condition=move.to_location == location_to.id
+                    ).select(move.product, Sum(move.internal_quantity),
+                    where=where
+                    & (location_from.left >= forecast.warehouse.left)
+                    & (location_from.right <= forecast.warehouse.right)
+                    & (location_to.left >= forecast.destination.left)
+                    & (location_to.right <= forecast.destination.right)
+                    & (move.state != 'cancelled')
+                    & (Coalesce(move.effective_date, move.planned_date)
+                        >= forecast.from_date)
+                    & (Coalesce(move.effective_date, move.planned_date)
+                        <= forecast.to_date)
+                    & ((move.origin == Null)
+                        | ~move.origin.like('stock.forecast.line,%')),
+                    group_by=move.product))
+            for product_id, quantity in cursor:
+                line = product2line[product_id]
+                result[line.id] = Uom.compute_qty(
+                    line.product.default_uom, quantity, line.unit)
         return result
 
     @classmethod
@@ -535,14 +535,13 @@ class ForecastComplete(Wizard):
         ForecastLine = pool.get('stock.forecast.line')
 
         product2line = {l.product: l for l in self.record.lines}
-        to_save = []
         # Ensure context is set
         self.ask.products = map(int, self.ask.products)
-        for product in self.ask.products:
-            line = product2line.get(product, ForecastLine())
-            self._fill_line(line, product)
-            to_save.append(line)
-        ForecastLine.save(to_save)
+        with ForecastLine.bulk_save() as save:
+            for product in self.ask.products:
+                line = product2line.get(product, ForecastLine())
+                self._fill_line(line, product)
+                save.push(line)
         return 'end'
 
     def _fill_line(self, line, product):

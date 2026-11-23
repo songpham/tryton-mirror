@@ -1,4 +1,4 @@
-<?xml version="1.0"?>
+<?xml version="1.0" encoding="utf-8"?>
 <!-- This file is part of Tryton.  The COPYRIGHT file at the top level of
 this repository contains the full copyright notices and license terms. -->
 <tryton>
@@ -38,6 +38,9 @@ this repository contains the full copyright notices and license terms. -->
             <field name="invoice_account" ref="451"/>
             <field name="credit_note_account" ref="451"/>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">AE</field>
+            <field name="vatex_code">VATEX-EU-AE</field>
         </record>
 
         <record model="account.tax.template" id="tva_vente_biens_intracommunautaires_0">
@@ -51,6 +54,9 @@ this repository contains the full copyright notices and license terms. -->
             <field name="credit_note_account" ref="451"/>
             <field name="ec_sales_list_code">L</field>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">K</field>
+            <field name="vatex_code">VATEX-EU-IC</field>
         </record>
 
         <record model="account.tax.template" id="tva_vente_biens_hors_communaute_0">
@@ -63,6 +69,9 @@ this repository contains the full copyright notices and license terms. -->
             <field name="invoice_account" ref="451"/>
             <field name="credit_note_account" ref="451"/>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">G</field>
+            <field name="vatex_code">VATEX-EU-G</field>
         </record>
 
         <record model="account.tax.template" id="tva_vente_biens_0">
@@ -75,6 +84,8 @@ this repository contains the full copyright notices and license terms. -->
             <field name="invoice_account" ref="451"/>
             <field name="credit_note_account" ref="451"/>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">Z</field>
         </record>
 
         <record model="account.tax.template" id="tva_vente_biens_6">
@@ -87,6 +98,8 @@ this repository contains the full copyright notices and license terms. -->
             <field name="invoice_account" ref="451"/>
             <field name="credit_note_account" ref="451"/>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">S</field>
         </record>
 
         <record model="account.tax.template" id="tva_vente_biens_12">
@@ -99,6 +112,8 @@ this repository contains the full copyright notices and license terms. -->
             <field name="invoice_account" ref="451"/>
             <field name="credit_note_account" ref="451"/>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">S</field>
         </record>
 
         <record model="account.tax.template" id="tva_vente_biens_21">
@@ -111,6 +126,8 @@ this repository contains the full copyright notices and license terms. -->
             <field name="invoice_account" ref="451"/>
             <field name="credit_note_account" ref="451"/>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">S</field>
         </record>
 
         <record model="account.tax.template" id="tva_vente_services_coco">
@@ -123,6 +140,9 @@ this repository contains the full copyright notices and license terms. -->
             <field name="invoice_account" ref="451"/>
             <field name="credit_note_account" ref="451"/>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">AE</field>
+            <field name="vatex_code">VATEX-EU-AE</field>
         </record>
 
         <record model="account.tax.template" id="tva_vente_services_intracommunautaires_0">
@@ -136,6 +156,9 @@ this repository contains the full copyright notices and license terms. -->
             <field name="credit_note_account" ref="451"/>
             <field name="ec_sales_list_code">S</field>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">K</field>
+            <field name="vatex_code">VATEX-EU-IC</field>
         </record>
 
         <record model="account.tax.template" id="tva_vente_services_hors_communaute_0">
@@ -148,6 +171,23 @@ this repository contains the full copyright notices and license terms. -->
             <field name="invoice_account" ref="451"/>
             <field name="credit_note_account" ref="451"/>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">G</field>
+            <field name="vatex_code">VATEX-EU-G</field>
+        </record>
+
+        <record model="account.tax.template" id="tva_vente_services_0">
+            <field name="name" lang="fr">T.V.A. Vente de services 0%</field>
+            <field name="name" lang="nl">BTW 0% Verkoop van diensten</field>
+            <field name="description">T.V.A. 0%</field>
+            <field name="group" ref="group_tva_vente_services"/>
+            <field name="rate" eval="Decimal('0')"/>
+            <field name="type">percentage</field>
+            <field name="invoice_account" ref="451"/>
+            <field name="credit_note_account" ref="451"/>
+            <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">Z</field>
         </record>
 
         <record model="account.tax.template" id="tva_vente_services_6">
@@ -160,6 +200,8 @@ this repository contains the full copyright notices and license terms. -->
             <field name="invoice_account" ref="451"/>
             <field name="credit_note_account" ref="451"/>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">S</field>
         </record>
 
         <record model="account.tax.template" id="tva_vente_services_12">
@@ -172,6 +214,8 @@ this repository contains the full copyright notices and license terms. -->
             <field name="invoice_account" ref="451"/>
             <field name="credit_note_account" ref="451"/>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">S</field>
         </record>
 
         <record model="account.tax.template" id="tva_vente_services_21">
@@ -184,6 +228,8 @@ this repository contains the full copyright notices and license terms. -->
             <field name="invoice_account" ref="451"/>
             <field name="credit_note_account" ref="451"/>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">S</field>
         </record>
 
         <record model="account.tax.template" id="tva_achat_marchandises_intracommunautaires_0">
@@ -196,6 +242,9 @@ this repository contains the full copyright notices and license terms. -->
             <field name="invoice_account" ref="411"/>
             <field name="credit_note_account" ref="411"/>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">K</field>
+            <field name="vatex_code">VATEX-EU-IC</field>
         </record>
 
         <record model="account.tax.template" id="tva_achat_marchandises_coco_6">
@@ -205,6 +254,9 @@ this repository contains the full copyright notices and license terms. -->
             <field name="group" ref="group_tva_achat"/>
             <field name="type">none</field>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">AE</field>
+            <field name="vatex_code">VATEX-EU-AE</field>
         </record>
 
         <record model="account.tax.template" id="tva_achat_marchandises_coco_6_1">
@@ -271,6 +323,9 @@ this repository contains the full copyright notices and license terms. -->
             <field name="group" ref="group_tva_achat"/>
             <field name="type">none</field>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">AE</field>
+            <field name="vatex_code">VATEX-EU-AE</field>
         </record>
 
         <record model="account.tax.template" id="tva_achat_marchandises_coco_21_1">
@@ -307,6 +362,8 @@ this repository contains the full copyright notices and license terms. -->
             <field name="invoice_account" ref="411"/>
             <field name="credit_note_account" ref="411"/>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">S</field>
         </record>
 
         <record model="account.tax.template" id="tva_achat_marchandises_intracommunautaires_6">
@@ -316,6 +373,9 @@ this repository contains the full copyright notices and license terms. -->
             <field name="group" ref="group_tva_achat"/>
             <field name="type">none</field>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">K</field>
+            <field name="vatex_code">VATEX-EU-IC</field>
         </record>
 
         <record model="account.tax.template" id="tva_achat_marchandises_intracommunautaires_6_1">
@@ -349,6 +409,8 @@ this repository contains the full copyright notices and license terms. -->
             <field name="group" ref="group_tva_achat"/>
             <field name="type">none</field>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">S</field>
         </record>
 
         <record model="account.tax.template" id="tva_achat_marchandises_12_1">
@@ -382,6 +444,9 @@ this repository contains the full copyright notices and license terms. -->
             <field name="group" ref="group_tva_achat"/>
             <field name="type">none</field>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">K</field>
+            <field name="vatex_code">VATEX-EU-IC</field>
         </record>
 
         <record model="account.tax.template" id="tva_achat_marchandises_intracommunautaires_12_1">
@@ -415,6 +480,8 @@ this repository contains the full copyright notices and license terms. -->
             <field name="group" ref="group_tva_achat"/>
             <field name="type">none</field>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">S</field>
         </record>
 
         <record model="account.tax.template" id="tva_achat_marchandises_21_1">
@@ -448,6 +515,9 @@ this repository contains the full copyright notices and license terms. -->
             <field name="group" ref="group_tva_achat"/>
             <field name="type">none</field>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">K</field>
+            <field name="vatex_code">VATEX-EU-IC</field>
         </record>
 
         <record model="account.tax.template" id="tva_achat_marchandises_intracommunautaires_21_1">
@@ -484,6 +554,9 @@ this repository contains the full copyright notices and license terms. -->
             <field name="invoice_account" ref="411"/>
             <field name="credit_note_account" ref="411"/>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">K</field>
+            <field name="vatex_code">VATEX-EU-IC</field>
         </record>
 
         <record model="account.tax.template" id="tva_achat_frais_biens_coco_6">
@@ -493,6 +566,9 @@ this repository contains the full copyright notices and license terms. -->
             <field name="group" ref="group_tva_achat"/>
             <field name="type">none</field>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">AE</field>
+            <field name="vatex_code">VATEX-EU-AE</field>
         </record>
 
         <record model="account.tax.template" id="tva_achat_frais_biens_coco_6_1">
@@ -526,6 +602,9 @@ this repository contains the full copyright notices and license terms. -->
             <field name="group" ref="group_tva_achat"/>
             <field name="type">none</field>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">AE</field>
+            <field name="vatex_code">VATEX-EU-AE</field>
         </record>
 
         <record model="account.tax.template" id="tva_achat_frais_biens_coco_12_1">
@@ -559,6 +638,9 @@ this repository contains the full copyright notices and license terms. -->
             <field name="group" ref="group_tva_achat"/>
             <field name="type">none</field>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">AE</field>
+            <field name="vatex_code">VATEX-EU-AE</field>
         </record>
 
         <record model="account.tax.template" id="tva_achat_frais_biens_coco_21_1">
@@ -585,6 +667,20 @@ this repository contains the full copyright notices and license terms. -->
             <field name="account" ref="root"/>
         </record>
 
+        <record model="account.tax.template" id="tva_achat_frais_biens_0">
+            <field name="name" lang="fr">T.V.A. Achat de services et biens divers déductibles 0%</field>
+            <field name="name" lang="nl">BTW 0% Aankoop van diverse goederen en diensten</field>
+            <field name="description">T.V.A. 0%</field>
+            <field name="group" ref="group_tva_achat"/>
+            <field name="rate" eval="Decimal('0')"/>
+            <field name="type">percentage</field>
+            <field name="invoice_account" ref="411"/>
+            <field name="credit_note_account" ref="411"/>
+            <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">Z</field>
+        </record>
+
         <record model="account.tax.template" id="tva_achat_frais_biens_6">
             <field name="name" lang="fr">T.V.A. Achat de services et biens divers déductibles 6%</field>
             <field name="name" lang="nl">BTW 6% Aankoop van diverse goederen en diensten</field>
@@ -604,6 +700,9 @@ this repository contains the full copyright notices and license terms. -->
             <field name="group" ref="group_tva_achat"/>
             <field name="type">none</field>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">K</field>
+            <field name="vatex_code">VATEX-EU-IC</field>
         </record>
 
         <record model="account.tax.template" id="tva_achat_frais_biens_intracommunautaires_6_1">
@@ -640,6 +739,8 @@ this repository contains the full copyright notices and license terms. -->
             <field name="invoice_account" ref="411"/>
             <field name="credit_note_account" ref="411"/>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">S</field>
         </record>
 
         <record model="account.tax.template" id="tva_achat_frais_biens_intracommunautaires_12">
@@ -649,6 +750,9 @@ this repository contains the full copyright notices and license terms. -->
             <field name="group" ref="group_tva_achat"/>
             <field name="type">none</field>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">K</field>
+            <field name="vatex_code">VATEX-EU-IC</field>
         </record>
 
         <record model="account.tax.template" id="tva_achat_frais_biens_intracommunautaires_12_1">
@@ -685,6 +789,8 @@ this repository contains the full copyright notices and license terms. -->
             <field name="invoice_account" ref="411"/>
             <field name="credit_note_account" ref="411"/>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">S</field>
         </record>
 
         <record model="account.tax.template" id="tva_achat_frais_biens_intracommunautaires_21">
@@ -694,6 +800,9 @@ this repository contains the full copyright notices and license terms. -->
             <field name="group" ref="group_tva_achat"/>
             <field name="type">none</field>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">K</field>
+            <field name="vatex_code">VATEX-EU-IC</field>
         </record>
 
         <record model="account.tax.template" id="tva_achat_frais_biens_intracommunautaires_21_1">
@@ -730,6 +839,9 @@ this repository contains the full copyright notices and license terms. -->
             <field name="invoice_account" ref="411"/>
             <field name="credit_note_account" ref="411"/>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">K</field>
+            <field name="vatex_code">VATEX-EU-IC</field>
         </record>
 
         <record model="account.tax.template" id="tva_achat_investissement_coco_6">
@@ -739,6 +851,9 @@ this repository contains the full copyright notices and license terms. -->
             <field name="group" ref="group_tva_achat"/>
             <field name="type">none</field>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">AE</field>
+            <field name="vatex_code">VATEX-EU-AE</field>
         </record>
 
         <record model="account.tax.template" id="tva_achat_investissement_coco_6_1">
@@ -772,6 +887,9 @@ this repository contains the full copyright notices and license terms. -->
             <field name="group" ref="group_tva_achat"/>
             <field name="type">none</field>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">AE</field>
+            <field name="vatex_code">VATEX-EU-AE</field>
         </record>
 
         <record model="account.tax.template" id="tva_achat_investissement_coco_12_1">
@@ -805,6 +923,9 @@ this repository contains the full copyright notices and license terms. -->
             <field name="group" ref="group_tva_achat"/>
             <field name="type">none</field>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">AE</field>
+            <field name="vatex_code">VATEX-EU-AE</field>
         </record>
 
         <record model="account.tax.template" id="tva_achat_investissement_coco_21_1">
@@ -841,6 +962,8 @@ this repository contains the full copyright notices and license terms. -->
             <field name="invoice_account" ref="411"/>
             <field name="credit_note_account" ref="411"/>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">S</field>
         </record>
 
         <record model="account.tax.template" id="tva_achat_investissement_intracommunautaires_6">
@@ -850,6 +973,9 @@ this repository contains the full copyright notices and license terms. -->
             <field name="group" ref="group_tva_achat"/>
             <field name="type">none</field>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">K</field>
+            <field name="vatex_code">VATEX-EU-IC</field>
         </record>
 
         <record model="account.tax.template" id="tva_achat_investissement_intracommunautaires_6_1">
@@ -886,6 +1012,8 @@ this repository contains the full copyright notices and license terms. -->
             <field name="invoice_account" ref="411"/>
             <field name="credit_note_account" ref="411"/>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">S</field>
         </record>
 
         <record model="account.tax.template" id="tva_achat_investissement_intracommunautaires_12">
@@ -895,6 +1023,9 @@ this repository contains the full copyright notices and license terms. -->
             <field name="group" ref="group_tva_achat"/>
             <field name="type">none</field>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">K</field>
+            <field name="vatex_code">VATEX-EU-IC</field>
         </record>
 
         <record model="account.tax.template" id="tva_achat_investissement_intracommunautaires_12_1">
@@ -931,6 +1062,8 @@ this repository contains the full copyright notices and license terms. -->
             <field name="invoice_account" ref="411"/>
             <field name="credit_note_account" ref="411"/>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">S</field>
         </record>
 
         <record model="account.tax.template" id="tva_achat_investissement_intracommunautaires_21">
@@ -940,6 +1073,9 @@ this repository contains the full copyright notices and license terms. -->
             <field name="group" ref="group_tva_achat"/>
             <field name="type">none</field>
             <field name="account" ref="root"/>
+            <field name="unece_code" depends="edocument_unece">VAT</field>
+            <field name="unece_category_code" depends="edocument_unece">K</field>
+            <field name="vatex_code">VATEX-EU-IC</field>
         </record>
 
         <record model="account.tax.template" id="tva_achat_investissement_intracommunautaires_21_1">
@@ -1012,6 +1148,13 @@ this repository contains the full copyright notices and license terms. -->
         <record model="account.tax.code.line.template" id="tax_code_II_A_00-tva_vente_biens_0">
             <field name="code" ref="tax_code_II_A_00"/>
             <field name="tax" ref="tva_vente_biens_0"/>
+            <field name="operator">+</field>
+            <field name="amount">base</field>
+            <field name="type">invoice</field>
+        </record>
+        <record model="account.tax.code.line.template" id="tax_code_II_A_00-tva_vente_services_0">
+            <field name="code" ref="tax_code_II_A_00"/>
+            <field name="tax" ref="tva_vente_services_0"/>
             <field name="operator">+</field>
             <field name="amount">base</field>
             <field name="type">invoice</field>

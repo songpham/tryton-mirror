@@ -50,6 +50,7 @@ class Pool(object):
         'model': defaultdict(OrderedDict),
         'wizard': defaultdict(OrderedDict),
         'report': defaultdict(OrderedDict),
+        'router': defaultdict(dict),
     }
     classes_mixin = defaultdict(list)
     _started = False
@@ -89,7 +90,7 @@ class Pool(object):
             module = kwargs['module']
             type_ = kwargs['type_']
             depends = set(kwargs.get('depends', []))
-            assert type_ in {'model', 'report', 'wizard'}, (
+            assert type_ in Pool.classes, (
                 f"{type_} is not a valid type_")
             for cls in classes:
                 mpool = Pool.classes[type_][module]
@@ -128,7 +129,7 @@ class Pool(object):
         :return: database list
         '''
         with cls._lock:
-            return list(cls._pools.keys())
+            return [n for n, p in cls._pools.items() if p]
 
     def init(self, update=None, lang=None, activatedeps=False, indexes=None):
         '''
@@ -218,11 +219,10 @@ class Pool(object):
                     cls = resolve(qualname)
                     assert issubclass(cls.__class__, PoolMeta)
                 try:
-                    previous_cls = self.get(cls.__name__, type=type_)
-                    cls = type(
-                        cls.__name__, (cls, previous_cls), {'__slots__': ()})
+                    base_classes = (cls, self.get(cls.__name__, type=type_))
                 except KeyError:
-                    pass
+                    base_classes = (cls,)
+                cls = type(cls.__name__, base_classes, {'__slots__': ()})
                 assert issubclass(cls, PoolBase), (
                     f"{cls} is not a subclass of {PoolBase}")
                 self.add(cls, type=type_)
@@ -273,6 +273,11 @@ class Pool(object):
                         cls = builtins.type(
                             cls.__name__, (mixin, cls), {'__slots__': ()})
                         self.add(cls, type=type_)
+
+    def setup_routers(self):
+        for _, router in self.iterobject('router'):
+            for name, route in router.__routes__.items():
+                route.start(self.database_name, router, name)
 
     @classmethod
     def refresh(cls, database_name, modules):

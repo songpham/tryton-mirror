@@ -6,6 +6,7 @@ import gettext
 import io
 import locale
 import math
+import unicodedata
 from collections import OrderedDict
 from decimal import Decimal
 from shlex import shlex
@@ -231,21 +232,21 @@ def convert_value(field, value, context=None):
     def convert_float():
         factor = float(field.get('factor', 1))
         try:
-            return locale.atof(value) / factor
+            return locale.atof(value.replace(' ', '')) / factor
         except (ValueError, AttributeError):
             return
 
     def convert_integer():
         factor = float(field.get('factor', 1))
         try:
-            return int(locale.atof(value) / factor)
+            return int(locale.atof(value.replace(' ', '')) / factor)
         except (ValueError, AttributeError):
             return
 
     def convert_numeric():
         factor = Decimal(field.get('factor', 1))
         try:
-            return Decimal(locale.delocalize(value)) / factor
+            return Decimal(locale.delocalize(value.replace(' ', ''))) / factor
         except (decimal.InvalidOperation, AttributeError):
             return
 
@@ -354,8 +355,8 @@ def format_value(field, value, target=None, context=None, _quote_empty=False):
             cast = float
         factor = cast(field.get('factor', 1))
         digit -= round(math.log10(factor))
-        return locale.localize(
-            '{0:.{1}f}'.format(value * factor or 0, digit), True)
+        digit = max(digit, 0)
+        return locale.localize('{0:.{1}f}'.format(value * factor, digit), True)
 
     def format_selection():
         if isinstance(field['selection'], (tuple, list)):
@@ -426,6 +427,16 @@ def format_value(field, value, target=None, context=None, _quote_empty=False):
             lambda: value if value is not None else '')(), empty=_quote_empty)
 
 
+def contains_without_diacritics(main, sub):
+    main = unicodedata.normalize('NFD', main.lower())
+    sub = unicodedata.normalize('NFD', sub.lower())
+
+    main = ''.join(c for c in main if not unicodedata.combining(c))
+    sub = ''.join(c for c in sub if not unicodedata.combining(c))
+
+    return sub in main
+
+
 def complete_value(field, value):
     "Complete value for field"
 
@@ -444,7 +455,7 @@ def complete_value(field, value):
             test_value = value[-1] or ''
         test_value = test_value.strip('%')
         for svalue, test in field['selection']:
-            if test.lower().startswith(test_value.lower()):
+            if contains_without_diacritics(test, test_value):
                 if isinstance(value, list):
                     yield value[:-1] + [svalue]
                 else:
@@ -454,9 +465,9 @@ def complete_value(field, value):
         test_value = value if value is not None else ''
         if isinstance(value, list):
             test_value = value[-1]
-        test_value = test_value.strip('%')
+        test_value = test_value.strip('%').lower()
         for svalue, test in field['selection']:
-            if test.lower().startswith(test_value.lower()):
+            if contains_without_diacritics(test, test_value):
                 if isinstance(value, list):
                     yield value[:-1] + [svalue]
                 else:
@@ -885,6 +896,26 @@ class DomainParser(object):
                                     (field_name, '<=', rvalue),
                                     ])
                             continue
+                        if (isinstance(value, str)
+                                and field['type'] in {'datetime', 'timestamp'}
+                                and operator == '='):
+                            ctx = self.context if self.context else {}
+                            format_ = date_format(ctx.get('date_format'))
+                            try:
+                                dt = datetime.datetime.strptime(
+                                    value, format_).date()
+                            except (ValueError, TypeError):
+                                dt = None
+                            if dt:
+                                date = untimezoned_date(
+                                    datetime.datetime.combine(
+                                        dt, datetime.time()))
+                                next_date = date + datetime.timedelta(days=1)
+                                yield iter([
+                                        (field_name, '>=', date),
+                                        (field_name, '<', next_date),
+                                        ])
+                                continue
                     if field['type'] in {
                             'many2one', 'one2many', 'many2many', 'one2one',
                             } and value:

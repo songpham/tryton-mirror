@@ -68,7 +68,8 @@ class Bank(ModelSQL, ModelView):
         pool = Pool()
         Party = pool.get('party.party')
         if IBAN:
-            assert isinstance(bic, BIC)
+            if not isinstance(bic, BIC):
+                bic = BIC(bic)
             banks = cls.search([
                     ('bic', '=', bic.compact),
                     ], limit=1)
@@ -143,6 +144,12 @@ class Account(DeactivableMixin, ModelSQL, ModelView):
             if number.type == 'iban':
                 return number.number
 
+    @property
+    def iban_compact(self):
+        for number in self.numbers:
+            if number.type == 'iban':
+                return number.number_compact
+
     @classmethod
     def validate(cls, accounts):
         super().validate(accounts)
@@ -199,6 +206,7 @@ class AccountNumber(DeactivableMixin, sequence_ordered(), ModelSQL, ModelView):
             ('iban', 'IBAN'),
             ('other', 'Other'),
             ], 'Type', required=True)
+    type_string = type.translated('type')
     number = fields.Char("Number", required=True)
     number_compact = fields.Char(
         "Number Compact", readonly=True,
@@ -238,6 +246,13 @@ class AccountNumber(DeactivableMixin, sequence_ordered(), ModelSQL, ModelView):
     def default_type(cls):
         return 'iban'
 
+    @fields.depends('type', 'number')
+    def on_change_with_number(self):
+        number = self.number
+        if self.type == 'iban' and number:
+            number = iban.format(number)
+        return number
+
     @classmethod
     def domain_number(cls, domain, tables):
         table, _ = tables[None]
@@ -245,7 +260,7 @@ class AccountNumber(DeactivableMixin, sequence_ordered(), ModelSQL, ModelView):
         Operator = fields.SQL_OPERATORS[operator]
         result = None
         for field in (cls.number, cls.number_compact):
-            column = field.sql_column(table)
+            column = field.sql_column(tables, cls)
             expression = Operator(column, field._domain_value(operator, value))
             if isinstance(expression, operators.In) and not expression.right:
                 expression = Literal(False)

@@ -262,6 +262,11 @@ msgctxt "field:purchase.line,quantity:"
 msgid "Quantity"
 msgstr "Količina"
 
+#, fuzzy
+msgctxt "field:purchase.line,quantity_to_invoice:"
+msgid "Quantity to Invoice"
+msgstr "Ponovno izdelani računi"
+
 msgctxt "field:purchase.line,summary:"
 msgid "Summary"
 msgstr "Povzetek"
@@ -318,6 +323,11 @@ msgctxt "field:purchase.line-recreated-stock.move,purchase_line:"
 msgid "Purchase Line"
 msgstr "Vrstica nabavnega naloga"
 
+#, fuzzy
+msgctxt "field:purchase.product_supplier,average_lead_time:"
+msgid "Average Lead Time"
+msgstr "Dobavni rok"
+
 msgctxt "field:purchase.product_supplier,code:"
 msgid "Code"
 msgstr "Šifra"
@@ -331,6 +341,11 @@ msgid "Currency"
 msgstr "Valuta"
 
 msgctxt "field:purchase.product_supplier,lead_time:"
+msgid "Lead Time"
+msgstr "Dobavni rok"
+
+#, fuzzy
+msgctxt "field:purchase.product_supplier,lead_time_used:"
 msgid "Lead Time"
 msgstr "Dobavni rok"
 
@@ -510,6 +525,11 @@ msgstr "Davek"
 msgctxt "field:purchase.purchase,tax_amount_cache:"
 msgid "Tax Cache"
 msgstr "Davek predpomnjen"
+
+#, fuzzy
+msgctxt "field:purchase.purchase,to_invoice:"
+msgid "To Invoice"
+msgstr "Račun"
 
 msgctxt "field:purchase.purchase,total_amount:"
 msgid "Total"
@@ -1364,16 +1384,17 @@ msgid "Title"
 msgstr "Napis"
 
 msgctxt "selection:purchase.purchase,invoice_method:"
-msgid "Based On Order"
-msgstr "Na podlagi naloga"
-
-msgctxt "selection:purchase.purchase,invoice_method:"
-msgid "Based On Shipment"
-msgstr "Na podlagi pošiljke"
-
-msgctxt "selection:purchase.purchase,invoice_method:"
 msgid "Manual"
 msgstr "Ročno"
+
+msgctxt "selection:purchase.purchase,invoice_method:"
+msgid "On Fulfillment"
+msgstr ""
+
+#, fuzzy
+msgctxt "selection:purchase.purchase,invoice_method:"
+msgid "On Order"
+msgstr "Na podlagi naloga"
 
 msgctxt "selection:purchase.purchase,invoice_state:"
 msgid "Awaiting Payment"

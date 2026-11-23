@@ -21,6 +21,7 @@ class Party(metaclass=PoolMeta):
         'party.party.payment_direct_debit', 'party', "Direct Debits")
     reception_direct_debits = fields.One2Many(
         'party.party.reception_direct_debit', 'party', "Direct Debits",
+        filter=[('journal.active', '=', True)],
         help="Fill to debit automatically the customer.")
     payment_identical_parties = fields.Function(
         fields.Many2Many('party.party', None, None, "Identical Parties"),
@@ -122,6 +123,13 @@ class PartyReceptionDirectDebit(
             'company': line.company.id,
             'currency': line.payment_currency.id,
             'type': type,
+            }
+
+    @classmethod
+    def get_pattern_for_invoice(cls, invoice):
+        return {
+            'company': invoice.company.id,
+            'currency': invoice.currency.id,
             }
 
     def get_payments(self, line=None, amount=None, date=None):

@@ -15,7 +15,7 @@ Let's create a virtual environment inside your working directory:
 
    $ python3 -m venv .venv
    $ source .venv/bin/activate
-   $ python -m pip install --upgrade pip
+   $ python3 -m pip install --upgrade pip
 
 Install cookiecutter and mercurial
 ----------------------------------
@@ -42,8 +42,6 @@ The Tryton template can be rendered into a module with:
    description []:
    author [Tryton]: John Doe
    author_email [bugs@tryton.org]: john@example.com
-   fullname []: John Doe
-   url [http://www.tryton.org/]: http://www.example.com/
    keywords []:
    test_with_scenario []:
 

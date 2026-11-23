@@ -9,8 +9,7 @@ from sql import Join, Table
 import trytond.config as config
 from trytond.model.exceptions import DomainValidationError
 from trytond.pool import Pool
-from trytond.tests.test_tryton import (
-    TestCase, activate_module, with_transaction)
+from trytond.tests.test_tryton import DBTestCase, with_transaction
 
 
 class CommonTestCaseMixin:
@@ -332,27 +331,40 @@ class SearchTestCaseMixin:
                 ], query=True)
         self.assertIn(self._strategy, str(query))
 
+    @with_transaction()
+    def test_search_where_target_union(self):
+        "Test search on Many2One using where and UNION-ed query on target"
+        pool = Pool()
+        Target = pool.get('test.many2one_target')
+        Many2One = pool.get('test.many2one')
+        target1, target2 = Target.create([
+                {'value': 1},
+                {'value': 2},
+                ])
+        many2one1, many2one2 = Many2One.create([
+                {'many2one': target1},
+                {'many2one': target2},
+                ])
+
+        many2ones = Many2One.search([
+                ('many2one', 'where',
+                    ['OR', ('value', '=', 1), ('write_uid.id', '=', -1)]),
+                ])
+        self.assertListEqual(many2ones, [many2one1])
+
 
 class FieldMany2OneTestCase(
-        TestCase, CommonTestCaseMixin, SearchTestCaseMixin):
+        DBTestCase, CommonTestCaseMixin, SearchTestCaseMixin):
     "Test Field Many2One"
+    module = 'tests'
     _strategy = 'IN'
-
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        activate_module('tests')
 
 
 class FieldMany2OneExistsTestCase(
-        TestCase, CommonTestCaseMixin, SearchTestCaseMixin):
+        DBTestCase, CommonTestCaseMixin, SearchTestCaseMixin):
     "Test Field Many2One"
+    module = 'tests'
     _strategy = 'EXISTS'
-
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        activate_module('tests')
 
     def setUp(self):
         super().setUp()
@@ -361,14 +373,10 @@ class FieldMany2OneExistsTestCase(
         self.addCleanup(config.set, 'database', 'subquery_threshold', previous)
 
 
-class FieldMany2OneTreeTestCase(TestCase):
+class FieldMany2OneTreeTestCase(DBTestCase):
     "Test Field Many2One Tree"
+    module = 'tests'
     model_name = 'test.many2one_tree'
-
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        activate_module('tests')
 
     def create_tree(self, Many2One):
         self.root1, self.root2 = Many2One.create([{}, {}])

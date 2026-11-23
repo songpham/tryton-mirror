@@ -1,5 +1,7 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
+
+import datetime as dt
 from collections import defaultdict
 
 from sql import Literal
@@ -70,6 +72,15 @@ class Shop(DeactivableMixin, ModelSQL, ModelView):
             'company': Eval('company', -1),
             },
         depends={'company'})
+    sale_draft_abandon_delay = fields.TimeDelta(
+        "Sale Draft Abandon Delay",
+        domain=['OR',
+            ('sale_draft_abandon_delay', '>=', dt.timedelta()),
+            ('sale_draft_abandon_delay', '=', None),
+            ],
+        help="The time period after which a sale made via the web shop "
+        "without modification is cancelled.\n"
+        "Leave empty to never cancel any draft sales.")
     countries = fields.Many2Many(
         'web.shop-country.country', 'shop', 'country', "Countries")
 
@@ -255,11 +266,16 @@ class Shop(DeactivableMixin, ModelSQL, ModelView):
         Sale = pool.get('sale.sale')
         if not party:
             party = self.guest_party
-        sale = Sale(party=party)
+        sale = Sale()
         sale.company = self.company
         sale.warehouse = self.warehouse
         sale.web_shop = self
-        sale.on_change_party()
+        if party:
+            sale.party = party
+            sale.invoice_address = party.address_get(type='invoice')
+            with Transaction().set_context(
+                    warehouse=self.warehouse.id if self.warehouse else None):
+                sale.shipment_address = party.address_get(type='delivery')
         sale.on_change_web_shop()
         sale.currency = self.currency
         sale.invoice_method = 'order'
@@ -273,6 +289,11 @@ class Shop(DeactivableMixin, ModelSQL, ModelView):
 
     def update_sales(self, sales):
         assert all(s.web_shop == self for s in sales)
+
+    @property
+    def is_managing_gift_card(self):
+        "Return if the webshop manages gift cards"
+        pass
 
 
 class Shop_PriceList(metaclass=PoolMeta):
@@ -320,7 +341,7 @@ class Shop_ShipmentCost(metaclass=PoolMeta):
 class Shop_TaxRuleCountry(metaclass=PoolMeta):
     __name__ = 'web.shop'
 
-    def get_products(self, pattern=None):
+    def get_products(self, pattern=None, key=None):
         pattern = pattern.copy() if pattern is not None else {}
         if (self.warehouse
                 and self.warehouse.address
@@ -330,7 +351,7 @@ class Shop_TaxRuleCountry(metaclass=PoolMeta):
         else:
             pattern.setdefault('from_country')
         pattern.setdefault('to_country')
-        return super().get_products(pattern=pattern)
+        return super().get_products(pattern=pattern, key=key)
 
 
 class Shop_Warehouse(ModelSQL):

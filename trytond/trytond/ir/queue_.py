@@ -5,6 +5,7 @@ import datetime
 from sql import Literal, Null, With
 from sql.aggregate import Min
 from sql.functions import CurrentTimestamp, Extract
+from sql.operators import Concat, Exists
 
 import trytond.config as config
 from trytond.model import Index, ModelSQL, fields
@@ -46,6 +47,17 @@ class Queue(ModelSQL):
     def default_enqueued_at(cls):
         return datetime.datetime.now()
 
+    def get_rec_name(self, name):
+        pool = Pool()
+        Model = pool.get('ir.model')
+        Button = pool.get('ir.model.button')
+        model = self.data.get('model', '')
+        model_string = Model.get_name(model)
+        method = self.data.get('method', '')
+        button_attr = Button.get_view_attributes(model, method)
+        method_string = button_attr.get('string', method)
+        return f'{model_string} {method_string} @ {self.name} ({self.id})'
+
     @classmethod
     def copy(cls, records, default=None):
         if default is None:
@@ -61,7 +73,6 @@ class Queue(ModelSQL):
     def push(cls, name, data, scheduled_at=None, expected_at=None):
         transaction = Transaction()
         database = transaction.database
-        cursor = transaction.connection.cursor()
         with without_check_access():
             record, = cls.create([{
                         'name': name,
@@ -70,7 +81,7 @@ class Queue(ModelSQL):
                         'expected_at': expected_at,
                         }])
         if database.has_channel():
-            cursor.execute('NOTIFY "%s"', (cls.__name__,))
+            database.notify(transaction.connection, cls.__name__, '')
         if not config.getboolean('queue', 'worker', default=False):
             transaction.tasks.append(record.id)
         return record.id
@@ -141,12 +152,13 @@ class Queue(ModelSQL):
                 seconds, = row
 
         if not task_id and database.has_channel():
-            cursor.execute('LISTEN "%s"', (cls.__name__,))
+            cursor.execute('LISTEN "%s"' % cls.__name__)
         return task_id, seconds
 
     def run(self):
         transaction = Transaction()
         Model = Pool().get(self.data['model'])
+        self.lock()
         with transaction.set_user(self.data['user']), \
                 transaction.set_context(
                     self.data['context'], _skip_warnings=True):
@@ -159,12 +171,9 @@ class Queue(ModelSQL):
                     else:
                         instances = None
             else:
-                ids = set()
                 with inactive_records():
-                    for sub_ids in grouped_slice(instances):
-                        records = Model.search([('id', 'in', list(sub_ids))])
-                        ids.update(map(int, records))
-                if ids:
+                    records = Model.search([('id', 'in', instances)])
+                if ids := set(map(int, records)):
                     instances = Model.browse(
                         [i for i in instances if i in ids])
                 else:
@@ -176,6 +185,41 @@ class Queue(ModelSQL):
             self.dequeued_at = datetime.datetime.now()
         self.finished_at = datetime.datetime.now()
         self.save()
+
+    @classmethod
+    def retry(cls):
+        pool = Pool()
+        Error = pool.get('ir.error')
+        queue = cls.__table__()
+        queue_s = cls.__table__()
+        error = Error.__table__()
+        transaction = Transaction()
+        database = transaction.database
+        cursor = transaction.connection.cursor()
+
+        selected = queue_s.select(
+            queue_s.id,
+            where=(queue_s.dequeued_at != Null)
+            & (queue_s.finished_at == Null)
+            & ~Exists(error.select(
+                    error.origin,
+                    where=error.origin == Concat('ir.queue,', queue_s.id))))
+        if database.has_select_for():
+            For = database.get_select_for_skip_locked()
+            selected.for_ = For('UPDATE')
+        update = queue.update(
+            [queue.dequeued_at],
+            [None],
+            where=queue.id.in_(selected))
+        if database.has_returning():
+            update.returning = [queue.id]
+        cursor.execute(*update)
+        if database.has_returning():
+            task_updated = bool(cursor.fetchone())
+        else:
+            task_updated = True
+        if task_updated and database.has_channel():
+            database.notify(transaction.connection, cls.__name__, '')
 
     @classmethod
     def clean(cls, date=None):

@@ -2,6 +2,12 @@
 # this repository contains the full copyright notices and license terms.
 import logging
 
+try:
+    import phonenumbers
+    from phonenumbers import NumberParseException
+except ImportError:
+    phonenumbers = None
+
 from trytond.model import sequence_reorder
 from trytond.pool import Pool, PoolMeta
 from trytond.tools import remove_forbidden_chars
@@ -68,6 +74,16 @@ class Party(IdentifiersMixin, metaclass=PoolMeta):
                     except EmailNotValidError as e:
                         logger.info("Skip email %s", value, exc_info=e)
                         continue
+                elif types[0] == 'phone':
+                    if phonenumbers:
+                        try:
+                            phonenumber = phonenumbers.parse(value)
+                        except NumberParseException as e:
+                            logger.info("Skip phone %s", value, exc_info=e)
+                            continue
+                        if not phonenumbers.is_valid_number(phonenumber):
+                            logger.info("Skip phone %s", value)
+                            continue
                 contact_mechanisms.insert(index, ContactMechanism(
                         type=types[0], value=value))
         party.contact_mechanisms = sequence_reorder(contact_mechanisms)
@@ -137,8 +153,10 @@ class Address(metaclass=PoolMeta):
         values = {}
         values['party_name'] = remove_forbidden_chars(address['name'] or '')
         if address['company']:
-            values['party_name'] += (
-                f"({remove_forbidden_chars(address['company'])})")
+            values['attn'] = values['party_name']
+            values['party_name'] = remove_forbidden_chars(address['company'])
+        else:
+            values['attn'] = ''
         values['street'] = '\n'.join(filter(None, [
                     address['address1'], address['address2']]))
         values['city'] = remove_forbidden_chars(address['city'] or '')
@@ -167,6 +185,7 @@ class Address(metaclass=PoolMeta):
     def shopify_values(self):
         values = {}
         values['party_name'] = self.party_name or ''
+        values['attn'] = self.attn or ''
         values['street'] = self.street or ''
         values['city'] = self.city or ''
         values['postal_code'] = self.postal_code or ''

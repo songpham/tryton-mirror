@@ -54,7 +54,10 @@ class Action(DeactivableMixin, ModelSQL, ModelView):
     __name__ = 'ir.action'
     name = fields.Char('Name', required=True, translate=True)
     type = fields.Selection(
-        ACTION_SELECTION, "Type", required=True, readonly=True)
+        ACTION_SELECTION, "Type", required=True,
+        states={
+            'readonly': Eval('id', -1) >= 0,
+            })
     action = fields.Function(
         fields.Reference("Action", selection=ACTION_SELECTION),
         'get_action')
@@ -345,7 +348,11 @@ class ActionMixin(ModelSQL):
 
     action = fields.Many2One(
         'ir.action', "Action",
-        required=True, readonly=True, ondelete='CASCADE')
+        required=True, ondelete='CASCADE',
+        states={
+            'required': Eval('id', -1) >= 0,
+            'readonly': Eval('id', -1) >= 0,
+            })
 
     @classmethod
     def __setup__(cls):
@@ -456,8 +463,9 @@ class ActionMixin(ModelSQL):
             values = values.copy()
             for field in values:
                 if field in Action._fields:
-                    action_values[field] = values[field]
-                if hasattr(getattr(cls, field), 'set'):
+                    if field != 'action':
+                        action_values[field] = values[field]
+                elif hasattr(getattr(cls, field), 'set'):
                     later[field] = values[field]
             for field in later:
                 del values[field]
@@ -468,7 +476,7 @@ class ActionMixin(ModelSQL):
             if database.nextid(transaction.connection, cls._table):
                 database.setnextid(transaction.connection, cls._table,
                     database.currid(transaction.connection, Action._table))
-            if 'action' not in values:
+            if not values.get('action'):
                 action, = Action.create([action_values])
                 values['action'] = action.id
             else:
@@ -530,7 +538,7 @@ class ActionReport(
         'get_report_content', setter='set_report_content')
     report_content_name = fields.Function(fields.Char('Content Name'),
         'on_change_with_report_content_name')
-    report_content_html = fields.Function(fields.Binary(
+    report_content_html = fields.Function(fields.Text(
             "Content HTML",
             states={
                 'invisible': ~Eval('template_extension').in_(
@@ -692,11 +700,18 @@ class ActionReport(
 
     @classmethod
     def get_report_content_html(cls, reports, name):
-        return cls.get_report_content(reports, name[:-5])
+        contents = cls.get_report_content(reports, name[:-5])
+        for report_id, content in contents.items():
+            if isinstance(content, bytes):
+                try:
+                    contents[report_id] = content.decode('utf-8')
+                except UnicodeDecodeError:
+                    pass
+        return contents
 
     @classmethod
     def set_report_content_html(cls, reports, name, value):
-        if value is not None:
+        if isinstance(value, str):
             value = value.encode('utf-8')
         cls.set_report_content(reports, name[:-5], value)
 
@@ -935,7 +950,7 @@ class ActionActWindow(
                                 action=action.rec_name)) from exception
 
     def get_views(self, name):
-        return [(view.view.id, view.view.rng_type)
+        return [(view.view.id, view.view.real_type)
             for view in self.act_window_views]
 
     def get_domains(self, name):

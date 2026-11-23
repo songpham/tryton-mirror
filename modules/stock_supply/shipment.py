@@ -5,7 +5,6 @@ from collections import defaultdict
 
 from trytond.model import ModelSQL, ModelView
 from trytond.pool import Pool
-from trytond.tools import grouped_slice
 from trytond.transaction import Transaction
 
 
@@ -89,19 +88,17 @@ class ShipmentInternal(ModelSQL, ModelView):
                     location_ids, with_childs=True,
                     grouping_filter=grouping_filter)
 
-        # ordered by ids to speedup reduce_ids in products_by_location
         if implicit_locations:
             products = Product.search([
                     ('type', 'in', ['goods', 'assets']),
-                    ], order=[('id', 'ASC')])
+                    ],
+                order=[])
             product_ids = [p.id for p in products]
             pbl = get_pbl(None, today, None)
         else:
-            product_ids = list(id2product.keys())
-            product_ids.sort()
+            product_ids = sorted(id2product.keys())
             pbl = defaultdict(int)
-            for sub_product_ids in grouped_slice(product_ids):
-                pbl.update(get_pbl(None, today, (list(sub_product_ids),)))
+            pbl.update(get_pbl(None, today, (product_ids,)))
 
         shipments = []
         date = today
@@ -188,10 +185,9 @@ class ShipmentInternal(ModelSQL, ModelView):
                 for key, qty in get_pbl(date, date, None).items():
                     current_qties[key] += qty
             else:
-                for sub_product_ids in grouped_slice(product_ids):
-                    for key, qty in get_pbl(
-                            date, date, (list(sub_product_ids),)).items():
-                        current_qties[key] += qty
+                for key, qty in get_pbl(
+                        date, date, (product_ids,)).items():
+                    current_qties[key] += qty
 
         if shipments:
             cls.save(shipments)

@@ -49,7 +49,11 @@ class RoleGroup(ModelSQL):
 
 class User(metaclass=PoolMeta):
     __name__ = 'res.user'
-    roles = fields.One2Many('res.user.role', 'user', "Roles")
+    roles = fields.One2Many(
+        'res.user.role', 'user', "Roles",
+        states={
+            'invisible': Eval('administrator', False),
+            })
 
     @classmethod
     def __setup__(cls):
@@ -60,6 +64,15 @@ class User(metaclass=PoolMeta):
         cls.groups.states['readonly'] = group_readonly
 
         cls._context_fields.append('roles')
+
+    @fields.depends('administrator', 'roles')
+    def on_change_administrator(self):
+        try:
+            super().on_change_administrator()
+        except AttributeError:
+            pass
+        if self.administrator:
+            self.roles = []
 
     @classmethod
     def on_modification(cls, mode, users, field_names=None):
@@ -75,6 +88,8 @@ class User(metaclass=PoolMeta):
             users = cls.search([])
         to_write = []
         for user in users:
+            if user.administrator:
+                continue
             if not user.roles and not clear:
                 continue
             new = {g.id for r in user.roles for g in r.role.groups
@@ -93,7 +108,10 @@ class User(metaclass=PoolMeta):
 class UserRole(ModelSQL, ModelView):
     __name__ = 'res.user.role'
     user = fields.Many2One(
-        'res.user', "User", ondelete='CASCADE', required=True)
+        'res.user', "User", ondelete='CASCADE', required=True,
+        domain=[
+            ('administrator', '=', False),
+            ])
     role = fields.Many2One(
         'res.role', "Role", ondelete='CASCADE', required=True)
     from_date = fields.DateTime(

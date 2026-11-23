@@ -14,17 +14,13 @@ from trytond.model.exceptions import (
 from trytond.model.modelsql import split_subquery_domain
 from trytond.pool import Pool
 from trytond.tests.test_tryton import (
-    CONTEXT, DB_NAME, USER, TestCase, activate_module, with_transaction)
+    CONTEXT, DB_NAME, USER, DBTestCase, with_transaction)
 from trytond.transaction import Transaction, TransactionError
 
 
-class ModelSQLTestCase(TestCase):
+class ModelSQLTestCase(DBTestCase):
     'Test ModelSQL'
-
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        activate_module('tests')
+    module = 'tests'
 
     @with_transaction()
     def test_read(self):
@@ -742,11 +738,6 @@ class ModelSQLTestCase(TestCase):
         pool = Pool()
         Model = pool.get('test.modelsql.fk.tree')
 
-        # Delete all records at a time
-        in_max = Transaction().database.IN_MAX
-        self.addCleanup(setattr, Transaction().database, 'IN_MAX', in_max)
-        Transaction().database.IN_MAX = 2
-
         parent = Model()
         parent.save()
         child = Model(parent_restrict=parent)
@@ -759,11 +750,6 @@ class ModelSQLTestCase(TestCase):
         "Test tree Foreign key on delete restrict grouped branch"
         pool = Pool()
         Model = pool.get('test.modelsql.fk.tree')
-
-        # Delete one record at a time
-        in_max = Transaction().database.IN_MAX
-        self.addCleanup(setattr, Transaction().database, 'IN_MAX', in_max)
-        Transaction().database.IN_MAX = 1
 
         parent = Model()
         parent.save()
@@ -1432,7 +1418,8 @@ class ModelSQLTestCase(TestCase):
         self.assertEqual(stats, [("Foo", 2), ("Bar", 1)])
 
 
-class TranslationTestCase(TestCase):
+class TranslationTestCase(DBTestCase):
+    module = 'tests'
     default_language = 'fr'
     other_language = 'en'
 
@@ -1464,8 +1451,8 @@ class TranslationTestCase(TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        super().tearDownClass()
         cls.restore_language()
+        super().tearDownClass()
 
     @classmethod
     @with_transaction()
@@ -1495,7 +1482,6 @@ class ModelSQLTranslationTestCase(TranslationTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        activate_module('tests')
 
     @with_transaction()
     def test_create_default_language(self):
@@ -1614,7 +1600,7 @@ class ModelSQLTranslationTestCase(TranslationTestCase):
         translation, = Translation.search([
                 ('type', '=', 'model'),
                 ('name', '=', 'test.modelsql.name_translated,string'),
-                ('res_id', '=', -1),
+                ('res_id', '=', None),
                 ])
         self.assertEqual(translation.src, "NameTranslated")
         self.assertEqual(translation.value, "NameTranslated")
@@ -1637,7 +1623,7 @@ class ModelSQLTranslationTestCase(TranslationTestCase):
         translation, = Translation.search([
                 ('type', '=', 'help'),
                 ('name', '=', 'test.modelsql.name_translated,name'),
-                ('res_id', '=', -1),
+                ('res_id', '=', None),
                 ])
         self.assertEqual(translation.src, "Translated help")
         self.assertEqual(translation.value, "Translated help")
@@ -1767,6 +1753,55 @@ class ModelSQLTranslationTestCase(TranslationTestCase):
 
         self.assertEqual(record.name, "Foo")
         self.assertEqual(other.name, "Bar")
+
+    @with_transaction()
+    def test_read_multiple_languages(self):
+        "Test read multiple languages"
+        pool = Pool()
+        Model = pool.get('test.modelsql.translation')
+        transaction = Transaction()
+
+        with transaction.set_context(language=self.default_language):
+            record, = Model.create([{'name': "Foo"}])
+        with transaction.set_context(language=self.other_language):
+            Model.write([record], {'name': "Bar"})
+
+        values = Model.read([record.id], [
+                'name',
+                f'name:{self.default_language}',
+                f'name:{self.other_language}',
+                ])
+
+        self.assertEqual(values, [{
+                    'id': record.id,
+                    'name': "Foo",
+                    f'name:{self.default_language}': "Foo",
+                    f'name:{self.other_language}': "Bar",
+                    }])
+
+    @with_transaction()
+    def test_read_multiple_languages_fallback(self):
+        "Test read multiple languages with fallback"
+        pool = Pool()
+        Model = pool.get('test.modelsql.translation')
+        transaction = Transaction()
+
+        with transaction.set_context(language=self.default_language):
+            record, = Model.create([{'name': "Foo"}])
+        with transaction.set_context(language=self.other_language):
+            Model.write([record], {'name': "Bar"})
+
+        with transaction.set_context(language=self.other_language):
+            values = Model.read([record.id], [
+                    f'name:{self.other_language}',
+                    'name:unknown',
+                    ])
+
+        self.assertEqual(values, [{
+                    'id': record.id,
+                    f'name:{self.other_language}': "Bar",
+                    'name:unknown': "Foo",
+                    }])
 
     @with_transaction()
     def test_read_last_translation(self):

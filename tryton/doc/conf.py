@@ -8,36 +8,34 @@ if base_url:
     modules_url = base_url + '/modules-{module}/'
     trytond_url = base_url + '/server/'
 else:
-    modules_url = 'https://docs.tryton.org/${series}/modules-{module}/'
-    trytond_url = 'https://docs.tryton.org/${series}/server/'
+    modules_url = 'https://docs.tryton.org/{series}/modules-{module}/'
+    trytond_url = 'https://docs.tryton.org/{series}/server/'
 
 
 def get_info():
+    import json
     import subprocess
-    import sys
 
     module_dir = os.path.dirname(os.path.dirname(__file__))
 
     info = dict()
 
-    result = subprocess.run(
-        [sys.executable, 'setup.py', '--name', '--description'],
-        stdout=subprocess.PIPE, check=True, cwd=module_dir)
-    info['name'], info['description'] = (
-        result.stdout.decode('utf-8').strip().splitlines())
-
-    result = subprocess.run(
-        [sys.executable, 'setup.py', '--version'],
-        stdout=subprocess.PIPE, check=True, cwd=module_dir)
-    version = result.stdout.decode('utf-8').strip()
-    major_version, minor_version, _ = version.split('.', 2)
+    metadata_cmd = 'python3 -m build -qq --metadata'
+    if os.environ.get('DOC_NO_ISOLATION'):
+        metadata_cmd += ' --no-isolation'
+    metadata = subprocess.check_output(
+        metadata_cmd, shell=True, encoding='utf-8', cwd=module_dir).strip()
+    metadata = json.loads(metadata)
+    info['name'] = metadata['name']
+    info['description'] = metadata['summary']
+    major_version, minor_version, _ = metadata['version'].split('.', 2)
     major_version = int(major_version)
     minor_version = int(minor_version)
     if minor_version % 2:
         info['series'] = 'latest'
         info['branch'] = 'branch/default'
     else:
-        info['series'] = '.'.join(version.split('.', 2)[:2])
+        info['series'] = '.'.join(metadata['version'].split('.', 2)[:2])
         info['branch'] = 'branch/' + info['series']
 
     return info

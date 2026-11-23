@@ -12,11 +12,13 @@ import trytond.config as config
 from trytond.i18n import gettext
 from trytond.model import (
     MatchMixin, ModelSQL, ModelView, Unique, fields, sequence_ordered)
+from trytond.modules.product import (
+    copy_product_filtered, copy_template_filtered)
 from trytond.pool import PoolMeta
 from trytond.pyson import Bool, Eval, If
 from trytond.tools import slugify
 from trytond.transaction import Transaction
-from trytond.url import http_host
+from trytond.url import http_base
 from trytond.wsgi import Base64Converter
 
 from .exceptions import ImageValidationError
@@ -64,7 +66,7 @@ class ImageURLMixin:
                     args['h'] = height
                 if index is not None:
                     args['i'] = index
-            timestamp = int((self.write_date or self.create_date).timestamp())
+            timestamp = int(self.last_modified_at.timestamp())
             args['t'] = (
                 base64.urlsafe_b64encode(timestamp.to_bytes(8, 'big'))
                 .decode().rstrip('='))
@@ -77,7 +79,7 @@ class ImageURLMixin:
         url_base = config.get(
             'product', 'image_base', default='')
         url_external_base = config.get(
-            'product', 'image_base', default=http_host())
+            'product', 'image_base', default=http_base())
         return self._image_url(
             url_external_base if _external else url_base, **args)
 
@@ -96,13 +98,17 @@ class ImageURLMixin:
                 yield image
 
 
-class Template(ImageURLMixin, metaclass=PoolMeta):
+class Template(
+        copy_template_filtered('images'),
+        ImageURLMixin, metaclass=PoolMeta):
     __name__ = 'product.template'
     __image_url__ = '/product/image'
     images = fields.One2Many('product.image', 'template', "Images")
 
 
-class Product(ImageURLMixin, metaclass=PoolMeta):
+class Product(
+        copy_product_filtered('images'),
+        ImageURLMixin, metaclass=PoolMeta):
     __name__ = 'product.product'
     __image_url__ = '/product/variant/image'
     images = fields.One2Many(
@@ -122,7 +128,8 @@ class Product(ImageURLMixin, metaclass=PoolMeta):
 class _ImageMixin:
     __slots__ = ()
     image = fields.Binary(
-        "Image", file_id=file_id, store_prefix=store_prefix, required=True)
+        "Image", required=True, filename_ext='jpg',
+        file_id=file_id, store_prefix=store_prefix)
     image_id = fields.Char("Image ID", readonly=True)
 
 
@@ -241,6 +248,12 @@ class Image(ImageMixin, sequence_ordered(), ModelSQL, ModelView, MatchMixin):
     def __setup__(cls):
         super().__setup__()
         cls.__access__.add('template')
+
+    def get_rec_name(self, name):
+        if self.product:
+            return self.product.rec_name
+        else:
+            return self.template.rec_name
 
     def _store_cache(self, size, image):
         cache = super()._store_cache(size, image)

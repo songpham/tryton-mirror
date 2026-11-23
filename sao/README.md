@@ -4,7 +4,7 @@ sao
 Prerequisites
 -------------
 
- * Node.js 0.8.0 or later (http://nodejs.org/)
+ * Node.js v24 or later (https://nodejs.org/)
 
 Installation
 ------------
@@ -12,14 +12,14 @@ Installation
 Once you've downloaded and unpacked the sao source release, enter the directory
 where the archive was unpacked, and run:
 
-    $ npm install --production --legacy-peer-deps
+    $ npm install --omit=dev
 
 Development
 ...........
 
 For development, you have to run instead:
 
-    $ npm install --legacy-peer-deps
+    $ npm install
     $ grunt
 
 Setup

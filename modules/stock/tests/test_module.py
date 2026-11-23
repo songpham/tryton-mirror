@@ -8,13 +8,11 @@ from functools import partial
 
 from dateutil.relativedelta import relativedelta
 
-from trytond.model.exceptions import AccessError
 from trytond.modules.company.tests import (
     CompanyTestMixin, PartyCompanyCheckEraseMixin, create_company, set_company)
 from trytond.modules.party.tests import PartyCheckReplaceMixin
 from trytond.modules.stock.exceptions import (
-    LocationValidationError, MoveOriginWarning, PeriodCloseError,
-    ProductStockWarning)
+    LocationValidationError, MoveOriginWarning, ProductStockWarning)
 from trytond.pool import Pool
 from trytond.tests.test_tryton import ModuleTestCase, with_transaction
 from trytond.transaction import Transaction, check_access
@@ -334,6 +332,25 @@ class StockTestCase(
                                     context, quantity)
 
             test_products_by_location()
+
+            with transaction.set_context(
+                    locations=[supplier.id, customer.id, storage.id]):
+                for domain, found in [
+                        ([('quantity', '=', 0)], True),
+                        ([('quantity', '>=', 0)], True),
+                        ([('quantity', '>', 0)], False),
+                        ([('quantity', '<=', 0)], True),
+                        ([('quantity', '<', 0)], False),
+                        ([('quantity', '!=', 0)], False),
+                        ([('quantity', 'in', [0])], True),
+                        ([('quantity', 'in', [1])], False),
+                        ([('quantity', 'not in', [0])], False),
+                        ([('quantity', 'not in', [1])], True),
+                        ]:
+                    with self.subTest(domain=domain):
+                        self.assertEqual(
+                            Product.search(domain),
+                            [product] if found else [])
 
             periods = [
                 today + relativedelta(days=-6),
@@ -939,59 +956,6 @@ class StockTestCase(
                         quantities[cache.location.id])
 
                 test_products_by_location()
-
-            # Test check_period_closed
-            moves = Move.create([{
-                        'product': product.id,
-                        'unit': unit.id,
-                        'quantity': 10,
-                        'from_location': supplier.id,
-                        'to_location': storage.id,
-                        'planned_date': today,
-                        'effective_date': today,
-                        'company': company.id,
-                        'unit_price': Decimal('1'),
-                        'currency': currency.id,
-                        }])
-            Move.do(moves)
-
-            self.assertRaises(AccessError, Move.create, [{
-                        'product': product.id,
-                        'unit': unit.id,
-                        'quantity': 10,
-                        'from_location': supplier.id,
-                        'to_location': storage.id,
-                        'planned_date': today + relativedelta(days=-5),
-                        'effective_date': today + relativedelta(days=-5),
-                        'company': company.id,
-                        'unit_price': Decimal('1'),
-                        'currency': currency.id,
-                        }])
-            self.assertRaises(AccessError, Move.create, [{
-                        'product': product.id,
-                        'unit': unit.id,
-                        'quantity': 10,
-                        'from_location': supplier.id,
-                        'to_location': storage.id,
-                        'planned_date': today + relativedelta(days=-3),
-                        'effective_date': today + relativedelta(days=-3),
-                        'company': company.id,
-                        'unit_price': Decimal('1'),
-                        'currency': currency.id,
-                        }])
-
-            # Test close period check
-            period, = Period.create([{
-                        'date': today,
-                        'company': company.id,
-                        }])
-            self.assertRaises(PeriodCloseError, Period.close, [period])
-
-            period, = Period.create([{
-                        'date': today + relativedelta(days=1),
-                        'company': company.id,
-                        }])
-            self.assertRaises(PeriodCloseError, Period.close, [period])
 
     @with_transaction()
     def test_check_origin(self):

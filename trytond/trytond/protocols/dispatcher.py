@@ -1,16 +1,16 @@
 # -*- coding: utf-8 -*-
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
+import ctypes
 import logging
 import pydoc
+import threading
 import time
-
-from sql import Table
 
 from trytond import __series__, backend, config, security
 from trytond.exceptions import (
-    ConcurrencyException, LoginException, RateLimitException, UserError,
-    UserWarning)
+    ConcurrencyException, LoginException, RateLimitException, TimeOutException,
+    UserError, UserWarning)
 from trytond.rpc import RPCReturnException
 from trytond.tools import is_instance_method
 from trytond.tools.logging import format_args
@@ -18,19 +18,16 @@ from trytond.transaction import Transaction, TransactionError
 from trytond.worker import run_task
 from trytond.wsgi import app
 
-from .wrappers import HTTPStatus, Response, abort, with_pool
+from .wrappers import (
+    TRYTON_SESSION_COOKIE, HTTPStatus, Response, abort, add_auth_cookies,
+    decode_session_cookie, remove_auth_cookies, with_pool)
 
 __all__ = ['register_authentication_service']
 
 logger = logging.getLogger(__name__)
 
-ir_configuration = Table('ir_configuration')
-ir_lang = Table('ir_lang')
-ir_module = Table('ir_module')
-res_user = Table('res_user')
 
-
-@app.route('/<string:database_name>/', methods=['POST'])
+@app.route('/<string:database_name>/rpc/', methods=['POST'])
 def rpc(request, database_name):
     methods = {
         'common.db.login': login,
@@ -49,6 +46,8 @@ def login(request, database_name, user, parameters, language=None):
         'language': language,
         '_request': request.context,
         }
+    if not isinstance(user, str):
+        abort(HTTPStatus.BAD_REQUEST, "user argument must be a string")
     try:
         session = security.login(
             database_name, user, parameters, context=context)
@@ -75,6 +74,28 @@ def logout(request, database_name):
         context={'_request': request.context})
 
 
+@app.route('/<string:database_name>/session/login', methods=['POST'])
+def login_w_cookies(request, database_name):
+    user_id, token, bus_url_host = login(
+        request, database_name, *request.json['params'])
+    response = app.make_response(request, (user_id, bus_url_host))
+    add_auth_cookies(
+        response, database_name, request.json['params'][0], str(user_id),
+        token)
+    return response
+
+
+@app.route('/<string:database_name>/session/logout', methods=['POST'])
+def logout_w_cookies(request, database_name):
+    cookie = request.cookies.get(TRYTON_SESSION_COOKIE)
+    _, user_id, token = decode_session_cookie(cookie)
+    security.logout(
+        database_name, user_id, token, context={'_request': request.context})
+    response = app.make_response(request, None)
+    remove_auth_cookies(response, database_name)
+    return response
+
+
 def reset_password(request, database_name, user, language=None):
     authentications = config.get(
         'session', 'authentications', default='password').split(',')
@@ -84,6 +105,8 @@ def reset_password(request, database_name, user, language=None):
         'language': language,
         '_request': request.context,
         }
+    if not isinstance(user, str):
+        abort(HTTPStatus.BAD_REQUEST, "user argument must be a string")
     try:
         security.reset_password(database_name, user, context=context)
     except backend.DatabaseOperationalError:
@@ -93,7 +116,7 @@ def reset_password(request, database_name, user, language=None):
         abort(HTTPStatus.TOO_MANY_REQUESTS)
 
 
-@app.route('/', methods=['POST'])
+@app.route('/rpc/', methods=['POST'])
 def root(request, *args):
     methods = {
         'common.server.version': lambda *a: __series__,
@@ -109,6 +132,22 @@ def options(request, path=None):
     return Response(status=HTTPStatus.NO_CONTENT)
 
 
+@app.route('/<db>/r/<path:path>')
+def start_pool(request, db, path=None):
+    from trytond.pool import Pool
+
+    if db not in _db_list(request):
+        abort(HTTPStatus.NOT_FOUND)
+    elif db not in Pool.database_list():
+        pool = Pool(db)
+        with Transaction().start(db, 0, readonly=True):
+            pool.init()
+
+        return app.dispatch_request(request)
+    else:
+        abort(HTTPStatus.NOT_FOUND)
+
+
 def db_exist(request, database_name):
     try:
         backend.Database(database_name).connect()
@@ -117,9 +156,7 @@ def db_exist(request, database_name):
         return False
 
 
-def db_list(request, *args):
-    if not config.getboolean('database', 'list'):
-        abort(HTTPStatus.FORBIDDEN)
+def _db_list(request):
     context = {'_request': request.context}
     hostname = config.get_hostname(request.host)
     with Transaction().start(
@@ -128,12 +165,22 @@ def db_list(request, *args):
         return transaction.database.list(hostname=hostname)
 
 
+def db_list(request, *args):
+    if not config.getboolean('database', 'list'):
+        abort(HTTPStatus.FORBIDDEN)
+    return _db_list(request)
+
+
 def authentication_services(request):
     return _AUTHENTICATION_SERVICES
 
 
-def register_authentication_service(name, url):
-    _AUTHENTICATION_SERVICES.append((name, url))
+def register_authentication_service(name, url, icon=None):
+    _AUTHENTICATION_SERVICES.append({
+            'name': name,
+            'url': url,
+            'icon': icon,
+            })
 
 
 _AUTHENTICATION_SERVICES = []
@@ -175,9 +222,14 @@ def _dispatch(request, pool, *args, **kwargs):
         abort(HTTPStatus.FORBIDDEN)
 
     user = request.user_id
-    session = None
-    if request.authorization.type == 'session':
-        session = request.authorization.get('session')
+    if request.session:
+        username = request.session.username
+        session = request.session.token
+    elif request.authorization:
+        username = request.authorization.username
+        session = None
+    if isinstance(username, bytes):
+        username = username.decode('utf-8')
 
     if rpc.fresh_session and session:
         context = {'_request': request.context}
@@ -186,13 +238,14 @@ def _dispatch(request, pool, *args, **kwargs):
             abort(HTTPStatus.UNAUTHORIZED)
 
     log_message = '%s.%s%s from %s@%s%s in %i ms'
-    username = request.authorization.username
-    if isinstance(username, bytes):
-        username = username.decode('utf-8')
     log_args = (
         obj.__name__, method,
         format_args(args, kwargs, logger.isEnabledFor(logging.DEBUG)),
         username, request.remote_addr, request.path)
+
+    def raise_timeout(ident):
+        ctypes.pythonapi.PyThreadState_SetAsyncExc(
+            ctypes.c_ulong(ident), ctypes.py_object(TimeOutException))
 
     def duration():
         return (time.monotonic() - started) * 1000
@@ -201,37 +254,51 @@ def _dispatch(request, pool, *args, **kwargs):
     retry = config.getint('database', 'retry')
     count = 0
     transaction_extras = {}
+    timer = None
     while True:
+        if timer is not None:
+            timer.cancel()
         if count:
             time.sleep(0.02 * count)
         with Transaction().start(
                 pool.database_name, user,
                 readonly=rpc.readonly, timeout=rpc.timeout,
                 **transaction_extras) as transaction:
+            if rpc.timeout:
+                timer = threading.Timer(
+                    rpc.timeout, raise_timeout, (threading.get_ident(),))
+                timer.start()
             try:
-                c_args, c_kwargs, transaction.context, transaction.timestamp \
-                    = rpc.convert(obj, *args, **kwargs)
-                transaction.context['_request'] = request.context
-                meth = rpc.decorate(getattr(obj, method))
-                if (rpc.instantiate is None
-                        or not is_instance_method(obj, method)):
-                    result = rpc.result(meth(*c_args, **c_kwargs))
-                else:
-                    assert rpc.instantiate == 0
-                    inst = c_args.pop(0)
-                    if hasattr(inst, method):
-                        result = rpc.result(meth(inst, *c_args, **c_kwargs))
+                try:
+                    (c_args, c_kwargs,
+                        transaction.context, transaction.timestamp) \
+                        = rpc.convert(obj, *args, **kwargs)
+                    transaction.context['_request'] = request.context
+                    meth = rpc.decorate(getattr(obj, method))
+                    if (rpc.instantiate is None
+                            or not is_instance_method(obj, method)):
+                        result = rpc.result(meth(*c_args, **c_kwargs))
                     else:
-                        result = [rpc.result(meth(i, *c_args, **c_kwargs))
-                            for i in inst]
+                        assert rpc.instantiate == 0
+                        inst = c_args.pop(0)
+                        if hasattr(inst, method):
+                            result = rpc.result(
+                                meth(inst, *c_args, **c_kwargs))
+                        else:
+                            result = [rpc.result(meth(i, *c_args, **c_kwargs))
+                                for i in inst]
+                finally:
+                    if timer is not None:
+                        timer.cancel()
             except TransactionError as e:
                 transaction.rollback()
                 transaction.tasks.clear()
                 e.fix(transaction_extras)
                 continue
-            except backend.DatabaseTimeoutError:
-                logger.warning(log_message, *log_args, exc_info=True)
-                abort(HTTPStatus.REQUEST_TIMEOUT)
+            except (backend.DatabaseTimeoutError, TimeOutException):
+                logger.warning(
+                    log_message, *log_args, duration(), exc_info=True)
+                abort(HTTPStatus.GATEWAY_TIMEOUT)
             except backend.DatabaseOperationalError:
                 if count < retry and not rpc.readonly:
                     transaction.rollback()

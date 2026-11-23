@@ -7,7 +7,6 @@ from trytond.model import ModelView, Workflow, fields
 from trytond.modules.product import round_price
 from trytond.pool import Pool, PoolMeta
 from trytond.pyson import Eval
-from trytond.tools import grouped_slice
 from trytond.transaction import Transaction
 
 
@@ -30,11 +29,12 @@ class Invoice(metaclass=PoolMeta):
 
     @classmethod
     def _post(cls, invoices):
-        # Create commission only the first time the invoice is posted
-        to_commission = [i for i in invoices
-            if i.state not in ['posted', 'paid']]
-        super()._post(invoices)
-        cls.create_commissions(to_commission)
+        with cls.bulk_func('create_commissions', auto=False) as create:
+            # Create commission only the first time the invoice is posted
+            for invoice in invoices:
+                if invoice.state not in {'posted', 'paid'}:
+                    create.push(invoice)
+            super()._post(invoices)
 
     @classmethod
     def create_commissions(cls, invoices):
@@ -59,15 +59,13 @@ class Invoice(metaclass=PoolMeta):
         for company, c_invoices in groupby(invoices, key=lambda i: i.company):
             with Transaction().set_context(company=company.id):
                 today = Date.today()
-            for sub_invoices in grouped_slice(list(c_invoices)):
-                ids = [i.id for i in sub_invoices]
-                for commission in Commission.search([
-                            ('date', '=', None),
-                            ('origin.invoice', 'in', ids,
-                                'account.invoice.line'),
-                            ]):
-                    date = commission.origin.invoice.reconciled or today
-                    date2commissions[date].append(commission)
+            for commission in Commission.search([
+                        ('date', '=', None),
+                        ('origin.invoice', 'in', list(c_invoices),
+                            'account.invoice.line'),
+                        ]):
+                date = commission.origin.invoice.reconciled or today
+                date2commissions[date].append(commission)
         to_write = []
         for date, commissions in date2commissions.items():
             to_write.append(commissions)
@@ -101,24 +99,21 @@ class Invoice(metaclass=PoolMeta):
         super().cancel(invoices)
         cls.set_commissions_date(invoices_to_set_date)
 
-        to_delete = []
-        to_save = []
-        for sub_invoices in grouped_slice(invoices_to_revert_commission):
-            ids = [i.id for i in sub_invoices]
-            to_delete += Commission.search([
-                    ('invoice_line', '=', None),
-                    ('origin.invoice', 'in', ids, 'account.invoice.line'),
-                    ])
-            to_cancel = Commission.search([
-                    ('invoice_line', '!=', None),
-                    ('origin.invoice', 'in', ids, 'account.invoice.line'),
-                    ])
-            for commission in Commission.copy(to_cancel):
-                commission.amount *= -1
-                to_save.append(commission)
+        with Commission.bulk_delete() as delete:
+            delete.extend(Commission.search([
+                        ('invoice_line', '=', None),
+                        ('origin.invoice', 'in', invoices_to_revert_commission,
+                            'account.invoice.line'),
+                        ]))
 
-        Commission.delete(to_delete)
-        Commission.save(to_save)
+        to_cancel = Commission.search([
+                ('invoice_line', '!=', None),
+                ('origin.invoice', 'in', invoices_to_revert_commission,
+                    'account.invoice.line'),
+                ])
+        Commission.copy(to_cancel, default={
+                'amount': lambda data: -data['amount'],
+                })
 
     def _credit(self, **values):
         values.setdefault('agent', self.agent)

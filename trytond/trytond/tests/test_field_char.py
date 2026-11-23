@@ -3,14 +3,14 @@
 # this repository contains the full copyright notices and license terms.
 import unittest
 
-from sql import Literal
+from sql import Literal, Select
 
 from trytond import backend
 from trytond.model.exceptions import (
     ForbiddenCharValidationError, RequiredValidationError, SizeValidationError)
 from trytond.pool import Pool
 from trytond.tests.test_tryton import (
-    ExtensionTestCase, TestCase, activate_module, with_transaction)
+    DBTestCase, ExtensionTestCase, with_transaction)
 from trytond.transaction import Transaction
 
 
@@ -55,9 +55,17 @@ class CommonTestCaseMixin:
         chars_bar = Char.search([
                 ('char', '=', "Bar"),
                 ])
+        chars_select_foo = Char.search([
+                ('char', '=', Select([Literal('Foo')])),
+                ])
+        chars_select_bar = Char.search([
+                ('char', '=', Select([Literal('Bar')])),
+                ])
 
         self.assertListEqual(chars_foo, [char])
         self.assertListEqual(chars_bar, [])
+        self.assertListEqual(chars_select_foo, [char])
+        self.assertListEqual(chars_select_bar, [])
 
     @with_transaction()
     def test_search_equals_none(self):
@@ -178,10 +186,18 @@ class CommonTestCaseMixin:
         chars_empty = Char.search([
                 ('char', 'in', []),
                 ])
+        chars_select_foo = Char.search([
+                ('char', 'in', Select([Literal('Foo')])),
+                ])
+        chars_select_bar = Char.search([
+                ('char', 'in', Select([Literal('Bar')])),
+                ])
 
         self.assertListEqual(chars_foo, [char])
         self.assertListEqual(chars_bar, [])
         self.assertListEqual(chars_empty, [])
+        self.assertListEqual(chars_select_foo, [char])
+        self.assertListEqual(chars_select_bar, [])
 
     @with_transaction()
     def test_search_in_none(self):
@@ -410,13 +426,9 @@ class CommonTestCaseMixin:
         self.assertEqual(char.char_unstripped, " Foo ")
 
 
-class FieldCharTestCase(TestCase, CommonTestCaseMixin):
+class FieldCharTestCase(DBTestCase, CommonTestCaseMixin):
     "Test Field Char"
-
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        activate_module('tests')
+    module = 'tests'
 
     def Char(self):
         return Pool().get('test.char')
@@ -637,13 +649,9 @@ class FieldCharTestCase(TestCase, CommonTestCaseMixin):
         self.assertEqual(read_record.char_unstripped, " Bar ")
 
 
-class FieldCharTranslatedTestCase(TestCase, CommonTestCaseMixin):
+class FieldCharTranslatedTestCase(DBTestCase, CommonTestCaseMixin):
     "Test Field Char Translated"
-
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        activate_module('tests')
+    module = 'tests'
 
     def Char(self):
         return Pool().get('test.char_translate')
@@ -655,6 +663,181 @@ class FieldCharTranslatedTestCase(TestCase, CommonTestCaseMixin):
 
         with self.assertRaises(ValueError):
             Char.create([{'char': Literal('Foo')}])
+
+    @with_transaction()
+    def test_create_with_translations_dict(self):
+        "Test create with translations dictionary"
+        pool = Pool()
+        Language = pool.get('ir.lang')
+        Char = self.Char()
+        transaction = Transaction()
+
+        english, = Language.search([('code', '=', 'en')])
+        english.translatable = True
+        english.save()
+        french, = Language.search([('code', '=', 'fr')])
+        french.translatable = True
+        french.save()
+
+        record, = Char.create([{
+                    'char': {
+                        'en': "foo",
+                        'fr': "bar",
+                        },
+                    }])
+        with transaction.set_context(language='en'):
+            record_en = Char(record.id)
+        with transaction.set_context(language='fr'):
+            record_fr = Char(record.id)
+
+        self.assertEqual(record_en.char, "foo")
+        self.assertEqual(record_fr.char, "bar")
+
+    @with_transaction()
+    def test_write_with_translations_dict(self):
+        "Test write with translations dictionary"
+        pool = Pool()
+        Language = pool.get('ir.lang')
+        Char = self.Char()
+        transaction = Transaction()
+
+        english, = Language.search([('code', '=', 'en')])
+        english.translatable = True
+        english.save()
+        french, = Language.search([('code', '=', 'fr')])
+        french.translatable = True
+        french.save()
+
+        record, = Char.create([{}])
+        Char.write([record], {
+                'char': {
+                    'en': "foo",
+                    'fr': "bar",
+                    },
+                })
+        with transaction.set_context(language='en'):
+            record_en = Char(record.id)
+        with transaction.set_context(language='fr'):
+            record_fr = Char(record.id)
+
+        self.assertEqual(record_en.char, "foo")
+        self.assertEqual(record_fr.char, "bar")
+
+    @with_transaction()
+    def test_create_with_translations_dict_size_valid(self):
+        "Test create with translation and size"
+        pool = Pool()
+        Char = pool.get('test.char_translated_size')
+
+        record, = Char.create([{
+                    'char': {
+                        'en': "foo",
+                        'fr': "bar",
+                        },
+                    }])
+
+    @with_transaction()
+    def test_create_with_translations_dict_size_invalid(self):
+        "Test create with translation and size"
+        pool = Pool()
+        Char = pool.get('test.char_translated_size')
+
+        with self.assertRaises(SizeValidationError):
+            record, = Char.create([{
+                        'char': {
+                            'en': "foobar",
+                            'fr': "bar",
+                            },
+                        }])
+
+    @with_transaction()
+    def test_write_with_translations_dict_size_valid(self):
+        "Test write with translation and size"
+        pool = Pool()
+        Char = pool.get('test.char_translated_size')
+
+        record, = Char.create([{}])
+
+        Char.write([record], {
+                'char': {
+                    'en': "foo",
+                    'fr': "bar",
+                    },
+                })
+
+    @with_transaction()
+    def test_write_with_translations_dict_size_invalid(self):
+        "Test write with translation and size"
+        pool = Pool()
+        Char = pool.get('test.char_translated_size')
+
+        record, = Char.create([{}])
+
+        with self.assertRaises(SizeValidationError):
+            record, = Char.write([record], {
+                    'char': {
+                        'en': "foobar",
+                        'fr': "bar",
+                        },
+                    })
+
+    @with_transaction()
+    def test_create_with_translations_dict_required_with_value(self):
+        "Test create with translation required with value"
+        pool = Pool()
+        Char = pool.get('test.char_translated_required')
+
+        record, = Char.create([{
+                    'char': {
+                        'en': "foo",
+                        'fr': "bar",
+                        },
+                    }])
+
+    @with_transaction()
+    def test_create_with_translations_dict_required_without_value(self):
+        "Test create with translation required without value"
+        pool = Pool()
+        Char = pool.get('test.char_translated_required')
+
+        with self.assertRaises(RequiredValidationError):
+            record, = Char.create([{
+                        'char': {
+                            'en': None,
+                            'fr': "bar",
+                            },
+                        }])
+
+    @with_transaction()
+    def test_write_with_translations_dict_required_with_value(self):
+        "Test write with translation required with value"
+        pool = Pool()
+        Char = pool.get('test.char_translated_required')
+
+        record, = Char.create([{'char': "Test"}])
+
+        Char.write([record], {
+                'char': {
+                    'en': "foo",
+                    'fr': "bar",
+                    },
+                })
+
+    @with_transaction()
+    def test_write_with_translations_dict_required_without_value(self):
+        "Test create with translation required without value"
+        pool = Pool()
+        Char = pool.get('test.char_translated_required')
+
+        record, = Char.create([{'char': "Test"}])
+
+        with self.assertRaises(RequiredValidationError):
+            Char.write([record], {
+                    'char': {
+                        'en': None,
+                        'fr': "bar",
+                        },
+                    })
 
     @with_transaction()
     def test_translation_default_language_cache(self):
@@ -709,12 +892,8 @@ class FieldCharTranslatedTestCase(TestCase, CommonTestCaseMixin):
     "unaccent works only on postgresql")
 class FieldCharUnaccentedTestCase(ExtensionTestCase):
     "Test Field Char with unaccented searches"
+    module = 'tests'
     extension = 'unaccent'
-
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        activate_module('tests')
 
     @with_transaction()
     def test_normal_search(self):
@@ -789,12 +968,8 @@ class FieldCharUnaccentedTestCase(ExtensionTestCase):
     "similarity works only on postgresql")
 class FieldCharSimilarityTestCase(ExtensionTestCase):
     "Test Field Char with similarity searches"
+    module = 'tests'
     extension = 'pg_trgm'
-
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        activate_module('tests')
 
     def _test_search(self, Model):
         record1, record2 = Model.create([{
@@ -819,6 +994,40 @@ class FieldCharSimilarityTestCase(ExtensionTestCase):
         "Test search translated"
         pool = Pool()
         self._test_search(pool.get('test.char_translate'))
+
+    @with_transaction()
+    def test_search_empty(self):
+        "Test a full text search with an empty string"
+        pool = Pool()
+        Char = pool.get('test.char')
+
+        record1, record2 = Char.create([{
+                    'char': "word",
+                    }, {
+                    'char': "",
+                    }])
+
+        with Transaction().set_context(search_similarity=0.3):
+            self.assertEqual(
+                Char.search([('char', 'ilike', '')]),
+                [record2])
+
+    @with_transaction()
+    def test_search_null(self):
+        "Test a full text search with NULL"
+        pool = Pool()
+        Char = pool.get('test.char')
+
+        record1, record2 = Char.create([{
+                    'char': "word",
+                    }, {
+                    'char': None,
+                    }])
+
+        with Transaction().set_context(search_similarity=0.3):
+            self.assertEqual(
+                Char.search([('char', 'ilike', None)]),
+                [record2])
 
     def _test_order(self, Model):
         record1, record2 = Model.create([{

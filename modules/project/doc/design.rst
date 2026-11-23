@@ -5,6 +5,22 @@ Design
 The *Project Module* introduces some new concepts and extends some existing
 concepts:
 
+.. _model-project.configuration:
+
+Configuration
+=============
+
+The *Project Configuration* contains the settings used to configure the
+behavior for project related activities.
+
+.. seealso::
+
+   Project configuration settings are found by opening the main menu item:
+      |Projects --> Configuration --> Configuration|__
+
+      .. |Projects --> Configuration --> Configuration| replace:: :menuselection:`Projects --> Configuration --> Configuration`
+      __ https://demo.tryton.org/model/project.configuration/1
+
 .. _model-project.work:
 
 Work Effort
@@ -13,8 +29,8 @@ Work Effort
 The *Work Effort* concept is used to represent work that must be done for
 projects, or parts of projects.
 
-Each *Work Effort* is described by a name and a type, and there is space
-for additional comments to be added when required.
+Each *Work Effort* is described by a name, a number and a type, and there is
+space for additional comments to be added when required.
 
 The estimated time and effort needed for the work is recorded, and it is also
 possible to track the actual time and effort required.

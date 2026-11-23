@@ -259,37 +259,46 @@ class Wizard(URLMixin, PoolBase):
             model = context.get('active_model')
             if model:
                 Model = pool.get(model)
-            if model and model != 'ir.ui.menu':
-                ModelAccess.check(model, 'read')
-            models = ActionWizard.get_models(
-                cls.__name__, action_id=context.get('action_id'))
-            if model and models and model not in models:
-                groups = Group.browse(User.get_groups())
-                raise AccessError(
-                    gettext(
-                        'ir.msg_access_wizard_model_error',
-                        wizard=cls.__name__,
-                        model=model),
-                    gettext(
-                        'ir.msg_context_groups',
-                        groups=', '.join(g.rec_name for g in groups)))
-            groups = set(User.get_groups())
-            wizard_groups = ActionWizard.get_groups(cls.__name__,
-                action_id=context.get('action_id'))
-            if wizard_groups:
-                if not groups & wizard_groups:
+            if not User.is_administrator():
+                if model and model != 'ir.ui.menu':
+                    ModelAccess.check(model, 'read')
+                models = ActionWizard.get_models(
+                    cls.__name__, action_id=context.get('action_id'))
+                if models and (not model or model not in models):
                     groups = Group.browse(User.get_groups())
                     raise AccessError(
                         gettext(
-                            'ir.msg_access_wizard_error',
-                            wizard=cls.__name__),
+                            'ir.msg_access_wizard_model_error',
+                            wizard=cls.__name__,
+                            model=model),
                         gettext(
                             'ir.msg_context_groups',
                             groups=', '.join(g.rec_name for g in groups)))
-            elif model and model != 'ir.ui.menu' and not transaction.readonly:
-                if (not callable(getattr(Model, 'table_query', None))
-                        or Model.write.__func__ != ModelSQL.write.__func__):
-                    ModelAccess.check(model, 'write')
+                groups = set(User.get_groups())
+                wizard_groups = ActionWizard.get_groups(cls.__name__,
+                    action_id=context.get('action_id'))
+                if wizard_groups:
+                    if not groups & wizard_groups:
+                        groups = Group.browse(User.get_groups())
+                        raise AccessError(
+                            gettext(
+                                'ir.msg_access_wizard_error',
+                                wizard=cls.__name__),
+                            gettext(
+                                'ir.msg_context_groups',
+                                groups=', '.join(g.rec_name for g in groups)))
+                elif (model and model != 'ir.ui.menu'
+                        and not transaction.readonly):
+                    if (not callable(getattr(Model, 'table_query', None))
+                            or Model.write.__func__ != ModelSQL.write.__func__
+                            ):
+                        ModelAccess.check(model, 'write')
+
+                if not models and not wizard_groups:
+                    raise AccessError(
+                        gettext(
+                            'ir.msg_access_wizard_error',
+                            wizard=cls.__name__))
 
             if model:
                 ids = context.get('active_ids') or []
@@ -303,20 +312,25 @@ class Wizard(URLMixin, PoolBase):
     def create(cls):
         "Create a session"
         Session = Pool().get('ir.session.wizard')
-        cls.check_access()
         return (Session.create([{}])[0].id, cls.start_state, cls.end_state)
 
     @classmethod
     def delete(cls, session_id):
         "Delete the session"
-        Session = Pool().get('ir.session.wizard')
+        pool = Pool()
+        Session = pool.get('ir.session.wizard')
+        transaction = Transaction()
+        session = Session(session_id)
+        if session.create_uid.id != transaction.user:
+            raise AccessError(
+                gettext('ir.msg_access_wizard_error', wizard=cls.__name__))
         end = getattr(cls, cls.end_state, None)
         if end:
             wizard = cls(session_id)
             action = end(wizard)
         else:
             action = None
-        Session.delete([Session(session_id)])
+        Session.delete([session])
         return action
 
     @classmethod
@@ -398,8 +412,12 @@ class Wizard(URLMixin, PoolBase):
     def __init__(self, session_id):
         pool = Pool()
         Session = pool.get('ir.session.wizard')
-        self._session_id = session_id
+        transaction = Transaction()
         session = Session(session_id)
+        if session.create_uid.id != transaction.user:
+            raise AccessError(
+                gettext('ir.msg_access_wizard_error', wizard=self.__name__))
+        self._session_id = session.id
         data = defaultdict(dict)
         data.update(json.loads(session.data, object_hook=JSONDecoder()))
         for state_name, state in self.states.items():

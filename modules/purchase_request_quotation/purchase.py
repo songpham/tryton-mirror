@@ -5,7 +5,7 @@ from functools import wraps
 from itertools import groupby
 
 from sql import Null
-from sql.conditionals import Case
+from sql.conditionals import Case, Coalesce
 from sql.functions import CharLength
 
 from trytond.i18n import gettext
@@ -111,7 +111,7 @@ class Quotation(Workflow, ModelSQL, ModelView, ChatMixin):
     supplier = fields.Many2One(
         'party.party', "Supplier", required=True,
         states={
-            'readonly': Eval('lines', [0]) & Eval('supplier'),
+            'editable': ~(Eval('lines', [0]) & Eval('supplier', None)),
             },
         context={
             'company': Eval('company', -1),
@@ -140,7 +140,7 @@ class Quotation(Workflow, ModelSQL, ModelView, ChatMixin):
         super().__setup__()
         t = cls.__table__()
         cls._sql_indexes.update({
-                Index(t, (t.reference, Index.Similarity())),
+                Index(t, (Coalesce(t.reference, ''), Index.Similarity())),
                 Index(
                     t, (t.state, Index.Equality(cardinality='low')),
                     where=t.state.in_(['draft', 'sent'])),
@@ -421,6 +421,29 @@ class QuotationLine(ModelSQL, ModelView):
         return domain
 
     @classmethod
+    def on_modification(cls, mode, records, field_names=None):
+        pool = Pool()
+        Request = pool.get('purchase.request')
+        super().on_modification(mode, records, field_names=field_names)
+        if mode in {'create', 'write'}:
+            if field_names is None or 'request' in field_names:
+                requests = {r.request for r in records if r.request}
+                if requests:
+                    Request.update_state(requests)
+
+    @classmethod
+    def on_write(cls, lines, values):
+        pool = Pool()
+        Request = pool.get('purchase.request')
+
+        callback = super().on_write(lines, values)
+
+        if 'request' in values:
+            if requests := {l.request for l in lines if l.request}:
+                callback.append(lambda: Request.update_state(requests))
+        return callback
+
+    @classmethod
     def on_delete(cls, lines):
         pool = Pool()
         Request = pool.get('purchase.request')
@@ -636,7 +659,7 @@ class PurchaseRequest(metaclass=PoolMeta):
                 cls.state.selection.append(s)
         cls._buttons.update({
                 'create_quotation': {
-                    'invisible': Eval('state').in_(
+                    'invisible': ~Eval('state').in_(
                         ['draft', 'quotation', 'received']),
                     'depends': ['state'],
                     },
@@ -668,15 +691,12 @@ class CreatePurchase(Wizard):
         super().__setup__()
 
     def transition_start(self):
-        to_save = []
-        reqs = [r for r in self.records
-            if not r.purchase_line and r.quotation_lines]
-        to_save = []
-        for req in reqs:
-            if req.best_quotation_line:
-                to_save.append(self.apply_quotation(req))
-        if to_save:
-            self.model.save(to_save)
+        reqs = (r for r in self.records
+            if not r.purchase_line and r.quotation_lines)
+        with self.model.bulk_save() as save:
+            for req in reqs:
+                if req.best_quotation_line:
+                    save.push(self.apply_quotation(req))
         state = super().transition_start()
         return state
 

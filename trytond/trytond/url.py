@@ -14,6 +14,7 @@ HOSTNAME = (config.get('web', 'hostname')
     or socket.getfqdn())
 HOSTNAME = '.'.join(encodings.idna.ToASCII(part).decode('ascii')
     if part else '' for part in HOSTNAME.split('.'))
+ROOT_PATH = config.get('web', 'root_path')
 
 
 class URLAccessor(object):
@@ -23,36 +24,60 @@ class URLAccessor(object):
         self._protocol = protocol
 
     @classmethod
-    def is_secure(cls):
-        context = Transaction().context
-        if context:
-            request = context.get('_request')
-            if request and request['is_secure']:
-                return True
+    def is_secure(cls, request=None):
+        if request is None:
+            context = Transaction().context
+            if context:
+                request = context.get('_request')
+        if request and request.get('is_secure'):
+            return True
         return bool(
             config.get('ssl', 'certificate')
             or config.get('ssl', 'privatekey'))
 
     @classmethod
-    def host(cls):
-        context = Transaction().context
-        if context:
-            request = context.get('_request')
-            if request:
-                return request['http_host']
+    def host(cls, request=None):
+        if request is None:
+            context = Transaction().context
+            if context:
+                request = context.get('_request')
+        if request and 'http_host' in request:
+            return request['http_host']
         return HOSTNAME
 
     @classmethod
-    def http_host(cls):
+    def http_host(cls, request=None):
         return urllib.parse.urlunsplit((
                 'http' + ('s' if cls.is_secure() else ''),
-                cls.host(), '', '', ''))
+                cls.host(request=request), '', '', ''))
+
+    @classmethod
+    def http_root_path(cls, request=None):
+        if request is None:
+            context = Transaction().context
+            if context:
+                request = context.get('_request')
+        if request and 'root_path' in request:
+            return request['root_path']
+        return ROOT_PATH
+
+    @classmethod
+    def http_base(cls, request=None):
+        return urllib.parse.urljoin(
+            cls.http_host(request=request),
+            cls.http_root_path(request=request))
 
     @property
-    def protocol(self):
+    def protocol(self, request=None):
         if self._protocol == 'http':
-            return 'http' + ('s' if self.is_secure() else '')
+            return 'http' + ('s' if self.is_secure(request=request) else '')
         return self._protocol
+
+    @property
+    def root_path(self, request=None):
+        if self._protocol == 'http':
+            return self.http_root_path(request=request)
+        return '/'
 
     @property
     def separator(self):
@@ -82,13 +107,15 @@ class URLAccessor(object):
             '%(database)s/%(type)s/%(name)s' % url_part)
         if isinstance(inst, Model) and inst.id:
             local_part += '/%d' % inst.id
-        return '%s://%s/%s%s' % (
-            self.protocol, self.host(), self.separator, local_part)
+        return (
+            f'{self.protocol}://{self.host()}{self.root_path}'
+            f'{self.separator}{local_part}')
 
 
 is_secure = URLAccessor.is_secure
 host = URLAccessor.host
 http_host = URLAccessor.http_host
+http_base = URLAccessor.http_base
 
 
 class URLMixin:

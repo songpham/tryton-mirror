@@ -64,12 +64,22 @@ class BinaryMixin(Widget):
     def filename_field(self):
         return self.record.group.fields.get(self.filename)
 
+    default_filters = None
+
     @property
     def filters(self):
-        filter_all = Gtk.FileFilter()
-        filter_all.set_name(_('All files'))
-        filter_all.add_pattern("*")
-        return [filter_all]
+        file_filter = Gtk.FileFilter()
+        if filters := self.attrs.get('filters', self.default_filters):
+            file_filter.set_name(_("All Supported Types"))
+            for type in filters.split(','):
+                if type.startswith('.'):
+                    file_filter.add_pattern(type)
+                else:
+                    file_filter.add_mime_type(type)
+        else:
+            file_filter.set_name(_("All files"))
+            file_filter.add_pattern("*")
+        return [file_filter]
 
     @property
     def preview(self):
@@ -104,8 +114,10 @@ class BinaryMixin(Widget):
         uri = unquote(uri)
         self.field.set_client(self.record, url_open(uri).read())
         if self.filename_field:
-            self.filename_field.set_client(self.record,
-                os.path.basename(urlparse(uri).path))
+            filename = os.path.basename(urlparse(uri).path)
+            if ext := self.field.attrs.get('filename_ext'):
+                filename = filename.removesuffix(os.path.extsep + ext)
+            self.filename_field.set_client(self.record, filename)
 
     def get_data(self):
         if hasattr(self.field, 'get_data'):
@@ -117,11 +129,15 @@ class BinaryMixin(Widget):
         return data
 
     def open_(self, widget=None):
-        if not self.filename_field:
-            return
-        filename = self.filename_field.get(self.record)
+        filename = None
+        if self.filename_field:
+            filename = self.filename_field.get(self.record)
+        if not filename:
+            filename = self.record.rec_name()
         if not filename:
             return
+        if ext := self.field.attrs.get('filename_ext'):
+            filename = ''.join([filename, os.extsep, ext])
         file_path = file_write(filename, self.get_data())
         root, type_ = os.path.splitext(filename)
         if type_:
@@ -129,9 +145,13 @@ class BinaryMixin(Widget):
         file_open(file_path, type_)
 
     def save_as(self, widget=None):
-        filename = ''
+        filename = None
         if self.filename_field:
             filename = self.filename_field.get(self.record)
+        if not filename:
+            filename = self.record.rec_name()
+        if ext := self.field.attrs.get('filename_ext'):
+            filename = ''.join([filename, os.extsep, ext])
         filename = file_selection(_('Save As...'), filename=filename,
             action=Gtk.FileChooserAction.SAVE)
         if filename:
@@ -173,6 +193,10 @@ class Binary(BinaryMixin, Widget):
         self.widget.pack_start(
             self.toolbar(), expand=False, fill=False, padding=0)
 
+    @property
+    def _styled_widget(self):
+        return self.wid_size
+
     def _readonly_set(self, value):
         self.but_select.set_sensitive(not value)
         self.but_clear.set_sensitive(not value)
@@ -209,12 +233,13 @@ class Binary(BinaryMixin, Widget):
             size = self.field.get_size(self.record)
         else:
             size = len(self.field.get(self.record))
-        self.wid_size.set_text(common.humanize(size or 0, 'B'))
+        self.wid_size.set_text(
+            common.humanize(size, 'B') if size is not None else '')
         reset_position(self.wid_size)
         if self.wid_text:
             self.wid_text.set_text(self.filename_field.get(self.record) or '')
             reset_position(self.wid_text)
-            if size:
+            if size is not None:
                 icon, tooltip = 'tryton-open', _("Open...")
             else:
                 icon, tooltip = None, ''
@@ -226,7 +251,7 @@ class Binary(BinaryMixin, Widget):
                 pixbuf = None
             self.wid_text.set_icon_from_pixbuf(pos, pixbuf)
             self.wid_text.set_icon_tooltip_text(pos, tooltip)
-        self.update_buttons(bool(size))
+        self.update_buttons(size is not None)
         return True
 
     def set_value(self):

@@ -8,7 +8,7 @@ from itertools import groupby, zip_longest
 
 from dateutil.relativedelta import relativedelta
 from sql import Column, Literal, Null, Window
-from sql.aggregate import Count, Min, Sum
+from sql.aggregate import Count, Sum
 from sql.conditionals import Case, Coalesce
 
 from trytond import backend
@@ -22,8 +22,7 @@ from trytond.pool import Pool
 from trytond.pyson import Bool, Eval, Id, If, PYSONEncoder
 from trytond.report import Report
 from trytond.tools import (
-    grouped_slice, is_full_text, lstrip_wildcard, reduce_ids,
-    sqlite_apply_types)
+    is_full_text, lstrip_wildcard, pair, sql_pairing, sqlite_apply_types)
 from trytond.transaction import Transaction, check_access, inactive_records
 from trytond.wizard import (
     Button, StateAction, StateTransition, StateView, Wizard)
@@ -126,8 +125,8 @@ def TypeMixin(template=False):
             field = getattr(Mixin, fname)
             if not isinstance(field, fields.Field):
                 continue
-            field.states['readonly'] = (
-                Bool(Eval('template', -1)) & ~Eval('template_override', False))
+            field.states['ediable'] = (
+                ~Eval('template', None) | Eval('template_override', False))
     return Mixin
 
 
@@ -217,8 +216,9 @@ class Type(
     parent = fields.Many2One(
         'account.account.type', 'Parent', ondelete='RESTRICT',
         states={
-            'readonly': (Bool(Eval('template', -1))
-                & ~Eval('template_override', False)),
+            'editable': (
+                ~Eval('template', None)
+                | Eval('template_override', False)),
             },
         domain=[
             ('company', '=', Eval('company', -1)),
@@ -396,27 +396,26 @@ class Type(
             self.write(*values)
 
         # Update parent
-        to_save = []
         childs = [self]
-        while childs:
-            for child in childs:
-                if child.template:
-                    if not child.template_override:
-                        if child.template.parent:
-                            # Fallback to current parent
-                            # to keep under the same root
-                            parent = template2type.get(
-                                child.template.parent.id,
-                                child.parent)
-                        else:
-                            parent = None
-                        old_parent = (
-                            child.parent.id if child.parent else None)
-                        if parent != old_parent:
-                            child.parent = parent
-                            to_save.append(child)
-            childs = sum((c.childs for c in childs), ())
-        self.__class__.save(to_save)
+        with self.__class__.bulk_save() as save:
+            while childs:
+                for child in childs:
+                    if child.template:
+                        if not child.template_override:
+                            if child.template.parent:
+                                # Fallback to current parent
+                                # to keep under the same root
+                                parent = template2type.get(
+                                    child.template.parent.id,
+                                    child.parent)
+                            else:
+                                parent = None
+                            old_parent = (
+                                child.parent.id if child.parent else None)
+                            if parent != old_parent:
+                                child.parent = parent
+                                save.push(child)
+                childs = sum((c.childs for c in childs), ())
 
 
 class OpenType(Wizard):
@@ -528,6 +527,7 @@ def AccountMixin(template=False):
 
         @classmethod
         def __setup__(cls):
+            cls.code.search_unaccented = False
             super().__setup__()
 
             if not cls.childs.domain:
@@ -629,8 +629,8 @@ def AccountMixin(template=False):
             if (not isinstance(field, fields.Field)
                     or isinstance(field, fields.Function)):
                 continue
-            field.states['readonly'] = (
-                Bool(Eval('template', -1)) & ~Eval('template_override', False))
+            field.states['editable'] = (
+                ~Eval('template', None) | Eval('template_override', False))
     return Mixin
 
 
@@ -828,8 +828,7 @@ class Account(
         ModelSQL, ModelView):
     __name__ = 'account.account'
     _states = {
-        'readonly': (Bool(Eval('template', -1))
-            & ~Eval('template_override', False)),
+        'editable': ~Eval('template', None) | Eval('template_override', False),
         }
     company = fields.Many2One('company.company', 'Company', required=True,
             ondelete="RESTRICT")
@@ -842,14 +841,14 @@ class Account(
             ('id', '!=', Eval('currency', -1)),
             ],
         states={
-            'readonly': _states['readonly'],
+            'editable': _states['editable'],
             'invisible': ~Eval('deferral', False),
             },
         help="Force all moves for this account to have this second currency.")
     type = fields.Many2One(
         'account.account.type', "Type", ondelete='RESTRICT',
         states={
-            'readonly': _states['readonly'],
+            'editable': _states['editable'],
             },
         domain=[
             ('company', '=', Eval('company', -1)),
@@ -857,10 +856,10 @@ class Account(
     debit_type = fields.Many2One(
         'account.account.type', "Debit Type", ondelete='RESTRICT',
         states={
-            'readonly': _states['readonly'],
+            'editable': _states['editable'],
             'invisible': (
                 ~Eval('type') | Eval('credit_type')
-                | (_states['readonly']) & ~Eval('debit_type')),
+                | (_states['editable']) & ~Eval('debit_type')),
             },
         domain=[
             ('company', '=', Eval('company', -1)),
@@ -872,10 +871,10 @@ class Account(
     credit_type = fields.Many2One(
         'account.account.type', "Credit Type", ondelete='RESTRICT',
         states={
-            'readonly': _states['readonly'],
+            'editable': _states['editable'],
             'invisible': (
                 ~Eval('type') | Eval('debit_type')
-                | (_states['readonly']) & ~Eval('credit_type')),
+                | (_states['editable']) & ~Eval('credit_type')),
             },
         domain=[
             ('company', '=', Eval('company', -1)),
@@ -939,7 +938,7 @@ class Account(
         'account.account', "Replaced By",
         domain=[('company', '=', Eval('company', -1))],
         states={
-            'readonly': _states['readonly'],
+            'editable': _states['editable'],
             'invisible': ~Eval('end_date'),
             })
     template = fields.Many2One('account.account.template', 'Template')
@@ -955,8 +954,9 @@ class Account(
         super().__setup__()
         for date in [cls.start_date, cls.end_date]:
             date.states = {
-                'readonly': (Bool(Eval('template', -1))
-                    & ~Eval('template_override', False)),
+                'editable': (
+                    ~Eval('template', None)
+                    | Eval('template_override', False)),
                 }
         cls._order.insert(0, ('code', 'ASC'))
         cls._order.insert(1, ('name', 'ASC'))
@@ -965,11 +965,17 @@ class Account(
             ('only_one_debit_credit_types', Check(
                     table, (table.debit_type + table.credit_type) == Null),
                 'account.msg_only_one_debit_credit_types'))
-        cls._sql_indexes.add(
-            Index(
-                table,
-                (table.left, Index.Range(cardinality='high')),
-                (table.right, Index.Range(cardinality='high'))))
+        cls._sql_indexes.update({
+                Index(table,
+                    (Coalesce(table.code, ''),
+                        Index.Equality(cardinality='high'))),
+                Index(table,
+                    (Coalesce(table.code, ''),
+                        Index.Similarity(cardinality='high'))),
+                Index(
+                    table,
+                    (table.left, Index.Range(cardinality='high')),
+                    (table.right, Index.Range(cardinality='high')))})
 
     @classmethod
     def validate_fields(cls, accounts, field_names):
@@ -1007,6 +1013,7 @@ class Account(
         FiscalYear = pool.get('account.fiscalyear')
         transaction = Transaction()
         cursor = transaction.connection.cursor()
+        context = transaction.context
 
         table_a = cls.__table__()
         table_c = cls.__table__()
@@ -1017,22 +1024,26 @@ class Account(
             ids = [a.id for a in c_accounts]
             with transaction.set_context(company=company.id):
                 line_query, fiscalyear_ids = MoveLine.query_get(line)
-            for sub_ids in grouped_slice(ids):
-                red_sql = reduce_ids(table_a.id, sub_ids)
-                query = (table_a.join(table_c,
+            red_sql = fields.SQL_OPERATORS['in'](table_a.id, ids)
+            if context.get('flat_balance'):
+                query = (table_a
+                    .join(line, condition=line.account == table_a.id))
+            else:
+                query = (table_a
+                    .join(table_c,
                         condition=(table_c.left >= table_a.left)
-                        & (table_c.right <= table_a.right)
-                        ).join(line, condition=line.account == table_c.id
-                        ).select(
-                        table_a.id,
-                        Sum(Coalesce(line.debit, 0) - Coalesce(line.credit, 0)
-                            ).as_('balance'),
-                        where=red_sql & line_query,
-                        group_by=table_a.id))
-                if backend.name == 'sqlite':
-                    sqlite_apply_types(query, [None, 'NUMERIC'])
-                cursor.execute(*query)
-                balances.update(dict(cursor))
+                        & (table_c.right <= table_a.right))
+                    .join(line, condition=line.account == table_c.id))
+            query = query.select(
+                table_a.id,
+                Sum(Coalesce(line.debit, 0) - Coalesce(line.credit, 0)
+                    ).as_('balance'),
+                where=red_sql & line_query,
+                group_by=table_a.id)
+            if backend.name == 'sqlite':
+                sqlite_apply_types(query, [None, 'NUMERIC'])
+            cursor.execute(*query)
+            balances.update(dict(cursor))
 
             for account in c_accounts:
                 balances[account.id] = account.currency.round(
@@ -1067,7 +1078,6 @@ class Account(
             col_type = int if name == 'line_count' else Decimal
             result[name] = defaultdict(col_type)
 
-        table = cls.__table__()
         line = MoveLine.__table__()
 
         for company, c_accounts in groupby(accounts, key=lambda a: a.company):
@@ -1075,30 +1085,28 @@ class Account(
             ids = [a.id for a in c_accounts]
             with transaction.set_context(company=company.id):
                 line_query, fiscalyear_ids = MoveLine.query_get(line)
-            columns = [table.id]
+            columns = [line.account]
             types = [None]
             for name in names:
                 if name == 'line_count':
-                    columns.append(Count(Literal('*')))
+                    columns.append(Count())
                     types.append(None)
                 else:
                     columns.append(
                         Sum(Coalesce(Column(line, name), 0)).as_(name))
                     types.append('NUMERIC')
-            for sub_ids in grouped_slice(ids):
-                red_sql = reduce_ids(table.id, sub_ids)
-                query = (table.join(line, 'LEFT',
-                        condition=line.account == table.id
-                        ).select(*columns,
-                        where=red_sql & line_query,
-                        group_by=table.id))
-                if backend.name == 'sqlite':
-                    sqlite_apply_types(query, types)
-                cursor.execute(*query)
-                for row in cursor:
-                    account_id = row[0]
-                    for i, name in enumerate(names, 1):
-                        result[name][account_id] = row[i]
+            where = fields.SQL_OPERATORS['in'](line.account, ids)
+            query = line.select(
+                *columns,
+                where=where & line_query,
+                group_by=line.account)
+            if backend.name == 'sqlite':
+                sqlite_apply_types(query, types)
+            cursor.execute(*query)
+            for row in cursor:
+                account_id = row[0]
+                for i, name in enumerate(names, 1):
+                    result[name][account_id] = row[i]
             for account in c_accounts:
                 for name in names:
                     if name == 'line_count':
@@ -1155,14 +1163,12 @@ class Account(
         if fiscalyear.state == 'closed' and deferral:
             Deferral = pool.get(deferral)
             id2deferral = {}
-            ids = [a.id for a in accounts]
-            for sub_ids in grouped_slice(ids):
-                deferrals = Deferral.search([
-                    ('fiscalyear', '=', fiscalyear.id),
-                    ('account', 'in', list(sub_ids)),
-                    ])
-                for deferral in deferrals:
-                    id2deferral[deferral.account.id] = deferral
+            deferrals = Deferral.search([
+                ('fiscalyear', '=', fiscalyear),
+                ('account', 'in', accounts),
+                ])
+            for deferral in deferrals:
+                id2deferral[deferral.account.id] = deferral
 
             for account in accounts:
                 if account.id in id2deferral:
@@ -1240,26 +1246,24 @@ class Account(
         if field_names and not (field_names & {'closed', 'type'}):
             return
         accounts = [a for a in accounts if a.closed or not a.type]
-        for sub_accounts in grouped_slice(accounts):
-            sub_accounts = list(sub_accounts)
-            if Line.search([
-                        ('account', 'in', [a.id for a in sub_accounts]),
-                        ], order=[], limit=1):
-                for account in sub_accounts:
-                    if not account.closed:
-                        continue
-                    lines = Line.search([
-                            ('account', '=', account.id),
-                            ], order=[], limit=1)
-                    if lines:
-                        if account.closed:
-                            raise AccountValidationError(gettext(
-                                    'account.msg_account_closed_lines',
-                                    account=account.rec_name))
-                        elif account.type:
-                            raise AccountValidationError(gettext(
-                                    'account.msg_account_no_type_lines',
-                                    account=account.rec_name))
+        if Line.search([
+                    ('account', 'in', accounts),
+                    ], order=[], limit=1):
+            for account in accounts:
+                if not account.closed:
+                    continue
+                lines = Line.search([
+                        ('account', '=', account.id),
+                        ], order=[], limit=1)
+                if lines:
+                    if account.closed:
+                        raise AccountValidationError(gettext(
+                                'account.msg_account_closed_lines',
+                                account=account.rec_name))
+                    elif account.type:
+                        raise AccountValidationError(gettext(
+                                'account.msg_account_no_type_lines',
+                                account=account.rec_name))
 
     @classmethod
     def copy(cls, accounts, default=None):
@@ -1268,7 +1272,7 @@ class Account(
         else:
             default = default.copy()
         default.setdefault('template', None)
-        default.setdefault('deferrals', [])
+        default.setdefault('deferrals')
         new_accounts = super().copy(accounts, default=default)
         cls._rebuild_tree('parent', None, 0)
         return new_accounts
@@ -1348,7 +1352,7 @@ class Account(
         childs = [self]
         while childs:
             for child in childs:
-                if not child.template:
+                if not child.template or child.template_override:
                     continue
                 values = {}
                 tax_ids = [template2tax[x.id] for x in child.template.taxes
@@ -1416,6 +1420,26 @@ class Account(
                     }),
             ]
 
+    @classmethod
+    def check_modification(cls, mode, accounts, values=None, external=False):
+        pool = Pool()
+        MoveLine = pool.get('account.move.line')
+        super().check_modification(
+            mode, accounts, values=values, external=external)
+        # Only external to allow update from template
+        if mode == 'write' and external and 'party_required' in values:
+            if to_check := [
+                    a.id for a in accounts
+                    if a.party_required != values['party_required']]:
+                if lines := MoveLine.search([
+                            ('account', 'in', to_check),
+                            ],
+                        limit=1, order=[]):
+                    line, = lines
+                    raise AccessError(gettext(
+                            'account.msg_account_party_required_with_moves',
+                            account=line.account.rec_name))
+
 
 class AccountParty(ActivePeriodMixin, ModelSQL):
     __name__ = 'account.account.party'
@@ -1466,26 +1490,42 @@ class AccountParty(ActivePeriodMixin, ModelSQL):
         Account = pool.get('account.account')
         line = Line.__table__()
         account = Account.__table__()
+        account_p = Account.__table__()
+        account_c = Account.__table__()
 
-        account_party = line.select(
-                Min(line.id).as_('id'), line.account, line.party,
-                where=line.party != Null,
-                group_by=[line.account, line.party])
+        account_party = (line
+            .join(account_c, condition=line.account == account_c.id)
+            .join(account_p,
+                condition=(account_c.left >= account_p.left)
+                & (account_c.right <= account_p.right))
+            .select(
+                account_p.id.as_('account'),
+                line.party.as_('party'),
+                distinct=True,
+                where=(line.party != Null)
+                & (account_p.party_required)))
 
         columns = []
         for fname, field in cls._fields.items():
             if not hasattr(field, 'set'):
-                if fname in {'id', 'account', 'party'}:
+                if fname == 'id':
+                    column = sql_pairing(
+                        account_party.party,
+                        account.id)
+                elif fname == 'account':
+                    column = account.id
+                elif fname == 'party':
                     column = Column(account_party, fname)
                 else:
                     column = Column(account, fname)
                 columns.append(column.as_(fname))
+
         return (
-            account_party.join(
-                account, condition=account_party.account == account.id)
+            account_party
+            .join(account,
+                condition=account_party.account == account.id)
             .select(
-                *columns,
-                where=account.party_required))
+                *columns))
 
     @classmethod
     def get_balance(cls, records, name):
@@ -1495,6 +1535,7 @@ class AccountParty(ActivePeriodMixin, ModelSQL):
         FiscalYear = pool.get('account.fiscalyear')
         transaction = Transaction()
         cursor = transaction.connection.cursor()
+        context = transaction.context
 
         table_a = Account.__table__()
         table_c = Account.__table__()
@@ -1505,37 +1546,32 @@ class AccountParty(ActivePeriodMixin, ModelSQL):
             c_records = list(c_records)
             account_ids = {a.account.id for a in c_records}
             party_ids = {a.party.id for a in c_records}
-            account_party2id = {
-                (a.account.id, a.party.id): a.id for a in c_records}
             with transaction.set_context(company=company.id):
                 line_query, fiscalyear_ids = MoveLine.query_get(line)
-            for sub_account_ids in grouped_slice(account_ids):
-                account_sql = reduce_ids(table_a.id, sub_account_ids)
-                for sub_party_ids in grouped_slice(party_ids):
-                    party_sql = reduce_ids(line.party, sub_party_ids)
-                    query = (table_a.join(table_c,
-                            condition=(table_c.left >= table_a.left)
-                            & (table_c.right <= table_a.right)
-                            ).join(line, condition=line.account == table_c.id
-                            ).select(
-                            table_a.id,
-                            line.party,
-                            Sum(
-                                Coalesce(line.debit, 0)
-                                - Coalesce(line.credit, 0)).as_('balance'),
-                            where=account_sql & party_sql & line_query,
-                            group_by=[table_a.id, line.party]))
-                    if backend.name == 'sqlite':
-                        sqlite_apply_types(query, [None, None, 'NUMERIC'])
-                    cursor.execute(*query)
-                    for account_id, party_id, balance in cursor:
-                        try:
-                            id_ = account_party2id[(account_id, party_id)]
-                        except KeyError:
-                            # There can be more combinations of account-party
-                            # in the database than from records
-                            continue
-                        balances[id_] = balance
+            account_sql = fields.SQL_OPERATORS['in'](table_a.id, account_ids)
+            party_sql = fields.SQL_OPERATORS['in'](line.party, party_ids)
+            if context.get('flat_balance'):
+                query = (table_a
+                    .join(line, condition=line.account == table_a.id))
+            else:
+                query = (table_a
+                    .join(table_c,
+                        condition=(table_c.left >= table_a.left)
+                        & (table_c.right <= table_a.right))
+                    .join(line, condition=line.account == table_c.id))
+            query = query.select(
+                table_a.id,
+                line.party,
+                Sum(
+                    Coalesce(line.debit, 0)
+                    - Coalesce(line.credit, 0)).as_('balance'),
+                where=account_sql & party_sql & line_query,
+                group_by=[table_a.id, line.party])
+            if backend.name == 'sqlite':
+                sqlite_apply_types(query, [None, None, 'NUMERIC'])
+            cursor.execute(*query)
+            for account_id, party_id, balance in cursor:
+                balances[pair(party_id, account_id)] = balance
 
             for record in c_records:
                 balances[record.id] = record.currency.round(
@@ -1567,13 +1603,12 @@ class AccountParty(ActivePeriodMixin, ModelSQL):
             column_type = int if name == 'line_count' else Decimal
             result[name] = defaultdict(column_type)
 
-        table = Account.__table__()
         line = MoveLine.__table__()
-        columns = [table.id, line.party]
+        columns = [line.party, line.account]
         types = [None, None]
         for name in names:
             if name == 'line_count':
-                columns.append(Count(Literal('*')).as_(name))
+                columns.append(Count().as_(name))
                 types.append(None)
             else:
                 columns.append(Sum(Coalesce(Column(line, name), 0)).as_(name))
@@ -1583,33 +1618,23 @@ class AccountParty(ActivePeriodMixin, ModelSQL):
             c_records = list(c_records)
             account_ids = {a.account.id for a in c_records}
             party_ids = {a.party.id for a in c_records}
-            account_party2id = {
-                (a.account.id, a.party.id): a.id for a in c_records}
 
             with transaction.set_context(company=company.id):
                 line_query, fiscalyear_ids = MoveLine.query_get(line)
 
-            for sub_account_ids in grouped_slice(account_ids):
-                account_sql = reduce_ids(table.id, sub_account_ids)
-                for sub_party_ids in grouped_slice(party_ids):
-                    party_sql = reduce_ids(line.party, sub_party_ids)
-                    query = (table.join(line, 'LEFT',
-                            condition=line.account == table.id
-                            ).select(*columns,
-                            where=account_sql & party_sql & line_query,
-                            group_by=[table.id, line.party]))
-                    if backend.name == 'sqlite':
-                        sqlite_apply_types(query, types)
-                    cursor.execute(*query)
-                    for row in cursor:
-                        try:
-                            id_ = account_party2id[tuple(row[0:2])]
-                        except KeyError:
-                            # There can be more combinations of account-party
-                            # in the database than from records
-                            continue
-                        for i, name in enumerate(names, 2):
-                            result[name][id_] = row[i]
+            account_sql = fields.SQL_OPERATORS['in'](line.account, account_ids)
+            party_sql = fields.SQL_OPERATORS['in'](line.party, party_ids)
+            query = line.select(
+                *columns,
+                where=account_sql & party_sql & line_query,
+                group_by=[line.account, line.party])
+            if backend.name == 'sqlite':
+                sqlite_apply_types(query, types)
+            cursor.execute(*query)
+            for row in cursor:
+                id_ = pair(*row[0:2])
+                for i, name in enumerate(names, 2):
+                    result[name][id_] = row[i]
             for record in c_records:
                 for name in names:
                     if name == 'line_count':
@@ -1708,7 +1733,7 @@ class AccountDeferral(ModelSQL, ModelView):
                 .join(period, condition=move.period == period.id)
                 .select(
                     move_line.account, period.fiscalyear,
-                    Count(Literal('*')).as_('line_count'),
+                    Count().as_('line_count'),
                     group_by=[move_line.account, period.fiscalyear]))
             cursor.execute(*deferral.update(
                     [deferral.line_count], [counting_query.line_count],
@@ -1736,25 +1761,25 @@ class AccountDeferral(ModelSQL, ModelView):
         account_child = Account.__table__()
         balances = defaultdict(Decimal)
 
-        for sub_deferrals in grouped_slice(deferrals):
-            red_sql = reduce_ids(table.id, [d.id for d in sub_deferrals])
-            query = (table
-                .join(account, condition=table.account == account.id)
-                .join(account_child,
-                    condition=(account_child.left >= account.left)
-                    & (account_child.right <= account.right))
-                .join(table_child,
-                    condition=(table_child.account == account_child.id)
-                    & (table_child.fiscalyear == table.fiscalyear))
-                .select(
-                    table.id.as_('id'),
-                    Sum(table_child.debit - table_child.credit).as_('balance'),
-                    where=red_sql,
-                    group_by=table.id))
-            if backend.name == 'sqlite':
-                sqlite_apply_types(query, [None, 'NUMERIC'])
-            cursor.execute(*query)
-            balances.update(dict(cursor))
+        where = fields.SQL_OPERATORS['in'](
+            table.id, [d.id for d in deferrals])
+        query = (table
+            .join(account, condition=table.account == account.id)
+            .join(account_child,
+                condition=(account_child.left >= account.left)
+                & (account_child.right <= account.right))
+            .join(table_child,
+                condition=(table_child.account == account_child.id)
+                & (table_child.fiscalyear == table.fiscalyear))
+            .select(
+                table.id.as_('id'),
+                Sum(table_child.debit - table_child.credit).as_('balance'),
+                where=where,
+                group_by=table.id))
+        if backend.name == 'sqlite':
+            sqlite_apply_types(query, [None, 'NUMERIC'])
+        cursor.execute(*query)
+        balances.update(dict(cursor))
         return balances
 
     def get_currency(self, name):
@@ -1991,6 +2016,7 @@ class _GeneralLedgerAccount(ActivePeriodMixin, ModelSQL, ModelView):
             'periods': period_ids,
             'from_date': from_date,
             'to_date': to_date,
+            'flat_balance': True,
             }
 
     @classmethod
@@ -2107,7 +2133,12 @@ class GeneralLedgerAccount(_GeneralLedgerAccount):
     debit_type = fields.Many2One('account.account.type', "Debit Type")
     credit_type = fields.Many2One('account.account.type', "Credit Type")
     lines = fields.One2Many(
-        'account.general_ledger.line', 'account', "Lines", readonly=True)
+        'account.general_ledger.line', 'account', "Lines", readonly=True,
+        order=[('move.date', 'ASC'), ('id', None)])
+    parties = fields.One2Many(
+        'account.general_ledger.account.party', 'account', "Parties",
+        readonly=True)
+    party_required = fields.Boolean("Party Required")
     general_ledger_balance = fields.Boolean("General Ledger Balance")
 
     @classmethod
@@ -2281,11 +2312,43 @@ class GeneralLedgerAccountParty(_GeneralLedgerAccount):
             'company': Eval('company', -1),
             },
         depends={'company'})
+    lines = fields.Function(fields.Many2Many(
+            'account.general_ledger.line', None, None, "Lines", readonly=True,
+            context={
+                'party_cumulate': True,
+                }),
+        'get_lines')
 
     @classmethod
     def __setup__(cls):
         super().__setup__()
-        cls._order.insert(2, ('party', 'ASC'))
+        cls._order.insert(1, ('party', 'ASC'))
+
+    @classmethod
+    def get_lines(cls, parties, name):
+        pool = Pool()
+        Line = pool.get('account.general_ledger.line')
+        Move = pool.get('account.move')
+        table = cls.__table__()
+        line = Line.__table__()
+        move = Move.__table__()
+        cursor = Transaction().connection.cursor()
+
+        query = (line
+            .join(table,
+                condition=(
+                    (line.account == table.account)
+                    & (line.party == table.party)))
+            .join(move,
+                condition=line.move == move.id)
+            .select(table.id, line.id,
+                where=fields.SQL_OPERATORS['in'](
+                    table.id, list(map(int, parties))),
+                order_by=[table.id, move.date.asc, line.id]))
+        cursor.execute(*query)
+        return defaultdict(list, (
+            (i, [r[1] for r in g])
+            for i, g in groupby(cursor, lambda row: row[0])))
 
     @classmethod
     def _get_account(cls):
@@ -2456,39 +2519,20 @@ class GeneralLedgerLine(DescriptionOriginMixin, ModelSQL, ModelView):
     def get_account_party(cls, records, name):
         pool = Pool()
         AccountParty = pool.get('account.general_ledger.account.party')
+        table = cls.__table__()
         account_party = AccountParty.__table__()
         cursor = Transaction().connection.cursor()
 
-        account_parties = {}
-        account_party2ids = defaultdict(list)
-        account_ids, party_ids = set(), set()
-        for r in records:
-            account_parties[r.id] = None
-            if not r.party:
-                continue
-            account_party2ids[r.account.id, r.party.id].append(r.id)
-            account_ids.add(r.account.id)
-            party_ids.add(r.party.id)
-
-        query = account_party.select(
-            account_party.account, account_party.party, account_party.id)
-        for sub_account_ids in grouped_slice(account_ids):
-            account_where = reduce_ids(account_party.account, sub_account_ids)
-            for sub_party_ids in grouped_slice(party_ids):
-                query.where = (account_where
-                    & reduce_ids(account_party.party, sub_party_ids))
-                cursor.execute(*query)
-                for account, party, id_ in cursor:
-                    key = (account, party)
-                    try:
-                        account_party_ids = account_party2ids[key]
-                    except KeyError:
-                        # There can be more combinations of account-party in
-                        # the database than from records
-                        continue
-                    for record_id in account_party_ids:
-                        account_parties[record_id] = id_
-        return account_parties
+        query = (account_party
+            .join(table,
+                condition=(
+                    (account_party.account == table.account)
+                    & (account_party.party == table.party)))
+            .select(table.id, account_party.id,
+                where=fields.SQL_OPERATORS['in'](
+                    table.id, list(map(int, records)))))
+        cursor.execute(*query)
+        return defaultdict(type(None), cursor)
 
     @classmethod
     def reconcile(cls, *lines_list, **kwargs):
@@ -2595,7 +2639,7 @@ class BalanceSheetContext(ModelView):
         return Transaction().context.get('posted', False)
 
 
-class BalanceSheetComparisionContext(BalanceSheetContext):
+class BalanceSheetComparisonContext(BalanceSheetContext):
     __name__ = 'account.balance_sheet.comparison.context'
     comparison = fields.Boolean('Comparison')
     date_cmp = fields.Date('Date', states={

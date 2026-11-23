@@ -13,7 +13,6 @@ from trytond.modules import get_module_info, get_modules
 from trytond.pool import Pool
 from trytond.pyson import Eval
 from trytond.rpc import RPC
-from trytond.tools import grouped_slice
 from trytond.transaction import Transaction
 from trytond.wizard import (
     Button, StateAction, StateTransition, StateView, Wizard)
@@ -83,7 +82,11 @@ class Module(ModelSQL, ModelView):
                         ['to activate', 'to remove', 'to upgrade']),
                     'depends': ['state'],
                     },
-                'apply': {},
+                'apply': {
+                    'readonly': ~Eval('state').in_(
+                        ['to upgrade', 'to remove', 'to activate']),
+                    'depends': ['state'],
+                    },
                 })
 
     @staticmethod
@@ -241,7 +244,10 @@ class Module(ModelSQL, ModelView):
     @classmethod
     @ModelView.button_action('ir.act_module_activate_upgrade')
     def apply(cls, modules):
-        pass
+        return {
+            # Set keyword to prevent record names to be appended
+            'keyword': 'form_relate',
+            }
 
     @classmethod
     def update_list(cls):
@@ -249,11 +255,10 @@ class Module(ModelSQL, ModelView):
         pool = Pool()
         Dependency = pool.get('ir.module.dependency')
         module_names = get_modules(with_test=Pool.test)
-        for sub_module_names in grouped_slice(module_names):
-            cls.delete(cls.search([
-                        ('state', '!=', 'activated'),
-                        ('name', 'not in', list(sub_module_names)),
-                        ]))
+        cls.delete(cls.search([
+                    ('state', '!=', 'activated'),
+                    ('name', 'not in', module_names),
+                    ]))
         modules = cls.search([])
         name2module = {m.name: m for m in modules}
 
@@ -261,18 +266,15 @@ class Module(ModelSQL, ModelView):
             name2module[name] = cls(name=name, state=cls.default_state())
         cls.save(name2module.values())
 
-        to_save, to_delete = [], []
-        for module in name2module.values():
-            depends = set(get_module_info(module.name).get('depends', []))
-            for dependency in module.dependencies:
-                if dependency.name not in depends:
-                    to_delete.append(dependency)
-            for name in depends - {d.name for d in module.dependencies}:
-                to_save.append(Dependency(name=name, module=module))
-        if to_delete:
-            Dependency.delete(to_delete)
-        if to_save:
-            Dependency.save(to_save)
+        with Dependency.bulk_save(auto=False) as save, \
+                Dependency.bulk_delete(auto=False) as delete:
+            for module in name2module.values():
+                depends = set(get_module_info(module.name).get('depends', []))
+                for dependency in module.dependencies:
+                    if dependency.name not in depends:
+                        delete.push(dependency)
+                for name in depends - {d.name for d in module.dependencies}:
+                    save.push(Dependency(name=name, module=module))
 
 
 class ModuleDependency(ModelSQL, ModelView):
@@ -303,12 +305,10 @@ class ModuleDependency(ModelSQL, ModelView):
     def get_state(cls, dependencies, name):
         pool = Pool()
         Module = pool.get('ir.module')
-        modules = []
         names = [d.name for d in dependencies]
-        for sub_names in grouped_slice(names):
-            modules.extend(Module.search([
-                        ('name', 'in', list(sub_names)),
-                        ]))
+        modules = Module.search([
+                ('name', 'in', names),
+                ])
         name2state = {m.name: m.state for m in modules}
         return {d.id: name2state.get(d.name, 'unknown') for d in dependencies}
 
@@ -428,7 +428,9 @@ class ModuleConfigWizard(Wizard):
 
 class ModuleActivateUpgradeStart(ModelView):
     __name__ = 'ir.module.activate_upgrade.start'
-    module_info = fields.Text('Modules to update', readonly=True)
+    modules = fields.Many2Many(
+        'ir.module', None, None,
+        "Modules to Activate / Upgrade", readonly=True)
 
 
 class ModuleActivateUpgradeDone(ModelView):
@@ -441,7 +443,10 @@ class ModuleActivateUpgrade(Wizard):
     start = StateView('ir.module.activate_upgrade.start',
         'ir.module_activate_upgrade_start_view_form', [
             Button('Cancel', 'end', 'tryton-cancel'),
-            Button('Start Upgrade', 'upgrade', 'tryton-ok', default=True),
+            Button("OK", 'upgrade', 'tryton-ok', default=True,
+                states={
+                    'readonly': ~Eval('modules'),
+                    }),
             ])
     upgrade = StateTransition()
     done = StateView('ir.module.activate_upgrade.done',
@@ -457,16 +462,15 @@ class ModuleActivateUpgrade(Wizard):
         with Transaction().new_transaction():
             super().check_access()
 
-    @staticmethod
-    def default_start(fields):
+    @classmethod
+    def default_start(cls, fields):
         pool = Pool()
         Module = pool.get('ir.module')
         modules = Module.search([
                 ('state', 'in', ['to upgrade', 'to remove', 'to activate']),
                 ])
         return {
-            'module_info': '\n'.join(x.name + ': ' + x.state
-                for x in modules),
+            'modules': [m.id for m in modules],
             }
 
     def __init__(self, session_id):

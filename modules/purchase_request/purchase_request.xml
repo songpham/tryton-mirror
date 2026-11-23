@@ -8,12 +8,6 @@ this repository contains the full copyright notices and license terms. -->
             <field name="name">Purchase Request</field>
         </record>
 
-        <record model="res.user-res.group"
-            id="user_admin_group_purchase_request">
-            <field name="user" ref="res.user_admin"/>
-            <field name="group" ref="group_purchase_request"/>
-        </record>
-
         <record model="ir.ui.view" id="purchase_request_view_form">
             <field name="model">purchase.request</field>
             <field name="type">form</field>
@@ -45,7 +39,7 @@ this repository contains the full copyright notices and license terms. -->
             id="act_purchase_request_form_domain_draft">
             <field name="name">Draft</field>
             <field name="sequence" eval="10"/>
-            <field name="domain" eval="[('purchase_line', '=', None)]"
+            <field name="domain" eval="[('state', '=', 'draft')]"
                 pyson="1"/>
             <field name="count" eval="True"/>
             <field name="act_window" ref="act_purchase_request_form"/>

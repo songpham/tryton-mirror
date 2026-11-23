@@ -122,9 +122,27 @@ msgctxt "field:res.user,warehouse:"
 msgid "Current Warehouse"
 msgstr "当前仓库"
 
+#, fuzzy
+msgctxt "field:stock.configuration,inventory_cost_thresold:"
+msgid "Inventory Cost Thresold"
+msgstr "库间库存变动"
+
+#, fuzzy
+msgctxt "field:stock.configuration,inventory_quantity_tolerance:"
+msgid "Inventory Quantity Tolerance"
+msgstr "库存盘点序列"
+
 msgctxt "field:stock.configuration,inventory_sequence:"
 msgid "Inventory Sequence"
 msgstr "库存盘点序列"
+
+msgctxt "field:stock.configuration,period_closing_delay:"
+msgid "Period Closing Delay"
+msgstr ""
+
+msgctxt "field:stock.configuration,period_creation_interval:"
+msgid "Period Creation Interval"
+msgstr ""
 
 msgctxt "field:stock.configuration,shipment_in_return_sequence:"
 msgid "Supplier Return Shipment Sequence"
@@ -150,9 +168,32 @@ msgctxt "field:stock.configuration,shipment_out_sequence:"
 msgid "Customer Shipment Sequence"
 msgstr "向客户发货序列"
 
+#, fuzzy
+msgctxt "field:stock.configuration.inventory,inventory_cost_thresold:"
+msgid "Inventory Cost Thresold"
+msgstr "库间库存变动"
+
+#, fuzzy
+msgctxt "field:stock.configuration.inventory,inventory_quantity_tolerance:"
+msgid "Inventory Quantity Tolerance"
+msgstr "库存盘点序列"
+
 msgctxt "field:stock.configuration.location,shipment_internal_transit:"
 msgid "Internal Shipment Transit"
 msgstr "内部发货中转"
+
+#, fuzzy
+msgctxt "field:stock.configuration.period,company:"
+msgid "Company"
+msgstr "公司"
+
+msgctxt "field:stock.configuration.period,period_closing_delay:"
+msgid "Period Closing Delay"
+msgstr ""
+
+msgctxt "field:stock.configuration.period,period_creation_interval:"
+msgid "Period Creation Interval"
+msgstr ""
 
 msgctxt "field:stock.configuration.sequence,company:"
 msgid "Company"
@@ -234,6 +275,11 @@ msgctxt "field:stock.inventory.count.search,search:"
 msgid "Search"
 msgstr "搜索"
 
+#, fuzzy
+msgctxt "field:stock.inventory.line,cost_variation:"
+msgid "Cost Variation"
+msgstr "成本价修正"
+
 msgctxt "field:stock.inventory.line,expected_quantity:"
 msgid "Expected Quantity"
 msgstr "预计数量"
@@ -265,6 +311,20 @@ msgstr "产品"
 msgctxt "field:stock.inventory.line,quantity:"
 msgid "Actual Quantity"
 msgstr "总数量"
+
+#, fuzzy
+msgctxt "field:stock.inventory.line,quantity_variation:"
+msgid "Quantity Variation"
+msgstr "数量计量单位"
+
+msgctxt "field:stock.inventory.line,tolerance_cost_variation:"
+msgid "Tolerance Cost Variation"
+msgstr ""
+
+#, fuzzy
+msgctxt "field:stock.inventory.line,tolerance_quantity_variation:"
+msgid "Tolerance Quantity Variation"
+msgstr "累计数量开始"
 
 msgctxt "field:stock.inventory.line,unit:"
 msgid "Unit"
@@ -345,10 +405,6 @@ msgstr "存储"
 msgctxt "field:stock.location,type:"
 msgid "Type"
 msgstr "类型"
-
-msgctxt "field:stock.location,warehouse:"
-msgid "Warehouse"
-msgstr "仓库"
 
 msgctxt "field:stock.location,waste_locations:"
 msgid "Waste Locations"
@@ -646,6 +702,16 @@ msgstr "数量为空"
 
 #, fuzzy
 msgctxt "field:stock.reporting.inventory,product:"
+msgid "Variant"
+msgstr "变体"
+
+#, fuzzy
+msgctxt "field:stock.reporting.inventory,product_reference:"
+msgid "Product Reference"
+msgstr "参考"
+
+#, fuzzy
+msgctxt "field:stock.reporting.inventory,product_template:"
 msgid "Product"
 msgstr "产品"
 
@@ -701,6 +767,16 @@ msgstr "数量为空"
 
 #, fuzzy
 msgctxt "field:stock.reporting.inventory.daily,product:"
+msgid "Variant"
+msgstr "变体"
+
+#, fuzzy
+msgctxt "field:stock.reporting.inventory.daily,product_reference:"
+msgid "Product Reference"
+msgstr "参考"
+
+#, fuzzy
+msgctxt "field:stock.reporting.inventory.daily,product_template:"
 msgid "Product"
 msgstr "产品"
 
@@ -756,6 +832,16 @@ msgstr "数量为空"
 
 #, fuzzy
 msgctxt "field:stock.reporting.inventory.move,product:"
+msgid "Variant"
+msgstr "变体"
+
+#, fuzzy
+msgctxt "field:stock.reporting.inventory.move,product_reference:"
+msgid "Product Reference"
+msgstr "参考"
+
+#, fuzzy
+msgctxt "field:stock.reporting.inventory.move,product_template:"
 msgid "Product"
 msgstr "产品"
 
@@ -806,6 +892,16 @@ msgstr "数量为空"
 
 #, fuzzy
 msgctxt "field:stock.reporting.inventory.turnover,product:"
+msgid "Variant"
+msgstr "变体"
+
+#, fuzzy
+msgctxt "field:stock.reporting.inventory.turnover,product_reference:"
+msgid "Product"
+msgstr "产品"
+
+#, fuzzy
+msgctxt "field:stock.reporting.inventory.turnover,product_template:"
 msgid "Product"
 msgstr "产品"
 
@@ -1365,9 +1461,26 @@ msgctxt "help:res.user,warehouse:"
 msgid "The warehouse that the user works at."
 msgstr "用户工作的仓库."
 
+#, fuzzy
+msgctxt "help:stock.configuration,inventory_cost_thresold:"
+msgid "The inventory cost thresold accepted in company currency."
+msgstr "以公司货币表示的单价."
+
+msgctxt "help:stock.configuration,inventory_quantity_tolerance:"
+msgid "The inventory quantity variation accepted in percentage."
+msgstr ""
+
 msgctxt "help:stock.configuration,inventory_sequence:"
 msgid "Used to generate the number given to inventories."
 msgstr "用于生成库存盘点编号."
+
+msgctxt "help:stock.configuration,period_closing_delay:"
+msgid "Leave it empty to prevent periods from being closed automatically."
+msgstr ""
+
+msgctxt "help:stock.configuration,period_creation_interval:"
+msgid "Leave it empty to prevent periods from being created automatically."
+msgstr ""
 
 msgctxt "help:stock.configuration,shipment_in_return_sequence:"
 msgid "Used to generate the number given to supplier return shipments."
@@ -1393,6 +1506,15 @@ msgstr "用于生成接收客户退货用编号."
 msgctxt "help:stock.configuration,shipment_out_sequence:"
 msgid "Used to generate the number given to customer shipments."
 msgstr "用于生成向客户发货编号."
+
+#, fuzzy
+msgctxt "help:stock.configuration.inventory,inventory_cost_thresold:"
+msgid "The inventory cost thresold accepted in company currency."
+msgstr "以公司货币表示的单价."
+
+msgctxt "help:stock.configuration.inventory,inventory_quantity_tolerance:"
+msgid "The inventory quantity variation accepted in percentage."
+msgstr ""
 
 msgctxt "help:stock.configuration.location,shipment_internal_transit:"
 msgid ""
@@ -1450,6 +1572,10 @@ msgstr "所属库存盘点明细."
 msgctxt "help:stock.inventory.line,quantity:"
 msgid "The actual quantity found in the location."
 msgstr "在库位实际找到的数量."
+
+msgctxt "help:stock.inventory.line,quantity_variation:"
+msgid "The difference between expected quantity and actual quantity."
+msgstr ""
 
 msgctxt "help:stock.inventory.line,unit:"
 msgid "The unit in which the quantity is specified."
@@ -2299,6 +2425,12 @@ msgid ""
 "empty quantity."
 msgstr "要确认库存\"%(inventory)s\"，必须为空数量选择一个选项."
 
+#, fuzzy, python-format
+msgctxt "model:ir.message,text:msg_inventory_over_tolerance"
+msgid "The inventory line \"%(lines)s\" is outside the tolerance range."
+msgid_plural "The inventory lines \"%(lines)s\" are outside the tolerance range."
+msgstr[0] "库存盘点 \"%(inventories)s\" 日期超前."
+
 #, python-format
 msgctxt "model:ir.message,text:msg_location_inactive_not_empty"
 msgid "To inactivate location \"%(location)s\", you must empty it."
@@ -2405,11 +2537,6 @@ msgid ""
 "It is recommended to clear the stock from the storage locations before "
 "deactivating the product."
 msgstr "建议在停用产品之前清除库位的库存。"
-
-#, python-format
-msgctxt "model:ir.message,text:msg_product_quantities_max"
-msgid "You cannot select more than %(max)s products to compute quantities."
-msgstr ""
 
 #, python-format
 msgctxt "model:ir.message,text:msg_shipment_check_quantity"
@@ -2984,6 +3111,11 @@ msgctxt "model:res.group,name:group_stock_admin"
 msgid "Stock Administration"
 msgstr "库存管理"
 
+#, fuzzy
+msgctxt "model:res.group,name:group_stock_cancellation"
+msgid "Stock Cancellation"
+msgstr "库位"
+
 msgctxt "model:res.group,name:group_stock_force_assignment"
 msgid "Stock Force Assignment"
 msgstr "仓库强制选货"
@@ -2994,9 +3126,19 @@ msgid "Stock Configuration"
 msgstr "库存配置"
 
 #, fuzzy
+msgctxt "model:stock.configuration.inventory,string:"
+msgid "Stock Configuration Inventory"
+msgstr "库存配置"
+
+#, fuzzy
 msgctxt "model:stock.configuration.location,string:"
 msgid "Stock Configuration Location"
 msgstr "库存配置-库位"
+
+#, fuzzy
+msgctxt "model:stock.configuration.period,string:"
+msgid "Stock Configuration Period"
+msgstr "库存配置"
 
 #, fuzzy
 msgctxt "model:stock.configuration.sequence,string:"
@@ -3471,6 +3613,16 @@ msgctxt "selection:ir.cron,method:"
 msgid "Assign Shipments"
 msgstr "选货"
 
+#, fuzzy
+msgctxt "selection:ir.cron,method:"
+msgid "Close Stock Periods"
+msgstr "库存分期"
+
+#, fuzzy
+msgctxt "selection:ir.cron,method:"
+msgid "Create Stock Periods"
+msgstr "库存分期"
+
 msgctxt "selection:ir.cron,method:"
 msgid "Recompute Cost Price from Moves"
 msgstr "根据变动重新计算成本价"
@@ -3592,12 +3744,12 @@ msgid "Variant"
 msgstr "变体"
 
 #, fuzzy
-msgctxt "selection:stock.reporting.inventory,product:"
+msgctxt "selection:stock.reporting.inventory,product_reference:"
 msgid "Product"
 msgstr "产品"
 
 #, fuzzy
-msgctxt "selection:stock.reporting.inventory,product:"
+msgctxt "selection:stock.reporting.inventory,product_reference:"
 msgid "Variant"
 msgstr "变体"
 
@@ -3612,32 +3764,32 @@ msgid "Variant"
 msgstr "变体"
 
 #, fuzzy
-msgctxt "selection:stock.reporting.inventory.daily,product:"
+msgctxt "selection:stock.reporting.inventory.daily,product_reference:"
 msgid "Product"
 msgstr "产品"
 
 #, fuzzy
-msgctxt "selection:stock.reporting.inventory.daily,product:"
+msgctxt "selection:stock.reporting.inventory.daily,product_reference:"
 msgid "Variant"
 msgstr "变体"
 
 #, fuzzy
-msgctxt "selection:stock.reporting.inventory.move,product:"
+msgctxt "selection:stock.reporting.inventory.move,product_reference:"
 msgid "Product"
 msgstr "产品"
 
 #, fuzzy
-msgctxt "selection:stock.reporting.inventory.move,product:"
+msgctxt "selection:stock.reporting.inventory.move,product_reference:"
 msgid "Variant"
 msgstr "变体"
 
 #, fuzzy
-msgctxt "selection:stock.reporting.inventory.turnover,product:"
+msgctxt "selection:stock.reporting.inventory.turnover,product_reference:"
 msgid "Product"
 msgstr "产品"
 
 #, fuzzy
-msgctxt "selection:stock.reporting.inventory.turnover,product:"
+msgctxt "selection:stock.reporting.inventory.turnover,product_reference:"
 msgid "Variant"
 msgstr "变体"
 
@@ -3789,6 +3941,16 @@ msgctxt "view:res.user:"
 msgid "The warehouse that you work at."
 msgstr "你工作的仓库."
 
+#, fuzzy
+msgctxt "view:stock.configuration:"
+msgid "%"
+msgstr "%"
+
+#, fuzzy
+msgctxt "view:stock.configuration:"
+msgid "Cost Thresold"
+msgstr "成本价"
+
 msgctxt "view:stock.configuration:"
 msgid "Customer Return Sequence"
 msgstr "接收客户退货序列"
@@ -3809,6 +3971,16 @@ msgctxt "view:stock.configuration:"
 msgid "Inventory"
 msgstr "库存盘点"
 
+#, fuzzy
+msgctxt "view:stock.configuration:"
+msgid "Period"
+msgstr "分期"
+
+#, fuzzy
+msgctxt "view:stock.configuration:"
+msgid "Quantity Tolerance"
+msgstr "数量计量单位"
+
 msgctxt "view:stock.configuration:"
 msgid "Sequence"
 msgstr "序列"
@@ -3824,10 +3996,6 @@ msgstr "向供应商退货序列"
 msgctxt "view:stock.configuration:"
 msgid "Supplier Sequence"
 msgstr "从供应商收货序列"
-
-msgctxt "view:stock.move:"
-msgid "Cost"
-msgstr "成本"
 
 msgctxt "view:stock.move:"
 msgid "Move"

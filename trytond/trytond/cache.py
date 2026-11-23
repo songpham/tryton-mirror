@@ -83,8 +83,18 @@ class _CacheLocal(local):
         self.portable_id = str(uuid4())
 
 
-class BaseCache(object):
+class _CacheMeta(type):
+    def __call__(cls, *args, **kwargs):
+        inst = super().__call__(*args, **kwargs)
+        assert inst._name not in BaseCache._instances, inst._name
+        with BaseCache._instances_lock:
+            BaseCache._instances[inst._name] = inst
+        return inst
+
+
+class BaseCache(metaclass=_CacheMeta):
     _instances = {}
+    _instances_lock = threading.Lock()
     context_ignored_keys = {
         'client', '_request', '_check_access', '_skip_warnings',
         }
@@ -112,17 +122,16 @@ class BaseCache(object):
             self.duration = dt.timedelta(**duration)
         else:
             self.duration = None
-        assert self._name not in self._instances, self._name
-        self._instances[self._name] = self
 
     @classmethod
     def stats(cls):
-        for name, inst in cls._instances.items():
-            yield {
-                'name': name,
-                'hit': inst.hit,
-                'miss': inst.miss,
-                }
+        with cls._instances_lock:
+            for name, inst in cls._instances.items():
+                yield {
+                    'name': name,
+                    'hit': inst.hit,
+                    'miss': inst.miss,
+                    }
 
     def _key(self, key):
         if self.context:
@@ -144,8 +153,9 @@ class BaseCache(object):
 
     @classmethod
     def clear_all(cls):
-        for inst in cls._instances.values():
-            inst.clear()
+        with cls._instances_lock:
+            for inst in cls._instances.values():
+                inst.clear()
 
     @classmethod
     def sync(cls, transaction):
@@ -245,11 +255,14 @@ class MemoryCache(BaseCache):
 
     @classmethod
     def _clear_all(cls, dbname):
-        for inst in cls._instances.values():
-            inst._clear(dbname)
+        with cls._instances_lock:
+            for inst in cls._instances.values():
+                inst._clear(dbname)
 
     @classmethod
     def sync(cls, transaction):
+        if not Pool().ready:
+            return
         if cls._clean_last is None:
             cls._clean_last = dt.datetime.now()
             return
@@ -292,7 +305,7 @@ class MemoryCache(BaseCache):
         cls._clean_last = dt.datetime.now()
 
     def sync_since(self, value):
-        return self._clean_last > value
+        return self._clean_last is not None and self._clean_last > value
 
     @classmethod
     def commit(cls, transaction):
@@ -308,9 +321,8 @@ class MemoryCache(BaseCache):
                 # The count computed as
                 # 8000 (max notify size) / 64 (max name data len)
                 for sub_reset in grouped_slice(reset, 125):
-                    cursor.execute(
-                        'NOTIFY "%s", %%s' % cls._channel,
-                        (json.dumps(list(sub_reset), separators=(',', ':')),))
+                    database.notify(transaction.connection, cls._channel,
+                        json.dumps(list(sub_reset), separators=(',', ':')))
         else:
             connection = database.get_connection(
                 readonly=False, autocommit=True)
@@ -375,16 +387,16 @@ class MemoryCache(BaseCache):
             database = backend.Database(dbname)
             conn = database.get_connection()
             try:
-                cursor = conn.cursor()
-                cursor.execute('NOTIFY "%s"' % cls._channel)
+                database.notify(conn, cls._channel, "")
                 conn.commit()
             finally:
                 database.put_connection(conn)
             listener.join()
-        for inst in cls._instances.values():
-            inst._timestamp.pop(dbname, None)
-            inst._database_cache.pop(dbname, None)
-            inst._transaction_lower.pop(dbname, None)
+        with cls._instances_lock:
+            for inst in cls._instances.values():
+                inst._timestamp.pop(dbname, None)
+                inst._database_cache.pop(dbname, None)
+                inst._transaction_lower.pop(dbname, None)
 
     @classmethod
     def refresh_pool(cls, transaction):
@@ -397,8 +409,7 @@ class MemoryCache(BaseCache):
             process_id = cls._local.portable_id
             payload = f"{REFRESH_POOL_MSG} {process_id}"
             try:
-                cursor = conn.cursor()
-                cursor.execute(f'NOTIFY "{cls._channel}", %s', (payload,))
+                database.notify(conn, cls._channel, payload)
                 conn.commit()
             finally:
                 database.put_connection(conn)
@@ -429,9 +440,9 @@ class MemoryCache(BaseCache):
             while cls._local.listeners.get(dbname) == current_thread:
                 selector.select(
                     timeout=config.getint('cache', 'select_timeout'))
-                conn.poll()
-                while conn.notifies:
-                    notification = conn.notifies.pop()
+                notifications = database.get_notifications(conn)
+                while notifications:
+                    notification = notifications.pop()
                     payload = notification.payload
                     if payload and payload.startswith(REFRESH_POOL_MSG):
                         remote_id = payload[len(REFRESH_POOL_MSG) + 1:]

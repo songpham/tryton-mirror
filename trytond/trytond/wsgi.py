@@ -28,9 +28,10 @@ except ImportError:
     from werkzeug.wsgi import SharedDataMiddleware
 
 from trytond import backend, config, security
+from trytond.exceptions import TrytonException
 from trytond.protocols.jsonrpc import JSONProtocol
 from trytond.protocols.wrappers import (
-    HTTPStatus, Request, Response, abort, exceptions)
+    BaseResponse, HTTPStatus, Request, Response, abort, exceptions)
 from trytond.protocols.xmlrpc import XMLProtocol
 from trytond.status import processing
 from trytond.tools import resolve, safe_join
@@ -70,7 +71,7 @@ class TrytondWSGI(object):
                 })
         self.protocols = [JSONProtocol, XMLProtocol]
         self.error_handlers = []
-        self.dev = False
+        self.dev = bool(int(os.getenv('TRYTOND_DEV', 0)))
 
     def route(self, string, methods=None, defaults=None):
         def decorator(func):
@@ -95,15 +96,11 @@ class TrytondWSGI(object):
     def session_valid(self, func):
         @wraps(func)
         def wrapper(request, *args, **kwargs):
-            if (not request.authorization
-                    or request.authorization.type != 'session'):
+            if request.session is None:
                 _do_basic_auth(request)
-            userid = request.authorization.get('userid')
-            session = request.authorization.get('session')
             dbname = request.view_args.get('database_name')
-
             session_check = security.check(
-                dbname, userid, session, {
+                dbname, request.session.userid, request.session.token, {
                     '_request': {
                         'remote_addr': request.remote_addr,
                         },
@@ -116,6 +113,14 @@ class TrytondWSGI(object):
         return wrapper
 
     def dispatch_request(self, request):
+        def handle_exception(e):
+            response = e
+            for error_handler in self.error_handlers:
+                rv = error_handler(self, request, e)
+                if isinstance(rv, BaseResponse):
+                    response = rv
+            return response
+
         adapter = self.url_map.bind_to_environ(request.environ)
         try:
             endpoint, request.view_args = adapter.match()
@@ -127,28 +132,24 @@ class TrytondWSGI(object):
                 max_size = config.getint('request', 'max_size')
             request.max_content_length = max_size
             return endpoint(request, **request.view_args)
-        except exceptions.HTTPException as e:
+        except (TrytonException, exceptions.HTTPException) as e:
             logger.debug(
                 "Exception when processing %s", request, exc_info=True)
-            return e
+            return handle_exception(e)
         except backend.DatabaseOperationalError as e:
             logger.debug(
                 "Exception when processing %s", request, exc_info=True)
-            return exceptions.ServiceUnavailable(description=str(e))
+            return handle_exception(
+                exceptions.ServiceUnavailable(description=str(e)))
         except Exception as e:
-            logger.debug(
-                "Exception when processing %s", request, exc_info=True)
+            logger.exception("Exception when processing %s", request)
+            tb_s = ''.join(traceback.format_exception(*sys.exc_info()))
+            request.environ['wsgi.errors'].write(tb_s)
             if self.dev:
-                tb_s = ''.join(traceback.format_exception(*sys.exc_info()))
                 for path in sys.path:
                     tb_s = tb_s.replace(path, '')
                 e.__format_traceback__ = tb_s
-            response = e
-            for error_handler in self.error_handlers:
-                rv = error_handler(self, request, e)
-                if isinstance(rv, Response):
-                    response = rv
-            return response
+            return handle_exception(e)
 
     def make_response(self, request, data):
         for cls in self.protocols:
@@ -168,9 +169,9 @@ class TrytondWSGI(object):
                 if isinstance(data, Exception):
                     try:
                         response = exceptions.InternalServerError(
-                            original_exception=data)
+                            str(data), original_exception=data)
                     except TypeError:
-                        response = exceptions.InternalServerError(data)
+                        response = exceptions.InternalServerError(str(data))
                 else:
                     response = Response(data)
         return response
@@ -209,12 +210,13 @@ class TrytondWSGI(object):
 
             with processing(request):
                 data = self.dispatch_request(request)
-                if not isinstance(data, (Response, exceptions.HTTPException)):
+                if not isinstance(
+                        data, (BaseResponse, exceptions.HTTPException)):
                     response = self.make_response(request, data)
                 else:
                     response = data
 
-            if origin and isinstance(response, Response):
+            if origin and isinstance(response, BaseResponse):
                 response.headers['Access-Control-Allow-Origin'] = origin
                 response.headers['Vary'] = 'Origin'
                 method = request.headers.get('Access-Control-Request-Method')
@@ -281,3 +283,4 @@ if config.has_section('wsgi middleware'):
 
 import trytond.bus  # noqa: E402,F401
 import trytond.protocols.dispatcher  # noqa: E402,F401
+import trytond.protocols.rest  # noqa: E402,F401

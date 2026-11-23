@@ -3,18 +3,12 @@
 
 /* eslint-disable no-redeclare */
 var Sao = {
-    __version__: '7.9.0',
+    __version__: '8.3.0',
 };
 /* eslint-enable no-redeclare */
 
 (function() {
     'use strict';
-
-    if (!('contains' in String.prototype)) {
-        String.prototype.contains = function(str, startIndex) {
-            return -1 !== String.prototype.indexOf.call(this, str, startIndex);
-        };
-    }
 
     // Browser compatibility: polyfill
     if (!Set.prototype.intersection) {
@@ -88,7 +82,22 @@ var Sao = {
         // continue
     }
 
-    // Add .uniqueId to jQuery
+    Sao._showHide = function(elements, show) {
+        for (let element of elements) {
+            let display = element.style.display;
+            if (show) {
+                if (display === 'none') {
+                    element.style.display = '';
+                }
+            } else {
+                if (display !== 'none') {
+                    element.style.display = 'none';
+                }
+            }
+        }
+    }
+
+    // Add custom functions to jQuery
     jQuery.fn.extend({
         uniqueId: (function() {
             var uuid = 0;
@@ -99,7 +108,19 @@ var Sao = {
                     }
                 });
             };
-        })()
+        })(),
+        sao_show: function() {
+            Sao._showHide(this.toArray(), true);
+            return this;
+        },
+        sao_hide: function() {
+            Sao._showHide(this.toArray(), false);
+            return this;
+        },
+        sao_toggle: function(bool) {
+            Sao._showHide(this.toArray(), bool);
+            return this;
+        },
     });
 
     window.onbeforeunload = function(e) {
@@ -226,6 +247,7 @@ var Sao = {
         date.date(day);
         date.set({hour: 0, minute: 0, second: 0, millisecond: 0});
         date.isDate = true;
+        date.utc(true);
         return date;
     };
 
@@ -233,9 +255,11 @@ var Sao = {
     Sao.Date.min = moment(new Date((-100000000 + 1) * 86400000));
     Sao.Date.min.set({hour: 0, minute: 0, second: 0, millisecond: 0});
     Sao.Date.min.isDate = true;
+    Sao.Date.min.utc(true);
     Sao.Date.max = moment(new Date(100000000 * 86400000));
     Sao.Date.max.set({hour: 0, minute: 0, second: 0, millisecond: 0});
     Sao.Date.max.isDate = true;
+    Sao.Date.max.utc(true);
 
     Sao.DateTime = function(
         year, month, day,
@@ -330,7 +354,7 @@ var Sao = {
                  navigator.userLanguage ||
                  'en').replace('-', '_');
         }
-        jQuery('html').attr('lang', lang);
+        jQuery('html').attr('lang', Sao.i18n.BC47(lang));
         Sao.i18n.setLocale(lang);
         moment.locale(lang.slice(0, 2));
         return jQuery.getJSON('locale/' + lang + '.json').then(function(data) {
@@ -349,7 +373,7 @@ var Sao = {
             }
             Sao.i18n.loadJSON(data);
         }, function() {
-            if (~lang.indexOf('_')) {
+            if (lang.includes('_')) {
                 return Sao.i18n.setlang(lang.split('_').slice(0, -1).join('_'));
             }
         });
@@ -424,11 +448,11 @@ var Sao = {
     Sao.set_url = function(path, name) {
         var session = Sao.Session.current_session;
         if (session) {
-            var url = '#' + session.database;
+            var url = session.database;
             if (path) {
                 url += '/' + path;
             }
-            window.location = url;
+            window.location.hash = url;
         }
         Sao.set_title(name);
     };
@@ -499,9 +523,14 @@ var Sao = {
                 if (params.limit !== undefined) {
                     attributes.limit = loads(params.limit || 'null');
                 }
-                attributes.name = loads(params.name || '""');
+                if (params.name) {
+                    attributes.name = loads(params.name);
+                } else {
+                    attributes.name = Sao.common.MODELNAME.get(attributes.model);
+                }
                 attributes.search_value = loads(params.search_value || '[]');
                 attributes.domain = loads(params.domain || '[]');
+                attributes.context_domain = params.context_domain;
                 attributes.context = loads(params.context || '{}');
                 attributes.context_model = params.context_model;
                 attributes.tab_domain = loads(params.tab_domain || '[]');
@@ -687,30 +716,38 @@ var Sao = {
             });
             jQuery('#user-favorites').append(menu);
             Sao.rpc(args, session).then(function(fav) {
-                fav.forEach(function(menu_item) {
-                    var a = jQuery('<a/>', {
-                        'href': '#'
-                    });
-                    var id = menu_item[0];
-                    var li = jQuery('<li/>', {
-                        'role': 'presentation'
-                    });
-                    var icon = Sao.common.ICONFACTORY.get_icon_img(
-                        menu_item[2], {'class': 'favorite-icon'});
-                    a.append(icon);
-                    li.append(a);
-                    a.append(menu_item[1]);
-                    a.click(function(evt) {
-                        evt.preventDefault();
-                        Sao.favorites_menu_clear();
-                        // ids is not defined to prevent to add suffix
-                        Sao.Action.exec_keyword('tree_open', {
-                            'model': Sao.main_menu_screen.model_name,
-                            'id': id,
+                if (!fav.length) {
+                    jQuery('<li/>', {
+                        'class': 'dropdown-header',
+                        'role': 'presentation',
+                    }).text(Sao.i18n.gettext("Check menu entries to add favorites"))
+                    .appendTo(menu);
+                } else {
+                    fav.forEach(function(menu_item) {
+                        var a = jQuery('<a/>', {
+                            'href': '#'
                         });
+                        var id = menu_item[0];
+                        var li = jQuery('<li/>', {
+                            'role': 'presentation'
+                        });
+                        var icon = Sao.common.ICONFACTORY.get_icon_img(
+                            menu_item[2], {'class': 'favorite-icon'});
+                        a.append(icon);
+                        li.append(a);
+                        a.append(menu_item[1]);
+                        a.click(function(evt) {
+                            evt.preventDefault();
+                            Sao.favorites_menu_clear();
+                            // ids is not defined to prevent to add suffix
+                            Sao.Action.exec_keyword('tree_open', {
+                                'model': Sao.main_menu_screen.model_name,
+                                'id': id,
+                            });
+                        });
+                        menu.append(li);
                     });
-                    menu.append(li);
-                });
+                }
             });
         }
     };
@@ -750,13 +787,6 @@ var Sao = {
             }));
         }
         user.prepend(Sao.NotificationMenu.indicator);
-        var title = Sao.i18n.gettext("Logout");
-        jQuery('#user-logout > a')
-            .attr('title', title)
-            .attr('aria-label', title)
-            .off()
-            .click(Sao.logout)
-            .find('span:not(.icon)').text(title);
     };
 
     Sao.main_menu_row_activate = function() {
@@ -810,7 +840,7 @@ var Sao = {
             var view = screen.current_view;
             view.table.removeClass('table table-bordered');
             view.table.addClass('no-responsive');
-            view.table.find('thead').hide();
+            view.table.find('thead').sao_hide();
             view.table.find('colgroup > col.tree-menu').css('width', 0);
             var gs = new Sao.GlobalSearch();
             jQuery('#global-search').empty();
@@ -857,6 +887,11 @@ var Sao = {
                     var icon = 'tryton-star';
                     if (!record._values.favorite) {
                         icon += '-border';
+                        cell.attr('title', Sao.i18n.gettext(
+                            "Add to favorites"));
+                    } else {
+                        cell.attr('title', Sao.i18n.gettext(
+                            "Remove from favorites"));
                     }
                     cell.data('star', Boolean(record._values.favorite));
                     Sao.common.ICONFACTORY.get_icon_url(icon)
@@ -886,9 +921,13 @@ var Sao = {
             if (!star) {
                 icon = 'tryton-star';
                 method = 'set';
+                button.attr('title', Sao.i18n.gettext(
+                    "Remove from favorites"));
             } else {
                 icon = 'tryton-star-border';
                 method = 'unset';
+                button.attr('title', Sao.i18n.gettext(
+                    "Add to favorites"));
             }
             button.data('star', !star);
             Sao.common.ICONFACTORY.get_icon_url(icon)
@@ -1150,7 +1189,7 @@ var Sao = {
                 shortcut: 'f1',
                 label: Sao.i18n.gettext('Show this help'),
                 callback: function() {
-                    help_dialog();
+                    Sao.help_dialog();
                 },
             }, {
                 shortcut: 'ctrl+f1',
@@ -1164,13 +1203,12 @@ var Sao = {
 
     jQuery(document).ready(function() {
         var url = new URL(window.location);
-        if (url.searchParams.has('session')) {
+        if (url.searchParams.has('login_service')) {
             var database = url.searchParams.get('database');
             var session = {
                 login_service: url.searchParams.get('login_service'),
                 login: url.searchParams.get('login'),
                 user_id: parseInt(url.searchParams.get('user_id'), 10),
-                session: url.searchParams.get('session'),
                 bus_url_host: url.searchParams.get('bus_url_host'),
             };
             if (url.searchParams.has('renew')) {
@@ -1228,7 +1266,7 @@ var Sao = {
 
     var _help_dialog = null;
 
-    function help_dialog() {
+    Sao.help_dialog = function() {
         Mousetrap.pause();
         var dialog;
         if (!_help_dialog) {
@@ -1322,13 +1360,13 @@ var Sao = {
         var modalZIndex = 1040;
         jQuery('.modal.in').each(function(index) {
             var $modal = jQuery(this);
-            modalZIndex++;
+            modalZIndex += 10;
             $modal.css('zIndex', modalZIndex);
-            $modal.next('.modal-backdrop.in').addClass('hidden')
-            .css('zIndex', modalZIndex - 1);
+            $modal.prev('.modal-backdrop.in').addClass('hidden')
+            .css('zIndex', modalZIndex - 5);
         });
         jQuery('.modal.in:visible:last').focus()
-        .next('.modal-backdrop.in').removeClass('hidden');
+        .prev('.modal-backdrop.in').removeClass('hidden');
     }
 
 }());

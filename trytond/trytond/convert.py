@@ -1,7 +1,9 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
 import datetime
+import io
 import logging
+import os.path
 import re
 import time
 from collections import defaultdict
@@ -11,6 +13,8 @@ from xml import sax
 from trytond import __version__
 from trytond.pyson import CONTEXT, PYSONEncoder
 from trytond.transaction import Transaction, inactive_records
+
+__all__ = ['import_xml']
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +44,8 @@ class DummyTagHandler:
 
 
 class MenuitemTagHandler:
-    """Taghandler for the tag <record> """
+    """Taghandler for the tag <menuitem>"""
+
     def __init__(self, master_handler):
         self.mh = master_handler
         self.xml_id = None
@@ -61,8 +66,9 @@ class MenuitemTagHandler:
                 values[attr] = attributes.get(attr)
         values['icon'] = attributes.get('icon', 'tryton-folder')
 
-        if attributes.get('active'):
-            values['active'] = bool(eval(attributes['active']))
+        for attr in ['active', 'administration']:
+            if attr in attributes:
+                values[attr] = bool(eval(attributes[attr]))
 
         if values.get('parent'):
             model, id_ = self.mh.get_id(values['parent'])
@@ -188,11 +194,13 @@ class RecordTagHandler:
         self.xml_ids = []
         self.model = None
         self.xml_id = None
+        self.search_domain = None
         self.update = None
         self.values = None
         self.current_field = None
         self.cdata = None
         self.start_cdata = None
+        self.is_path_field = False
 
     def startElement(self, name, attributes):
 
@@ -203,6 +211,7 @@ class RecordTagHandler:
             except KeyError:
                 self.xml_id = None
                 raise ParsingError("missing 'id' attribute")
+            self.search_domain = attributes.get('search', None)
 
             self.model = self.mh.pool.get(attributes["model"])
 
@@ -239,6 +248,7 @@ class RecordTagHandler:
             ref_attr = attributes.get('ref', '')
             eval_attr = attributes.get('eval', '')
             pyson_attr = bool(int(attributes.get('pyson', '0')))
+            self.is_path_field = bool(int(attributes.get('path', '0')))
 
             context = {}
             context['time'] = time
@@ -309,6 +319,10 @@ class RecordTagHandler:
                 self.values[self.current_field] = \
                     CDATA_END.sub('', self.values[self.current_field])
                 self.cdata = 'done'
+            if self.is_path_field:
+                self.values[self.current_field] = os.path.join(
+                    self.mh.base_path, self.values[self.current_field])
+            self.is_path_field = False
             self.current_field = None
             return self
 
@@ -316,7 +330,8 @@ class RecordTagHandler:
             if self.xml_id in self.xml_ids and not self.update:
                 raise ParsingError("duplicate id: %s" % self.xml_id)
             self.mh.import_record(
-                self.model.__name__, self.values, self.xml_id)
+                self.model.__name__, self.values, self.xml_id,
+                self.search_domain)
             self.xml_ids.append(self.xml_id)
             return None
         else:
@@ -366,13 +381,16 @@ class FS2DBAccessor:
 
 class TrytondXmlHandler(sax.handler.ContentHandler):
 
-    def __init__(self, pool, module, module_state, modules, languages):
+    def __init__(
+            self, pool, module, module_state, modules, languages,
+            store_model_data=True):
         "Register known taghandlers, and managed tags."
-        sax.handler.ContentHandler.__init__(self)
+        super().__init__()
 
         self.pool = pool
         self.module = module
         self.ModelData = pool.get('ir.model.data')
+        self.store_model_data = store_model_data
         self.fs2db = FS2DBAccessor(self.ModelData)
         self.to_delete = self.populate_to_delete()
         self.noupdate = None
@@ -384,6 +402,7 @@ class TrytondXmlHandler(sax.handler.ContentHandler):
         self.skip_data = False
         self.modules = modules
         self.languages = languages
+        self.base_path = ''
 
         # Tag handlders are used to delegate the processing
         self.taghandlerlist = {
@@ -405,7 +424,8 @@ class TrytondXmlHandler(sax.handler.ContentHandler):
         """
         Take a byte stream has input and parse the xml content.
         """
-
+        self.base_path = (
+            os.path.dirname(stream.name) if hasattr(stream, 'name') else '')
         source = sax.InputSource()
         source.setByteStream(stream)
 
@@ -414,6 +434,8 @@ class TrytondXmlHandler(sax.handler.ContentHandler):
                 self.sax_parser.parse(source)
             except Exception as e:
                 raise ParsingError("in %s" % self.current_state()) from e
+
+        self.base_path = ''
         return self.to_delete
 
     def startElement(self, name, attributes):
@@ -459,7 +481,8 @@ class TrytondXmlHandler(sax.handler.ContentHandler):
                 self.write_records(model, *actions)
             self.grouped_write.clear()
         if name == 'data' and self.grouped_model_data:
-            self.ModelData.save(self.grouped_model_data)
+            if self.store_model_data:
+                self.ModelData.save(self.grouped_model_data)
             self.grouped_model_data.clear()
 
         # Closing tag found, if we are in a delegation the handler
@@ -516,14 +539,18 @@ class TrytondXmlHandler(sax.handler.ContentHandler):
         process. The records that are not encountered are deleted from the
         database in post_import."""
 
-        # Fetch the data in id descending order to avoid depedendcy
-        # problem when the corresponding recordds will be deleted:
-        module_data = self.ModelData.search([
-                ('module', '=', self.module),
-                ], order=[('id', 'DESC')])
+        if self.store_model_data:
+            # Fetch the data in id descending order to avoid depedendcy
+            # problem when the corresponding recordds will be deleted:
+            module_data = self.ModelData.search([
+                    ('module', '=', self.module),
+                    ], order=[('id', 'DESC')])
+        else:
+            module_data = []
+
         return set(rec.fs_id for rec in module_data)
 
-    def import_record(self, model, values, fs_id):
+    def import_record(self, model, values, fs_id, domain=None):
         module = self.module
 
         if not fs_id:
@@ -538,7 +565,25 @@ class TrytondXmlHandler(sax.handler.ContentHandler):
         # This means that the corresponding record have been found.
         self.to_delete.discard(fs_id)
 
-        if self.fs2db.exists(module, fs_id):
+        exists = self.fs2db.exists(module, fs_id)
+        if not exists and domain:
+            Model = self.pool.get(model)
+            records = Model.search(eval(domain), limit=1)
+            if records:
+                record, = records
+                mdata = self.ModelData(
+                    fs_id=fs_id,
+                    model=model,
+                    module=module,
+                    db_id=record.id,
+                    field_names=(),
+                    noupdate=self.noupdate,
+                    )
+                mdata.save()
+                self.fs2db.set(module, fs_id, mdata)
+                exists = True
+
+        if exists:
             if self.noupdate and self.module_state != 'to activate':
                 return
             mdata = self.fs2db.get(module, fs_id)
@@ -584,6 +629,8 @@ class TrytondXmlHandler(sax.handler.ContentHandler):
             if new_values:
                 to_update += [[record], values]
             if values.keys() - set(mdata.field_names):
+                if mdata.id is None:
+                    mdata.save()
                 field_names = dict(mdata.get_field_names()).keys()
                 mdata.field_names = tuple(
                     (set(mdata.field_names) & field_names) | values.keys())
@@ -656,3 +703,27 @@ def post_import(pool, module, to_delete):
         transaction.commit()
 
     return True
+
+
+def import_xml(xml):
+    from trytond.pool import Pool
+
+    pool = Pool()
+    Modules = pool.get('ir.module')
+    modules = {m.name for m in Modules.search([
+                ('state', '=', 'activated'),
+                ])}
+    Lang = pool.get('ir.lang')
+    langs = {l.code for l in Lang.search([
+                ('translatable', '=', True),
+                ])}
+    parser = TrytondXmlHandler(
+        pool, None, 'to activate', modules, langs, store_model_data=False)
+
+    if isinstance(xml, str):
+        stream = io.BytesIO(xml.encode('utf8'))
+    elif isinstance(xml, bytes):
+        stream = io.BytesIO(xml)
+    else:
+        stream = xml
+    parser.parse_xmlstream(stream)

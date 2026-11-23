@@ -16,6 +16,7 @@ from tryton.gui.window.nomodal import NoModal
 from .infobar import InfoBar
 
 _ = gettext.gettext
+SENTINEL = object()
 
 
 class WinForm(NoModal, InfoBar):
@@ -23,7 +24,8 @@ class WinForm(NoModal, InfoBar):
 
     def __init__(self, screen, callback=None, view_type='form',
             new=False, many=0, domain=None, context=None,
-            save_current=False, title='', defaults=None):
+            save_current=False, title='', defaults=None, prev_view=SENTINEL,
+            on_destroy=None):
         tooltips = common.Tooltips()
         NoModal.__init__(self)
 
@@ -36,6 +38,7 @@ class WinForm(NoModal, InfoBar):
         self.domain = domain
         self.context = context
         self.save_current = save_current
+        self.on_destroy = on_destroy
         if screen.breadcrumb:
             breadcrumb = list(screen.breadcrumb)
             if title:
@@ -49,7 +52,10 @@ class WinForm(NoModal, InfoBar):
             if not title:
                 title = MODELNAME.get(screen.model_name)
             self.title = title
-        self.prev_view = self.screen.current_view
+        if prev_view is not SENTINEL:
+            self.prev_view = prev_view
+        else:
+            self.prev_view = screen.current_view
         self.screen.screen_container.alternate_view = True
         self.screen.switch_view(view_type=view_type)
         if self.screen.current_view.view_type != view_type:
@@ -319,11 +325,24 @@ class WinForm(NoModal, InfoBar):
         self.screen.new()
         self.screen.current_view.widget.set_sensitive(True)
 
+    def _validate(self):
+        self.screen.current_view.set_value()
+        if record := self.screen.current_record:
+            fields = self.screen.current_view.get_fields()
+            if not record.validate(fields):
+                self.screen.display(set_cursor=True)
+                return False
+            if self.screen.pre_validate and not record.pre_validate():
+                return False
+        return True
+
     def _sig_next(self, widget):
-        self.screen.display_next()
+        if self._validate():
+            self.screen.display_next()
 
     def _sig_previous(self, widget):
-        self.screen.display_prev()
+        if self._validate():
+            self.screen.display_prev()
 
     def _sig_remove(self, widget, remove=False):
         self.screen.remove(remove=remove)
@@ -506,10 +525,13 @@ class WinForm(NoModal, InfoBar):
         viewport = self.screen.screen_container.alternate_viewport
         if viewport and viewport.get_parent():
             viewport.get_parent().remove(viewport)
-        self.screen.switch_view(view_type=self.prev_view.view_type)
+        if self.prev_view:
+            self.screen.switch_view(view_type=self.prev_view.view_type)
         if getattr(self, 'win', None):
             self.win.destroy()
         NoModal.destroy(self)
+        if self.on_destroy:
+            self.on_destroy()
 
     def show(self):
         self.win.show()

@@ -15,23 +15,22 @@ from genshi.core import END, START, Attrs, QName
 from genshi.template import MarkupTemplate
 from genshi.template import TemplateError as GenshiTemplateError
 from genshi.template import TextTemplate
-from sql import Literal
 from sql.aggregate import Count
 
 import trytond.config as config
 from trytond.i18n import gettext
 from trytond.model import (
-    EvalEnvironment, Index, ModelSQL, ModelView, Unique, Workflow, dualmethod,
-    fields)
+    EvalEnvironment, Index, ModelAccessProxy, ModelSQL, ModelView, Unique,
+    Workflow, dualmethod, fields)
 from trytond.pool import Pool
 from trytond.pyson import Eval, If, PYSONDecoder, TimeDelta
 from trytond.report import Report, html_to_text, mjml_to_html
 from trytond.sendmail import SMTPDataManager, send_message_transactional
-from trytond.tools import grouped_slice, pairwise_longest, reduce_ids
+from trytond.tools import pairwise_longest
 from trytond.tools.chart import sparkline
 from trytond.tools.email_ import format_address, has_rcpt, set_from_header
 from trytond.transaction import Transaction
-from trytond.url import http_host
+from trytond.url import http_base
 from trytond.wsgi import Base64Converter
 
 from .exceptions import ConditionError, DomainError, TemplateError
@@ -179,18 +178,18 @@ class Scenario(
                 others.append(scenario)
 
         count = {name: defaultdict(int) for name in names}
-        for sub in grouped_slice(others):
-            cursor.execute(*record.select(
-                    record.scenario,
-                    Count(Literal('*')),
-                    Count(Literal('*'), filter_=record.blocked),
-                    where=reduce_ids(record.scenario, sub),
-                    group_by=record.scenario))
-            for id_, all_, blocked in cursor:
-                if 'record_count' in count:
-                    count['record_count'][id_] = all_
-                if 'record_count_blocked' in count:
-                    count['record_count_blocked'][id_] = blocked
+        cursor.execute(*record.select(
+                record.scenario,
+                Count(),
+                Count(filter_=record.blocked),
+                where=fields.SQL_OPERATORS['in'](
+                    record.scenario, map(int, others)),
+                group_by=record.scenario))
+        for id_, all_, blocked in cursor:
+            if 'record_count' in count:
+                count['record_count'][id_] = all_
+            if 'record_count_blocked' in count:
+                count['record_count_blocked'][id_] = blocked
         for scenario in drafts:
             Model = pool.get(scenario.model)
             domain = PYSONDecoder({}).decode(scenario.domain)
@@ -522,22 +521,21 @@ class Activity(
         cursor = Transaction().connection.cursor()
 
         count = {name: defaultdict(int) for name in names}
-        for sub in grouped_slice(activities):
-            cursor.execute(*record_activity.select(
-                    record_activity.activity,
-                    Count(Literal('*'),
-                        filter_=record_activity.state == 'done'),
-                    Count(Literal('*'), filter_=record_activity.email_opened),
-                    Count(Literal('*'), filter_=record_activity.email_clicked),
-                    where=reduce_ids(record_activity.activity, sub),
-                    group_by=record_activity.activity))
-            for id_, all_, email_opened, email_clicked in cursor:
-                if 'record_count' in count:
-                    count['record_count'][id_] = all_
-                if 'email_opened' in count:
-                    count['email_opened'][id_] = email_opened
-                if 'email_clicked' in count:
-                    count['email_clicked'][id_] = email_clicked
+        cursor.execute(*record_activity.select(
+                record_activity.activity,
+                Count(filter_=record_activity.state == 'done'),
+                Count(filter_=record_activity.email_opened),
+                Count(filter_=record_activity.email_clicked),
+                where=fields.SQL_OPERATORS['in'](
+                    record_activity.activity, map(int, activities)),
+                group_by=record_activity.activity))
+        for id_, all_, email_opened, email_clicked in cursor:
+            if 'record_count' in count:
+                count['record_count'][id_] = all_
+            if 'email_opened' in count:
+                count['email_opened'][id_] = email_opened
+            if 'email_clicked' in count:
+                count['email_clicked'][id_] = email_clicked
         return count
 
     @classmethod
@@ -638,7 +636,7 @@ class Activity(
         Email = pool.get('ir.email')
         record = record_activity.record
         url_base = config.get(
-            'marketing', 'automation_base', default=http_host())
+            'marketing', 'automation_base', default=http_base())
         url_open = urljoin(url_base, '/m/empty.gif')
 
         with Transaction().set_context(language=record.language):
@@ -730,8 +728,10 @@ class Activity(
             email.save()
 
     def email_context(self, record):
+        record = ModelAccessProxy(
+            record.record, record.record.marketing_access_context)
         return {
-            'record': record.record,
+            'record': record,
             'format_date': Report.format_date,
             'format_datetime': Report.format_datetime,
             'format_timedelta': Report.format_timedelta,
@@ -910,13 +910,13 @@ class RecordActivity(Workflow, ModelSQL, ModelView):
                 ))
         cls._buttons.update(
             on_email_opened={
-                'invisible': ((Eval('state') != 'waiting')
+                'invisible': ((Eval('state') != 'done')
                     | (Eval('activity_action') != 'send_email')
                     | Eval('email_opened', False)),
                 'depends': ['state', 'activity_action', 'email_opened'],
                 },
             on_email_clicked={
-                'invisible': ((Eval('state') != 'waiting')
+                'invisible': ((Eval('state') != 'done')
                     | (Eval('activity_action') != 'send_email')
                     | Eval('email_clicked', False)),
                 'depends': ['state', 'activity_action', 'email_clicked'],

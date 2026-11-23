@@ -263,6 +263,11 @@ msgctxt "field:purchase.line,quantity:"
 msgid "Quantity"
 msgstr "Cantitate"
 
+#, fuzzy
+msgctxt "field:purchase.line,quantity_to_invoice:"
+msgid "Quantity to Invoice"
+msgstr "Creare Factura"
+
 msgctxt "field:purchase.line,summary:"
 msgid "Summary"
 msgstr "Sumar"
@@ -319,6 +324,11 @@ msgctxt "field:purchase.line-recreated-stock.move,purchase_line:"
 msgid "Purchase Line"
 msgstr "Rând de cumpărare"
 
+#, fuzzy
+msgctxt "field:purchase.product_supplier,average_lead_time:"
+msgid "Average Lead Time"
+msgstr "Timp de livrare"
+
 msgctxt "field:purchase.product_supplier,code:"
 msgid "Code"
 msgstr "Cod"
@@ -332,6 +342,11 @@ msgid "Currency"
 msgstr "Moneda"
 
 msgctxt "field:purchase.product_supplier,lead_time:"
+msgid "Lead Time"
+msgstr "Timp de livrare"
+
+#, fuzzy
+msgctxt "field:purchase.product_supplier,lead_time_used:"
 msgid "Lead Time"
 msgstr "Timp de livrare"
 
@@ -511,6 +526,11 @@ msgstr "Impozit"
 msgctxt "field:purchase.purchase,tax_amount_cache:"
 msgid "Tax Cache"
 msgstr ""
+
+#, fuzzy
+msgctxt "field:purchase.purchase,to_invoice:"
+msgid "To Invoice"
+msgstr "Factură"
 
 msgctxt "field:purchase.purchase,total_amount:"
 msgid "Total"
@@ -1376,16 +1396,17 @@ msgid "Title"
 msgstr "Titlu"
 
 msgctxt "selection:purchase.purchase,invoice_method:"
-msgid "Based On Order"
-msgstr "Pe baza Comenzii"
-
-msgctxt "selection:purchase.purchase,invoice_method:"
-msgid "Based On Shipment"
-msgstr "Pe baza expedierii"
-
-msgctxt "selection:purchase.purchase,invoice_method:"
 msgid "Manual"
 msgstr "Manual"
+
+msgctxt "selection:purchase.purchase,invoice_method:"
+msgid "On Fulfillment"
+msgstr ""
+
+#, fuzzy
+msgctxt "selection:purchase.purchase,invoice_method:"
+msgid "On Order"
+msgstr "Pe baza Comenzii"
 
 msgctxt "selection:purchase.purchase,invoice_state:"
 msgid "Awaiting Payment"

@@ -16,10 +16,12 @@ from trytond.modules.company.model import employee_field, set_employee
 from trytond.modules.product import price_digits, round_price
 from trytond.modules.stock.shipment import ShipmentAssignMixin
 from trytond.pool import Pool, PoolMeta
-from trytond.pyson import Bool, Eval, If
+from trytond.pyson import Bool, Eval, Id, If
 from trytond.transaction import Transaction
 
-from .exceptions import CostWarning
+from .exceptions import (
+    CostWarning, OverProductionWarning, UnderProductionWarning,
+    UnexpectedProductionWarning)
 
 
 class Production(
@@ -41,22 +43,29 @@ class Production(
     company = fields.Many2One('company.company', 'Company', required=True,
         states={
             'readonly': ~Eval('state').in_(['request', 'draft']),
+            'editable': ~(
+                Eval('inputs', [-1])
+                | Eval('outputs', [-1])),
             })
     warehouse = fields.Many2One('stock.location', 'Warehouse', required=True,
         domain=[
             ('type', '=', 'warehouse'),
             ],
         states={
-            'readonly': (~Eval('state').in_(['request', 'draft'])
-                | Eval('inputs', [-1]) | Eval('outputs', [-1])),
+            'readonly': ~Eval('state').in_(['request', 'draft']),
+            'editable': ~(
+                Eval('inputs', [-1])
+                | Eval('outputs', [-1])),
             })
     location = fields.Many2One('stock.location', 'Location', required=True,
         domain=[
             ('type', '=', 'production'),
             ],
         states={
-            'readonly': (~Eval('state').in_(['request', 'draft'])
-                | Eval('inputs', [-1]) | Eval('outputs', [-1])),
+            'readonly': ~Eval('state').in_(['request', 'draft']),
+            'editable': ~(
+                Eval('inputs', [-1])
+                | Eval('outputs', [-1])),
             })
     type = fields.Selection([
             ('assembly', "Assembly"),
@@ -87,8 +96,8 @@ class Production(
                 ),
             ],
         states={
-            'readonly': (~Eval('state').in_(['request', 'draft'])
-                | ~Eval('warehouse', 0) | ~Eval('location', 0)),
+            'readonly': ~Eval('state').in_(['request', 'draft']),
+            'editable': Eval('warehouse', None) & Eval('location', None),
             'invisible': ~Eval('product'),
             })
     uom_category = fields.Function(fields.Many2One(
@@ -123,8 +132,11 @@ class Production(
             ('company', '=', Eval('company', -1)),
             ],
         states={
-            'readonly': (~Eval('state').in_(['request', 'draft', 'waiting'])
-                | ~Eval('warehouse') | ~Eval('location')),
+            'readonly': ~Eval('state').in_(['request', 'draft', 'waiting']),
+            'editable': (
+                Eval('warehouse', None)
+                & Eval('location', None)
+                & Eval('company', None)),
             })
     outputs = fields.One2Many(
         'stock.move', 'production_output', "Output Materials",
@@ -138,8 +150,11 @@ class Production(
             ('company', '=', Eval('company', -1)),
             ],
         states={
-            'readonly': (Eval('state').in_(['done', 'cancelled'])
-                | ~Eval('warehouse') | ~Eval('location')),
+            'readonly': Eval('state').in_(['done', 'cancelled']),
+            'editable': (
+                Eval('warehouse', None)
+                & Eval('location', None)
+                & Eval('company', None)),
             })
 
     assigned_by = employee_field("Assigned By")
@@ -189,6 +204,7 @@ class Production(
                 ('assigned', 'running'),
                 ('running', 'done'),
                 ('running', 'waiting'),
+                ('running', 'cancelled'),
                 ('assigned', 'waiting'),
                 ('waiting', 'waiting'),
                 ('waiting', 'draft'),
@@ -201,8 +217,14 @@ class Production(
                 ))
         cls._buttons.update({
                 'cancel': {
-                    'invisible': ~Eval('state').in_(['request', 'draft',
-                            'assigned']),
+                    'invisible': (
+                        (Eval('state') == 'cancelled')
+                        | (Eval('state').in_(['running', 'done'])
+                            & ~Id('stock',
+                                'group_stock_cancellation').in_(
+                                Eval('context', {}).get('groups', []))
+                            & ~Eval('context', {}).get(
+                                'administrator', False))),
                     'depends': ['state'],
                     },
                 'draft': {
@@ -465,7 +487,7 @@ class Production(
         for input_ in self.inputs:
             if input_.state == 'cancelled':
                 continue
-            cost_price = input_.get_cost_price()
+            cost_price = input_.get_cost_price() or 0
             cost += (Decimal(str(input_.internal_quantity)) * cost_price)
         return round_price(cost)
 
@@ -486,44 +508,43 @@ class Production(
             product = input_.product
             quantity = Uom.compute_qty(
                 input_.unit, input_.quantity, product.default_uom)
-            cost += Decimal(str(quantity)) * product.cost_price
+            cost += Decimal(str(quantity)) * (product.cost_price or 0)
         return cost
 
     @dualmethod
     def set_moves(cls, productions):
         pool = Pool()
         Move = pool.get('stock.move')
-        to_save = []
-        for production in productions:
-            dates = production._get_move_planned_date()
-            input_date, output_date = dates
-            if not production.bom:
-                if production.product:
-                    move = production._move(
-                        'output', production.product, production.unit,
-                        production.quantity)
-                    move.planned_date = output_date
-                    to_save.append(move)
-                continue
+        with Move.bulk_save() as save:
+            for production in productions:
+                dates = production._get_move_planned_date()
+                input_date, output_date = dates
+                if not production.bom:
+                    if production.product:
+                        move = production._move(
+                            'output', production.product, production.unit,
+                            production.quantity)
+                        move.planned_date = output_date
+                        save.push(move)
+                    continue
 
-            factor = production.bom.compute_factor(
-                production.product, production.quantity, production.unit)
-            for input_ in production.bom.inputs:
-                quantity = input_.compute_quantity(factor)
-                product = input_.product
-                move = production._move(
-                    'input', product, input_.unit, quantity)
-                move.planned_date = input_date
-                to_save.append(input_.prepare_move(production, move))
+                factor = production.bom.compute_factor(
+                    production.product, production.quantity, production.unit)
+                for input_ in production.bom.inputs:
+                    quantity = input_.compute_quantity(factor)
+                    for line, quantity in input_.lines_for_quantity(quantity):
+                        move = production._move(
+                            'input', line.product, line.unit, quantity)
+                        move.planned_date = input_date
+                        save.push(input_.prepare_move(production, move))
 
-            for output in production.bom.outputs:
-                quantity = output.compute_quantity(factor)
-                product = output.product
-                move = production._move(
-                    'output', product, output.unit, quantity)
-                move.planned_date = output_date
-                to_save.append(output.prepare_move(production, move))
-        Move.save(to_save)
+                for output in production.bom.outputs:
+                    quantity = output.compute_quantity(factor)
+                    for line, quantity in output.lines_for_quantity(quantity):
+                        move = production._move(
+                            'output', line.product, line.unit, quantity)
+                        move.planned_date = output_date
+                        save.push(output.prepare_move(production, move))
 
     @classmethod
     def set_cost_from_moves(cls):
@@ -559,7 +580,7 @@ class Production(
             for input_ in production.inputs:
                 if input_.state == 'cancelled':
                     continue
-                cost_price = input_.get_cost_price()
+                cost_price = input_.get_cost_price() or 0
                 input_quantities[input_.product] += (
                     Decimal(str(input_.internal_quantity)))
                 input_costs[input_.product] += (
@@ -655,6 +676,78 @@ class Production(
                     production.number = number
         cls.save(productions)
 
+    def check_input_quantities(self):
+        self._check_quantities('inputs')
+
+    def check_output_quantities(self):
+        self._check_quantities('outputs')
+
+    def _check_quantities(self, type):
+        pool = Pool()
+        Lang = pool.get('ir.lang')
+        UoM = pool.get('product.uom')
+        Warning = pool.get('res.user.warning')
+
+        assert type in {'inputs', 'outputs'}
+
+        if not self.bom or self.bom.tolerance is None:
+            return
+
+        lang = Lang.get()
+        factor = self.bom.compute_factor(
+            self.product, self.quantity or 0, self.unit,
+            type='inputs' if self.type == 'disassembly' else 'outputs')
+        expected_quantities = defaultdict(float)
+        for move in getattr(self.bom, type):
+            quantity = move.compute_quantity(factor)
+            for line, quantity in move.lines_for_quantity(quantity):
+                expected_quantities[line.product] += UoM.compute_qty(
+                    line.unit, quantity, line.product.default_uom,
+                    round=False)
+
+        actual_quantities = defaultdict(float)
+        for move in getattr(self, type):
+            actual_quantities[move.product] += move.internal_quantity
+
+        for product, expected_quantity in expected_quantities.items():
+            actual_quantity = actual_quantities[product]
+            minimal_quantity = expected_quantity * (1 - self.bom.tolerance)
+            maximal_quantity = expected_quantity * (1 + self.bom.tolerance)
+            if actual_quantity < minimal_quantity:
+                name = Warning.format('under_tolerance', [self, product])
+                if Warning.check(name):
+                    raise UnderProductionWarning(
+                        name,
+                        gettext(f'production.msg_under_production_{type}',
+                            production=self.rec_name,
+                            product=product.rec_name,
+                            actual=lang.format_number_symbol(
+                                actual_quantity, product.default_uom),
+                            minimal=lang.format_number_symbol(
+                                minimal_quantity, product.default_uom)))
+            elif actual_quantity > maximal_quantity:
+                name = Warning.format('over_tolerance', [self, product])
+                if Warning.check(name):
+                    raise OverProductionWarning(
+                        name,
+                        gettext(f'production.msg_over_production_{type}',
+                            production=self.rec_name,
+                            product=product.rec_name,
+                            actual=lang.format_number_symbol(
+                                actual_quantity, product.default_uom),
+                            maximal=lang.format_number_symbol(
+                                maximal_quantity, product.default_uom)))
+
+        for product in actual_quantities.keys() - expected_quantities.keys():
+            name = Warning.format('unexpected_product', [self, product])
+            if Warning.check(name):
+                raise UnexpectedProductionWarning(
+                    name,
+                    gettext(
+                        f'production.msg_unexpected_product_production_{type}',
+                        production=self.rec_name,
+                        product=product.rec_name))
+
     @classmethod
     def on_modification(cls, mode, productions, field_names=None):
         pool = Pool()
@@ -734,15 +827,14 @@ class Production(
         pool = Pool()
         Move = pool.get('stock.move')
 
-        to_draft, to_delete = [], []
-        for production in productions:
-            for move in chain(production.inputs, production.outputs):
-                if move.state != 'cancelled':
-                    to_draft.append(move)
-                else:
-                    to_delete.append(move)
-        Move.draft(to_draft)
-        Move.delete(to_delete)
+        with Move.bulk_delete() as delete, \
+                Move.bulk_func('draft') as draft:
+            for production in productions:
+                for move in chain(production.inputs, production.outputs):
+                    if move.state != 'cancelled':
+                        draft.push(move)
+                    else:
+                        delete.push(move)
 
     @classmethod
     @ModelView.button
@@ -770,6 +862,8 @@ class Production(
         pool = Pool()
         Move = pool.get('stock.move')
         Date = pool.get('ir.date')
+        for production in productions:
+            production.check_input_quantities()
         Move.do([m for p in productions for m in p.inputs])
         for company, productions in groupby(
                 productions, key=lambda p: p.company):
@@ -787,6 +881,8 @@ class Production(
         pool = Pool()
         Move = pool.get('stock.move')
         Date = pool.get('ir.date')
+        for production in productions:
+            production.check_output_quantities()
         cls.set_cost(productions)
         Move.do([m for p in productions for m in p.outputs])
         for company, productions in groupby(
@@ -813,16 +909,14 @@ class Production(
         if Move.assign_try(to_assign):
             cls.assign(productions)
         else:
-            to_assign = []
-            for production in productions:
-                if any(
-                        m.state in {'staging', 'draft'}
-                        for m in production.assign_moves
-                        if m.assignation_required):
-                    continue
-                to_assign.append(production)
-            if to_assign:
-                cls.assign(to_assign)
+            with cls.bulk_func('assign', auto=False) as assign:
+                for production in productions:
+                    if any(
+                            m.state in {'staging', 'draft'}
+                            for m in production.assign_moves
+                            if m.assignation_required):
+                        continue
+                    assign.push(production)
 
     @classmethod
     def _get_reschedule_planned_start_dates_domain(cls, date):
@@ -893,7 +987,9 @@ class Production_Lot(metaclass=PoolMeta):
             for move in production.outputs:
                 if not move.lot and move.product.lot_is_required(
                         move.from_location, move.to_location):
-                    move.add_lot()
+                    date = move.effective_date or production.effective_date
+                    with Transaction().set_context(date=date):
+                        move.add_lot()
                     if move.lot:
                         lots.append(move.lot)
                         moves.append(move)

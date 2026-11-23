@@ -10,17 +10,18 @@ from trytond_gis.const import GIS_SQL_TYPE_RE, WGS_84
 logger = logging.getLogger(__name__)
 
 
-class TableHandler(PGTableHandler):
+class TableHandlerMixin:
 
-    def add_column(self, column_name, abstract_type, default=None, comment=''):
+    def add_column(self, column_name, abstract_type, default=None):
         if abstract_type.startswith('GIS_'):
             column_adder = self.add_geometry_column
         else:
             column_adder = super().add_column
-        column_adder(column_name, abstract_type, default, comment)
+        column_adder(column_name, abstract_type, default)
 
-    def add_geometry_column(self, column_name, abstract_type, default_fun=None,
-            fill_default=True, comment=''):
+    def add_geometry_column(
+            self, column_name, abstract_type, default_fun=None,
+            fill_default=True):
         cursor = Transaction().connection.cursor()
 
         match = GIS_SQL_TYPE_RE.match(abstract_type)
@@ -68,3 +69,7 @@ class TableHandler(PGTableHandler):
         cursor.execute('SELECT AddGeometryColumn(%s, %s, %s, %s, %s)',
             (self.table_name, column_name, srid, type_, dimension))
         self._update_definitions(columns=True)
+
+
+class TableHandler(TableHandlerMixin, PGTableHandler):
+    pass

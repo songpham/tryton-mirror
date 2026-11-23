@@ -194,6 +194,8 @@ class Field(object):
                 self.get_state_attrs(record)[key] = state_changes[key]
             elif key in self.attrs:
                 self.get_state_attrs(record)[key] = self.attrs[key]
+            if key == 'readonly' and not state_changes.get('editable', True):
+                self.get_state_attrs(record)['readonly'] = True
         if (record.group.readonly
                 or self.get_state_attrs(record).get('domain_readonly')
                 or record.parent_name == self.name):
@@ -1140,13 +1142,13 @@ class BinaryField(Field):
         return self.get(record)
 
     def set_client(self, record, value, force_change=False):
-        self._set_file_cache(record, value or b'')
+        self._set_file_cache(record, value)
         self.sig_changed(record)
         record.validate(softvalidation=True)
         record.set_modified(self.name)
 
     def get_size(self, record):
-        result = record.value.get(self.name) or 0
+        result = record.value.get(self.name)
         if isinstance(result, _FileCache):
             result = os.stat(result.path).st_size
         elif isinstance(result, (str, bytes)):

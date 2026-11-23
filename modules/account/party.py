@@ -16,7 +16,7 @@ from trytond.modules.currency.fields import Monetary
 from trytond.modules.party.exceptions import EraseError
 from trytond.pool import Pool, PoolMeta
 from trytond.pyson import Eval, If
-from trytond.tools import grouped_slice, reduce_ids, sqlite_apply_types
+from trytond.tools import sqlite_apply_types
 from trytond.tools import timezone as tz
 from trytond.transaction import Transaction
 
@@ -60,7 +60,10 @@ class Party(CompanyMultiValueMixin, metaclass=PoolMeta):
                 ],
             states={
                 'invisible': ~Eval('context', {}).get('company'),
-                }, help='Apply this rule on taxes when party is customer.'))
+                },
+            help="Apply this rule to the default taxes "
+            "when the party is a customer.\n"
+            "Leave it empty to keep the default taxes."))
     supplier_tax_rule = fields.MultiValue(fields.Many2One(
             'account.tax.rule', "Supplier Tax Rule",
             domain=[
@@ -69,7 +72,10 @@ class Party(CompanyMultiValueMixin, metaclass=PoolMeta):
                 ],
             states={
                 'invisible': ~Eval('context', {}).get('company'),
-                }, help='Apply this rule on taxes when party is supplier.'))
+                },
+            help="Apply this rule to the default taxes "
+            "when the party is a supplier.\n"
+            "Leave it empty to keep the default taxes."))
     currency = fields.Function(fields.Many2One(
             'currency.currency', "Currency"), 'get_currency')
     receivable = fields.Function(Monetary(
@@ -126,6 +132,7 @@ class Party(CompanyMultiValueMixin, metaclass=PoolMeta):
         Date = pool.get('ir.date')
         Move = pool.get('account.move')
         MoveLine = pool.get('account.move.line')
+        Reconciliation = pool.get('account.move.reconciliation')
 
         transaction = Transaction()
         context = transaction.context
@@ -133,6 +140,7 @@ class Party(CompanyMultiValueMixin, metaclass=PoolMeta):
         account_type = AccountType.__table__()
         move = Move.__table__()
         move_line = MoveLine.__table__()
+        reconciliation = Reconciliation.__table__()
 
         if date := context.get('date'):
             today = date
@@ -165,7 +173,8 @@ class Party(CompanyMultiValueMixin, metaclass=PoolMeta):
             columns.append(Coalesce(expressions[name], Decimal()).as_(name))
 
         if parties is not None:
-            party_where = reduce_ids(move_line.party, [p.id for p in parties])
+            party_where = fields.SQL_OPERATORS['in'](
+                move_line.party, [p.id for p in parties])
         else:
             party_where = Literal(True)
 
@@ -174,11 +183,15 @@ class Party(CompanyMultiValueMixin, metaclass=PoolMeta):
             .join(move, condition=move_line.move == move.id)
             .join(account, condition=move_line.account == account.id)
             .join(account_type, condition=account.type == account_type.id)
+            .left_join(
+                reconciliation,
+                condition=move_line.reconciliation == reconciliation.id)
             .select(
                 move_line.party.as_('party'),
                 *columns,
                 where=(
-                    (move_line.reconciliation == Null)
+                    ((move_line.reconciliation == Null)
+                        | (reconciliation.date > today))
                     & (account.company == company.id)
                     & party_where),
                 group_by=move_line.party))
@@ -199,14 +212,13 @@ class Party(CompanyMultiValueMixin, metaclass=PoolMeta):
 
         company = user.company
         currency = company.currency
-        for sub_parties in grouped_slice(parties):
-            query = cls._receivable_payable_query(names, company, sub_parties)
-            if backend.name == 'sqlite':
-                sqlite_apply_types(query, [None] + ['NUMERIC'] * 4)
-            cursor.execute(*query)
-            for party_id, *values in cursor:
-                for name, value in zip(names, values):
-                    amounts[name][party_id] = currency.round(value)
+        query = cls._receivable_payable_query(names, company, parties)
+        if backend.name == 'sqlite':
+            sqlite_apply_types(query, [None] + ['NUMERIC'] * 4)
+        cursor.execute(*query)
+        for party_id, *values in cursor:
+            for name, value in zip(names, values):
+                amounts[name][party_id] = currency.round(value)
         return amounts
 
     @classmethod

@@ -11,6 +11,7 @@ import re
 import string
 import time
 import uuid
+from secrets import compare_digest
 
 try:
     import secrets
@@ -30,6 +31,7 @@ from sql.conditionals import Case
 from sql.functions import CurrentTimestamp
 
 import trytond.config as config
+from trytond.backend import scalar_row
 from trytond.cache import Cache
 from trytond.exceptions import LoginException, RateLimitException, UserError
 from trytond.i18n import gettext, ngettext
@@ -42,7 +44,6 @@ from trytond.pyson import Bool, Eval, PYSONEncoder
 from trytond.report import Report, get_email
 from trytond.rpc import RPC
 from trytond.sendmail import send_message_transactional
-from trytond.tools import grouped_slice
 from trytond.tools.email_ import (
     EmailNotValidError, normalize_email, set_from_header, validate_email)
 from trytond.transaction import Transaction, without_check_access
@@ -122,6 +123,14 @@ class User(avatar_mixin(100, 'login'), DeactivableMixin, ModelSQL, ModelView):
             'invisible': not _has_password,
             },
         depends=['password_reset'])
+    administrator = fields.Boolean(
+        "Administrator",
+        states={
+            'readonly': (Eval('administrator', False)
+                & ((Eval('id') == Eval('context', {}).get('user'))
+                    | (Eval('id', -1) == 0))),
+            },
+        help="When checked the user has the access rights of all groups.")
     signature = fields.Text('Signature')
     menu = fields.Many2One(
         'ir.action', "Menu",
@@ -130,8 +139,11 @@ class User(avatar_mixin(100, 'login'), DeactivableMixin, ModelSQL, ModelView):
     actions = fields.Many2Many('res.user-ir.action', 'user', 'action',
         'Actions', help='Actions that will be run at login.',
         size=5)
-    groups = fields.Many2Many('res.user-res.group',
-       'user', 'group', 'Groups')
+    groups = fields.Many2Many(
+        'res.user-res.group', 'user', 'group', "Groups",
+        states={
+            'invisible': Eval('administrator', False),
+            })
     applications = fields.One2Many(
         'res.user.application', 'user', "Applications")
     language = fields.Many2One('ir.lang', 'Language',
@@ -152,6 +164,7 @@ class User(avatar_mixin(100, 'login'), DeactivableMixin, ModelSQL, ModelView):
     sessions = fields.Function(fields.Integer('Sessions'),
             'get_sessions')
     _get_groups_cache = Cache('res_user.get_groups', context=False)
+    _is_administrator_cache = Cache('res_user.is_administrator', context=False)
 
     @classmethod
     def __setup__(cls):
@@ -191,6 +204,7 @@ class User(avatar_mixin(100, 'login'), DeactivableMixin, ModelSQL, ModelView):
         cls._context_fields = [
             'language',
             'language_direction',
+            'administrator',
             'groups',
         ]
         cls._order.insert(0, ('name', 'ASC'))
@@ -286,8 +300,13 @@ class User(avatar_mixin(100, 'login'), DeactivableMixin, ModelSQL, ModelView):
     @dualmethod
     @ModelView.button
     def reset_password(cls, users, length=8, from_=None):
+        now = datetime.datetime.now()
         length = max(length, config.getint('password', 'length', default=0))
         for user in users:
+            if (user.password_reset
+                    and user.password_reset_expire
+                    and user.password_reset_expire > now):
+                continue
             user.password_reset = gen_password(length=length)
             user.password_reset_expire = (
                 datetime.datetime.now() + datetime.timedelta(
@@ -319,17 +338,16 @@ class User(avatar_mixin(100, 'login'), DeactivableMixin, ModelSQL, ModelView):
             seconds=config.getint('session', 'max_age'))
         result = dict((u.id, 0) for u in users)
         with without_check_access():
-            for sub_ids in grouped_slice(users):
-                sessions = Session.search([
-                        ('create_uid', 'in', sub_ids),
-                        ], order=[('create_uid', 'ASC')])
+            sessions = Session.search([
+                    ('create_uid', 'in', users),
+                    ],
+                order=[('create_uid', 'ASC')])
 
-                def filter_(session):
-                    timestamp = session.write_date or session.create_date
-                    return abs(timestamp - now) < timeout
-                result.update(dict((i, len(list(g)))
-                        for i, g in groupby(filter(filter_, sessions),
-                            attrgetter('create_uid.id'))))
+            def filter_(session):
+                return abs(session.last_modified_at - now) < timeout
+            result.update(dict((i, len(list(g)))
+                    for i, g in groupby(filter(filter_, sessions),
+                        attrgetter('create_uid.id'))))
         return result
 
     @classmethod
@@ -362,6 +380,8 @@ class User(avatar_mixin(100, 'login'), DeactivableMixin, ModelSQL, ModelView):
                     or {'active', 'password'} & set(field_names)):
                 Session.clear(users)
                 UserDevice.clear([u.login for u in users])
+            if field_names is None or 'administrator' in field_names:
+                cls._is_administrator_cache.clear()
 
             # Clean cursor cache as it could be filled by domain_get
             for cache in Transaction().cache.values():
@@ -483,8 +503,7 @@ class User(avatar_mixin(100, 'login'), DeactivableMixin, ModelSQL, ModelView):
                             getattr(user, field).rec_name
             elif cls._fields[field]._type in ('one2many', 'many2many'):
                 res[field] = [x.id for x in getattr(user, field)]
-                admin_id = ModelData.get_id('res.user_admin')
-                if field == 'actions' and user.id == admin_id:
+                if field == 'actions' and user.is_administrator(user.id):
                     config_wizard_id = ModelData.get_id('ir',
                         'act_module_config_wizard')
                     action_id = Action.get_action_id(config_wizard_id)
@@ -546,7 +565,8 @@ class User(avatar_mixin(100, 'login'), DeactivableMixin, ModelSQL, ModelView):
         user_id = Transaction().user
         user = cls(user_id)
         for field in values:
-            if field not in fields or field == 'groups':
+            if (field not in fields
+                    or field in {'administrator', 'groups'}):
                 del values_clean[field]
             if field == 'language':
                 langs = Lang.search([
@@ -577,7 +597,8 @@ class User(avatar_mixin(100, 'login'), DeactivableMixin, ModelSQL, ModelView):
         for name, definition in result['fields'].items():
             definition = dict(definition)
             result['fields'][name] = definition
-            definition['readonly'] = name in {'groups', 'language_direction'}
+            definition['readonly'] = name in {
+                'administrator', 'groups', 'language_direction'}
 
         def convert2selection(definition, name):
             del definition[name]['relation']
@@ -610,6 +631,23 @@ class User(avatar_mixin(100, 'login'), DeactivableMixin, ModelSQL, ModelView):
         return result
 
     @classmethod
+    def is_administrator(cls, user=None):
+        transaction = Transaction()
+        if user is None:
+            user = transaction.user
+        else:
+            user = int(user)
+        if (is_admin := cls._is_administrator_cache.get(user)) is not None:
+            return is_admin
+
+        table = cls.__table__()
+        cursor = transaction.connection.cursor(row_factory=scalar_row)
+        cursor.execute(*table.select(
+                table.administrator, where=table.id == user))
+        administrator = cursor.fetchone()
+        return cls._is_administrator_cache.set(user, bool(administrator))
+
+    @classmethod
     def get_groups(cls):
         '''
         Return an ordered tuple of all group ids for the user
@@ -619,6 +657,10 @@ class User(avatar_mixin(100, 'login'), DeactivableMixin, ModelSQL, ModelView):
         Group = pool.get('res.group')
 
         transaction = Transaction()
+
+        if '_groups' in transaction.context:
+            return transaction.context['_groups']
+
         user = transaction.user
         groups = cls._get_groups_cache.get(user)
         if groups is not None:
@@ -733,21 +775,22 @@ class User(avatar_mixin(100, 'login'), DeactivableMixin, ModelSQL, ModelView):
             msg = gettext('res.msg_user_password', login=login)
             raise LoginException('password', msg, type='password')
         user_id, password_hash, password_reset = cls._get_login(login)
-        if user_id and password_hash:
-            password = parameters['password']
-            valid, new_hash = cls.check_password(password, password_hash)
-            if valid:
-                if new_hash:
-                    logger.info("Update password hash for %s", user_id)
-                    with Transaction().new_transaction():
-                        with without_check_access():
-                            cls.write([cls(user_id)], {
-                                    'password_hash': new_hash,
-                                    })
-                return user_id
-        if user_id and password_reset:
-            if password_reset == parameters['password']:
-                return user_id
+        if user_id:
+            password = str(parameters['password'])
+            if password_hash:
+                valid, new_hash = cls.check_password(password, password_hash)
+                if valid:
+                    if new_hash:
+                        logger.info("Update password hash for %s", user_id)
+                        with Transaction().new_transaction():
+                            with without_check_access():
+                                cls.write([cls(user_id)], {
+                                        'password_hash': new_hash,
+                                        })
+                    return user_id
+            if password_reset:
+                if compare_digest(password_reset, password):
+                    return user_id
 
     @classmethod
     def hash_password(cls, password):
@@ -813,7 +856,7 @@ class LoginAttempt(ModelSQL):
     def count(cls, login, device_cookie=None):
         cursor = Transaction().connection.cursor()
         table = cls.__table__()
-        cursor.execute(*table.select(Count(Literal('*')),
+        cursor.execute(*table.select(Count(),
                 where=(table.login == login)
                 & (table.device_cookie == device_cookie)
                 & (table.create_date >= cls.delay())))
@@ -826,7 +869,7 @@ class LoginAttempt(ModelSQL):
         table = cls.__table__()
         _, ip_network = transaction.remote_address()
         ip_network = str(ip_network) if ip_network else None
-        cursor.execute(*table.select(Count(Literal('*')),
+        cursor.execute(*table.select(Count(),
                 where=(table.ip_network == ip_network)
                 & (table.create_date >= cls.delay())))
         return cursor.fetchone()[0]
@@ -838,21 +881,23 @@ class UserDevice(ModelSQL):
     __name__ = 'res.user.device'
 
     login = fields.Char("Login", required=True)
-    cookie = fields.Char("Cookie", readonly=True, required=True, strip=False)
+    cookie = fields.Char("Cookie", required=True, strip=False)
 
     @classmethod
     def __setup__(cls):
         super().__setup__()
         cls.__rpc__.update({
-                'renew': RPC(readonly=False),
+                'renew': RPC(readonly=False, check_access=False),
                 })
 
     @classmethod
-    def get_valid_cookie(cls, login, cookie):
+    def get_valid_cookie(cls, login, cookie=None):
+        if not cookie:
+            return None
         try:
             device, = cls.search([
                     ('login', '=', login),
-                    ('cookie', '=', cookie),
+                    ('cookie', '=', str(cookie)),
                     ], limit=1)
         except ValueError:
             return None
@@ -860,16 +905,19 @@ class UserDevice(ModelSQL):
         return device.cookie
 
     @classmethod
-    def renew(cls, current_cookie):
+    def renew(cls, current_cookie=None):
         pool = Pool()
         User = pool.get('res.user')
 
         user = User(Transaction().user)
         new_cookie = uuid.uuid4().hex
-        current_devices = cls.search([
-                    ('login', '=', user.login),
-                    ('cookie', '=', current_cookie),
-                    ])
+        if current_cookie is not None:
+            current_devices = cls.search([
+                        ('login', '=', user.login),
+                        ('cookie', '=', current_cookie),
+                        ])
+        else:
+            current_devices = []
         if current_devices:
             cls.write(current_devices, {
                     'cookie': new_cookie
@@ -883,10 +931,9 @@ class UserDevice(ModelSQL):
 
     @classmethod
     def clear(cls, logins):
-        for sub_logins in grouped_slice(logins):
-            cls.delete(cls.search([
-                        ('login', 'in', list(sub_logins)),
-                        ]))
+        cls.delete(cls.search([
+                    ('login', 'in', logins),
+                    ]))
 
 
 class UserAction(ModelSQL):
@@ -1002,7 +1049,9 @@ class UserApplication(Workflow, ModelSQL, ModelView):
 
     key = fields.Char("Key", required=True, strip=False)
     user = fields.Many2One('res.user', "User")
-    application = fields.Selection([], "Application", required=True)
+    application = fields.Selection([
+            ('rest', "REST API"),
+            ], "Application", required=True)
     state = fields.Selection([
             ('requested', "Requested"),
             ('validated', "Validated"),

@@ -40,95 +40,123 @@
             let Notification = new Sao.Model('res.notification');
             Notification.execute('get', []).done((notifications) => {
                 this.el.empty();
-                for (let notification of notifications) {
-                    let notification_item = jQuery('<div/>', {
-                    }).append(jQuery('<span/>', {
-                        'class': 'notification-label',
-                        'text': notification.label,
-                        'title': notification.label,
-                    })).append(jQuery('<span/>', {
-                        'class': 'notification-description',
-                        'text': notification.description,
-                        'title': notification.description,
-                    }));
-                    let link = jQuery('<a/>', {
-                        'role': 'menuitem',
-                        'href': '#',
-                    }).click((evt) => {
-                        evt.preventDefault();
-                        this.open(notification)
-                    }).append(notification_item);
-                    let li = jQuery('<li/>', {
-                        'class': 'notification-item',
+                if (!notifications.length) {
+                    jQuery('<li/>', {
+                        'class': 'dropdown-header',
                         'role': 'presentation',
-                    });
-                    let img = jQuery('<img/>', {
-                        'class': 'icon',
-                    });
-                    link.prepend(img);
-                    Sao.common.ICONFACTORY.get_icon_url(
-                        notification.icon || 'tryton-notification')
-                        .then(url => {
-                            img.attr('src', url);
-                            // Append only when the url is known to prevent
-                            // layout shifts
-                            li.append(link);
+                    }).text(Sao.i18n.gettext("No notifications at this time"))
+                    .appendTo(this.el);
+                } else {
+                    for (let notification of notifications) {
+                        let notification_item = jQuery('<div/>', {
+                        }).append(jQuery('<span/>', {
+                            'class': 'notification-label',
+                            'text': notification.label,
+                            'title': notification.label,
+                        })).append(jQuery('<span/>', {
+                            'class': 'notification-description',
+                            'text': notification.description,
+                            'title': notification.description,
+                        }));
+                        let link = jQuery('<a/>', {
+                            'role': 'menuitem',
+                            'href': '#',
+                        }).click((evt) => {
+                            evt.preventDefault();
+                            this.open(notification)
+                        }).append(notification_item);
+                        let li = jQuery('<li/>', {
+                            'class': 'notification-item',
+                            'role': 'presentation',
                         });
-                    if (notification.unread) {
-                        li.addClass('notification-unread');
+                        let img = jQuery('<img/>', {
+                            'class': 'icon',
+                        });
+                        link.prepend(img);
+                        Sao.common.ICONFACTORY.get_icon_url(
+                            notification.icon || 'tryton-notification')
+                            .then(url => {
+                                img.attr('src', url);
+                                // Append only when the url is known to prevent
+                                // layout shifts
+                                li.append(link);
+                            });
+                        if (notification.unread) {
+                            li.addClass('notification-unread');
+                        }
+                        this.el.append(li)
                     }
-                    this.el.append(li)
+                    this.el.append(
+                        jQuery('<li/>', {
+                            'role': 'presentation',
+                            'class': 'notification-item notification-action',
+                        }).append(jQuery('<a/>', {
+                            'role': 'menuitem',
+                            'href': '#',
+                            'title': Sao.i18n.gettext("All Notifications..."),
+                        }).append(jQuery('<span/>', {
+                            'class': 'caret',
+                        })).click((evt) => {
+                            evt.preventDefault();
+                            let params = {
+                                context: jQuery.extend(
+                                    {}, Sao.Session.current_session.context),
+                                domain: [
+                                    ['user', '=', Sao.Session.current_session.user_id]],
+                            };
+                            params.model = 'res.notification';
+                            Sao.Tab.create(params).done(() => {
+                                this.indicator.hide();
+                            });
+                        }))
+                    );
                 }
                 this.el.append(
                     jQuery('<li/>', {
-                        'role': 'presentation',
-                        'class': 'notification-item notification-action',
-                    }).append(jQuery('<a/>', {
-                        'role': 'menuitem',
-                        'href': '#',
-                        'title': Sao.i18n.gettext("All Notifications..."),
-                    }).append(jQuery('<span/>', {
-                        'class': 'caret',
-                    })).click((evt) => {
-                        evt.preventDefault();
-                        let params = {
-                            context: jQuery.extend({}, Sao.Session.current_session.context),
-                            domain: [['user', '=', Sao.Session.current_session.user_id]],
-                        };
-                        params.model = 'res.notification';
-                        Sao.Tab.create(params).done(() => {
-                            this.indicator.hide();
-                        });
-                    }))
-                );
-                if (notifications.length > 0) {
-                    this.el.append(
-                        jQuery('<li/>', {
-                            'role': 'separator',
-                            'class': 'divider',
-                        }));
-                }
-                let preferences_img = jQuery('<img/>', {
-                    'class': 'icon',
-                });
-                let preferences = jQuery('<li/>', {
-                    'class': 'notification-item',
-                    'role': 'presentation',
-                }).append(
-                    jQuery('<a/>', {
-                        'role': 'menuitem',
-                        'href': '#',
-                        'text': Sao.i18n.gettext("Preferences..."),
-                    }).prepend(preferences_img
-                    ).click((evt) => {
-                        evt.preventDefault();
-                        Sao.preferences();
+                        'role': 'separator',
+                        'class': 'divider',
                     }));
-                Sao.common.ICONFACTORY.get_icon_url('tryton-launch')
-                    .then(url => {
-                        preferences_img.attr('src', url);
+                let items = [
+                    {
+                        'text': Sao.i18n.gettext("Preferences..."),
+                        'icon': 'tryton-launch',
+                        'action': () => Sao.preferences(),
+                    },
+                    {
+                        'text': Sao.i18n.gettext("Help..."),
+                        'icon': 'tryton-question',
+                        'action': () => Sao.help_dialog(),
+                    },
+                    {
+                        'text': Sao.i18n.gettext("Logout"),
+                        'icon': 'tryton-exit',
+                        'action': () => Sao.logout(),
+                    },
+                ];
+
+                items.forEach((item) => {
+                    let item_img = jQuery('<img/>', {
+                        'class': 'icon',
                     });
-                this.el.append(preferences);
+                    Sao.common.ICONFACTORY.get_icon_url(item.icon)
+                        .then(url => {
+                            item_img.attr('src', url);
+                        });
+                    let item_li = jQuery('<li/>', {
+                        'class': 'notification-item',
+                        'role': 'presentation',
+                    }).append(
+                        jQuery('<a/>', {
+                            'role': 'menuitem',
+                            'href': '#',
+                            'text': item.text,
+                        }).prepend(item_img
+                        ).click((evt) => {
+                            evt.preventDefault();
+                            item.action();
+                        }));
+                    this.el.append(item_li);
+                });
             });
 
         }

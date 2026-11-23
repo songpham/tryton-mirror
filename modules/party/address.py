@@ -34,11 +34,12 @@ class Address(
     party_name = fields.Char(
         "Party Name",
         help="If filled, replace the name of the party for address formatting")
+    attn = fields.Char("Attn")
 
     street = fields.Function(fields.Text(
             "Street",
             states={
-                'readonly': (
+                'editable': ~(
                     Eval('street_name')
                     | Eval('building_number')
                     | Eval('unit_number')
@@ -54,6 +55,7 @@ class Address(
         states={
             'invisible': (
                 (Eval('street_name')
+                    | Eval('building_name')
                     | Eval('building_number')
                     | Eval('unit_number')
                     | Eval('floor_number')
@@ -263,6 +265,8 @@ class Address(
         if context.get('address_attention_party', False):
             substitutions['attn'] = (
                 context['address_attention_party'].full_name)
+        else:
+            substitutions['attn'] = getattr(self, 'attn', None) or ''
         for key, value in list(substitutions.items()):
             substitutions[key.upper()] = value.upper()
         substitutions.update(self._get_street_substitutions())
@@ -567,11 +571,16 @@ ${COUNTRY}"""
         substitutions = address._get_street_substitutions()
         for format_ in formats:
             try:
-                Template(format_.street_format).substitute(**substitutions)
+                value = Template(format_.street_format).substitute(
+                    **substitutions)
             except Exception as exception:
                 raise InvalidFormat(gettext('party.msg_invalid_format',
                         format=format_.street_format,
                         exception=exception)) from exception
+            if value := Address._strip(value, doublespace=True):
+                raise InvalidFormat(gettext('party.msg_invalid_format_strip',
+                        format=format_.format_,
+                        value=value)) from ValueError(value)
 
     @classmethod
     def check_number_format(cls, formats, field_names=None):

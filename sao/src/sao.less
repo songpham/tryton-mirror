@@ -134,6 +134,7 @@ html[theme="default"] {
         .action a {
             clear: both;
             display: block;
+            padding: 3px 0px;
         }
     }
 }
@@ -141,6 +142,7 @@ html[theme="default"] {
 #tablist {
     display: flex;
     overflow-x: auto;
+    scroll-behavior: smooth;
 
     > li {
         flex: auto;
@@ -223,7 +225,7 @@ html[theme="default"] {
     }
 }
 
-@media screen and (max-width: @screen-xs-max) {
+@media screen and (max-width: @screen-sm-max) {
     #menu, #tabs {
         padding-left: 0;
         padding-right: 0;
@@ -260,7 +262,13 @@ html[theme="default"] {
         max-width: 100vw;
     }
     @media (max-width: (@screen-sm-max)) {
-        width: 100%;
+        width: 100% !important;
+    }
+
+    .treeview {
+        > table.tree > tbody > tr > td {
+            cursor: pointer;
+        }
     }
 }
 
@@ -307,10 +315,11 @@ html[theme="default"] {
 
                 > div {
                     display: inline-flex;
-                    width: 100%;
+                    flex: 1 1 0;
+                    min-width: 0;
 
                     &:first-child {
-                        flex: 2;
+                        flex-grow: 2;
                     }
                 }
             }
@@ -327,7 +336,6 @@ html[theme="default"] {
         border-color: @panel-default-border;
         border-style: solid;
         border-width: 0 0 0 1px;
-        flex: 1;
         overflow: unset;
 
         .sidebar-resizer {
@@ -440,18 +448,21 @@ html[theme="default"] {
     }
 
     ul.notification-menu {
+        background-color: @body-bg;
+        color: @text-color;
+
         @media (min-width: @grid-float-breakpoint) {
             width: 320px;
         }
 
         > li.notification-item {
-            padding: 2px 0;
 
             &.notification-unread {
                 background-color: @state-selected-bg;
             }
 
             > a {
+                color: @text-color;
                 display: flex;
                 padding: 3px 10px;
 
@@ -488,6 +499,10 @@ html[theme="default"] {
                 }
             }
         }
+
+        > li.divider {
+            background-color: @dropdown-divider-bg;
+        }
     }
 }
 
@@ -519,6 +534,40 @@ html[theme="default"] {
     padding-left: 5px;
     padding-right: 5px;
 
+    .btn-toolbar {
+        display: flex;
+
+        .input-group {
+            flex: 1;
+
+            .img-circle {
+                height: 2em;
+                margin-inline-end: 1ex;
+            }
+        }
+
+        ul.dropdown-menu {
+            width: 20em;
+
+            div {
+                display: flex;
+                margin: 1ex;
+                gap: 5px;
+
+                img {
+                    align-self: center;
+                    width: 32px;
+                    height: 32px;
+                }
+
+                span {
+                    flex: 1;
+                    align-self: center;
+                }
+            }
+        }
+    }
+
     .chat-messages-outer {
         display: flex;
         flex-direction: column;
@@ -534,6 +583,15 @@ html[theme="default"] {
 
     .chat-message {
         margin-top: 5px;
+
+        &.system-message {
+            align-items: center;
+            color: @text-muted;
+            display: flex;
+            font-size: small;
+            justify-content: center;
+            padding: 0 2ex;
+        }
     }
 
     .chat-content {
@@ -587,12 +645,9 @@ html.accesskey {
         padding: 0 2px;
         position: absolute;
         text-transform: uppercase;
-        margin: 0 -1em;
+        left: -1em;
+        right: 0;
         z-index: 5;
-    }
-
-    input[accesskey][type="checkbox"]:after {
-        background-color: initial;
     }
 
     *[accesskey] ~ span[data-accesskey] {
@@ -608,11 +663,15 @@ html.accesskey {
         content: attr(accesskey);
     }
 
-    input[accesskey][type="checkbox"],
-    input[accesskey][type="checkbox"],
-    select[accesskey] {
-        & ~ span[data-accesskey] {
-            bottom: 1em;
+    &[dir="rtl"] {
+        *[accesskey] ~ span[data-accesskey]:after,
+        *[accesskey]:after {
+            left: 0;
+            right: -1em;
+        }
+
+        *[accesskey] ~ span[data-accesskey] {
+            float: left;
         }
     }
 }
@@ -843,11 +902,6 @@ img.icon {
     > table.tree {
         width: 100%;
         table-layout: fixed;
-        border: 1px solid transparent;
-
-        &.table-bordered {
-            border-color: @table-border-color;
-        }
 
         col.selection-state, col.favorite, col.tree-menu {
             width: 30px;
@@ -876,28 +930,43 @@ img.icon {
             position: relative;
             padding: 5px;
 
-            > label {
-                display: inline-block;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
-                margin: 0;
+            &.sortable {
+                cursor: pointer;
+            }
 
-                &.sortable {
-                    cursor: pointer;
+            > div {
+                display: flex;
+                overflow: hidden;
+
+                &.dropdown {
+                    overflow: visible;
+                }
+
+                > label {
+                    margin: 0;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                    width: 100%;
                 }
             }
 
             > div.resizer {
-                z-index: 1;
+                background-color: @table-border-color;
+                cursor: ew-resize;
+                height: 100%;
+                inset-inline-end: -5px;
+                opacity: 0;
+                padding: 0 4px;
                 position: absolute;
                 top: 0;
-                inset-inline-end: -5px;
+                transition: opacity 0.2s;
                 width: 2px;
-                height: 100%;
-                cursor: ew-resize;
-                padding: 0 4px;
-                background-color: transparent;
+                z-index: 1;
+
+                &:hover {
+                    opacity: 1;
+                }
             }
 
             &.tree-menu {
@@ -920,17 +989,26 @@ img.icon {
             position: sticky;
             top: 0;
             z-index: 100;
+            box-shadow: inset 0 1px 0 @table-border-color, inset 0 -1px 0 @table-border-color;
 
             th {
-                border: 1px solid transparent;
                 border-bottom: 2px solid @table-border-color;
             }
 
             &:hover th {
-                border: 1px solid @table-border-color;
-                border-bottom-width: 2px;
+                box-shadow: inset 1px 0 0 @table-border-color, inset -1px 0 0 @table-border-color;
             }
         }
+        &.table-bordered > thead > tr:first-child {
+            th {
+                box-shadow: inset .5px 0 0 @table-border-color, inset -.5px 0 0 @table-border-color;
+            }
+        }
+
+        &.resizing td:not(:last-child) {
+            border-right: 2px dashed @table-border-color;
+        }
+
         > tfoot > tr {
             background-color: @body-bg;
             bottom: 0;
@@ -948,7 +1026,7 @@ img.icon {
             }
         }
         > tbody > tr > td {
-            cursor: pointer;
+            cursor: cell;
             > * {
                 vertical-align: middle;
             }
@@ -961,6 +1039,10 @@ img.icon {
             width: unit(@line-height-base, em);
             height: unit(@line-height-base, em);
             display: block;
+
+            [dir="rtl"] & {
+                transform: scaleX(-1);
+            }
         }
 
         tr.more-row {
@@ -974,9 +1056,11 @@ img.icon {
         width: 100%;
 
         input[type='checkbox'] {
-            margin-top: 0;
+            display: block;
+            float: unset;
             margin-left: auto;
             margin-right: auto;
+            margin-top: 0;
         }
 
         > .input-group {
@@ -1054,6 +1138,7 @@ img.icon {
             float: left;
             [dir="rtl"] & {
                 float: right;
+                transform: scaleX(-1);
             }
             width: unit(@line-height-base, em);
             height: unit(@line-height-base, em);
@@ -1072,26 +1157,6 @@ img.icon {
     .btn {
         padding-top: 0;
         padding-bottom: 0;
-    }
-
-    > table.table-bordered {
-        border: 1px solid @table-border-color;
-        > thead,
-        > tbody,
-        > tfoot {
-            > tr:first-child {
-                > th,
-                > td {
-                    border: 1px solid @table-border-color;
-                }
-            }
-        }
-        > thead > tr:first-child {
-            > th,
-            > td {
-                border-bottom-width: 2px;
-            }
-        }
     }
 }
 
@@ -1140,10 +1205,21 @@ img.icon {
         border-color: @panel-default-border;
         border-style: solid;
         border-width: 1px;
+        display: flex;
+        flex-direction: column;
 
         .nav-tabs {
             background: @navbar-default-bg;
             margin-bottom: 5px;
+        }
+
+        > .tab-content {
+            flex: 1;
+            overflow-x: auto;
+
+            > .tab-pane {
+                height: 100%;
+            }
         }
     }
     .form-label {
@@ -1252,7 +1328,7 @@ img.icon {
         .treeview, .list-form {
             height: auto;
             min-height: 150px;
-            max-height: 300px;
+            max-height: 60vh;
         }
     }
     .form-text, .form-richtext {
@@ -1313,11 +1389,13 @@ img.icon {
         object, iframe, img {
             max-width: 100%;
             min-height: 50vh;
-            height: 100%;
-            width: 100%;
             @media screen and (max-width: @screen-xs-max) {
                 min-height: 50vh;
             }
+        }
+        object, iframe {
+            height: 100%;
+            width: 100%;
         }
     }
     label {
@@ -1568,6 +1646,16 @@ input.column-boolean {
     .form {
         .form-container, .form-hcontainer, .form-vcontainer {
             display: block;
+
+            // remove fake gap
+            margin-left: 0;
+            > * {
+                padding-left: 0;
+            }
+            > * + * {
+                margin-top: 0;
+                margin-left: 0;
+            }
 
             .form-item {
                 padding: 2px 0;

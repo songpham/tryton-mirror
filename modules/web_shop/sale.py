@@ -1,5 +1,7 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
+
+import datetime as dt
 from itertools import groupby
 from secrets import token_hex
 
@@ -16,13 +18,25 @@ from trytond.pyson import Bool, Eval
 class Sale(metaclass=PoolMeta):
     __name__ = 'sale.sale'
 
-    web_shop = fields.Many2One('web.shop', "Web Shop", ondelete='RESTRICT')
+    web_shop = fields.Many2One(
+        'web.shop', "Web Shop", ondelete='RESTRICT',
+        states={
+            'readonly': Eval('id', -1) >= 0,
+            })
     web_id = fields.Char(
         "Web ID", strip=False,
         states={
             'required': Bool(Eval('web_shop')),
-            'readonly': ~Eval('web_id'),
+            'readonly': Eval('id', -1) >= 0,
             })
+    web_url = fields.Function(
+        fields.Char(
+            "Web URL",
+            states={
+                'invisible': ~Eval('web_url'),
+                },
+            help="The URL of the order on the web shop."),
+        'get_web_url')
     web_status_url = fields.Function(
         fields.Char(
             "Web Status URL",
@@ -64,6 +78,9 @@ class Sale(metaclass=PoolMeta):
         if self.web_shop and not self.web_id:
             self.web_id = token_hex(nbytes)
 
+    def get_web_url(self, name):
+        pass
+
     def get_web_status_url(self, name):
         pass
 
@@ -99,3 +116,29 @@ class Sale(metaclass=PoolMeta):
     def web_shop_update(cls, sales):
         for web_shop, s_sales in groupby(sales, lambda s: s.web_shop):
             web_shop.update_sales(list(s_sales))
+
+    @classmethod
+    def web_cancel_draft_abandoned(cls):
+        pool = Pool()
+        WebShop = pool.get('web.shop')
+        now = dt.datetime.now()
+        sales = []
+        for web_shop in WebShop.search([
+                    ('sale_draft_abandon_delay', '!=', None),
+                    ]):
+            sales.extend(cls.search([
+                        ('state', '=', 'draft'),
+                        ('web_shop', '=', web_shop),
+                        ('last_modified_at', '<',
+                            now - web_shop.sale_draft_abandon_delay),
+                        ]))
+        cls.cancel(sales)
+
+
+class Line_GiftCard(metaclass=PoolMeta):
+    __name__ = 'sale.line'
+
+    def get_gift_cards(self):
+        if self.sale.web_shop and self.sale.web_shop.is_managing_gift_card:
+            return
+        return super().get_gift_cards()

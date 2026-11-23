@@ -1,3 +1,7 @@
+const fs = require("fs");
+const path = require("path");
+const po2json = require("po2json");
+
 module.exports = function(grunt) {
 
   var _ = grunt.util._;
@@ -30,10 +34,10 @@ module.exports = function(grunt) {
   ];
   var less_paths = [
       'src',
-      'bower_components',
-      'bower_components/bootstrap',
-      'bower_components/bootstrap/less',
-      'bower_components/bootstrap-rtl-ondemand/less',
+      'node_modules',
+      'node_modules/bootstrap',
+      'node_modules/bootstrap/less',
+      'node_modules/bootstrap-rtl-ondemand/less',
   ];
 
   // Project configuration.
@@ -60,15 +64,6 @@ module.exports = function(grunt) {
                 "--omit-header --no-location " +
                 "-o locale/messages.pot " +
                 jsfiles.join(" "))
-        }
-    },
-    po2json: {
-        options: {
-            format: 'raw'
-        },
-        all: {
-            src: ['locale/*.po'],
-            dest: 'locale/'
         }
     },
     concat: {
@@ -120,10 +115,20 @@ module.exports = function(grunt) {
 
   grunt.loadNpmTasks('grunt-contrib-concat');
   grunt.loadNpmTasks('grunt-contrib-less');
-  grunt.loadNpmTasks('grunt-po2json');
   grunt.loadNpmTasks('grunt-qunit-junit');
 
-  grunt.registerTask('default', 'Build for production.', function() {
+  grunt.registerTask(
+      "po2json", "Convert locale/*.po files to JSON", function() {
+          for (const src of grunt.file.expand("locale/*.po")) {
+              let catalog = po2json.parse(fs.readFileSync(src));
+              let dest = path.join(
+                  path.dirname(src), `${path.basename(src, ".po")}.json`);
+              grunt.file.write(dest, `${JSON.stringify(catalog)}\n`);
+              grunt.log.writeln(`${src} → ${dest}`);
+          }
+      });
+
+  grunt.registerTask('default', 'Build', function() {
     grunt.task.run(['concat', 'less', 'po2json']);
     });
   grunt.registerTask('watch', 'Watch development', function() {

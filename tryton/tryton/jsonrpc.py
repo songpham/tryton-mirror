@@ -294,27 +294,28 @@ class ServerProxy(xmlrpc.client.ServerProxy):
 
         try:
             try:
-                for i in range(5):
+                count, retry = 0, 5
+                while True:
                     try:
                         response = self.__transport.request(
                             self.__host,
-                            self.__handler,
+                            self.__handler + 'rpc/',
                             request,
                             verbose=self.__verbose
                             )
                         break
                     except xmlrpc.client.ProtocolError as e:
-                        if e.errcode == HTTPStatus.SERVICE_UNAVAILABLE:
+                        if (e.errcode == HTTPStatus.SERVICE_UNAVAILABLE
+                                and count < retry):
+                            count += 1
                             try:
-                                delay = int(e.headers.get('Retry-After', i))
+                                delay = int(
+                                    e.headers.get('Retry-After', count))
                             except ValueError:
-                                if isinstance(
-                                        e.errcode, HTTPStatus.GATEWAY_TIMEOUT):
-                                    # Do not retry on timeout without delay
-                                    raise
-                                delay = i
+                                delay = count
                             delay = min(delay, 10)
                             time.sleep(delay)
+                            continue
                         else:
                             raise
             except (socket.error, http.client.HTTPException) as v:
@@ -325,7 +326,7 @@ class ServerProxy(xmlrpc.client.ServerProxy):
                 self.__transport.close()
                 response = self.__transport.request(
                     self.__host,
-                    self.__handler,
+                    self.__handler + 'rpc/',
                     request,
                     verbose=self.__verbose
                     )

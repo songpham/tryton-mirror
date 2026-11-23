@@ -14,8 +14,88 @@ a database from another series.
 .. warning::
    You cannot skip more than 2 series ending with ``.0``.
 
+.. _migration-8.2:
+
+8.2
+---
+
+.. _migration-8.2-before:
+
+Before
+~~~~~~
+
+* Remove hard-coded admin user and add root user:
+
+   .. code-block:: SQL
+
+      DELETE FROM "ir_model_data" WHERE module = 'res' AND fs_id = 'user_admin';
+      INSERT INTO ir_model_data (fs_id, model, module, db_id, noupdate, field_names) VALUES
+          ('user_root', 'res.user', 'res', 0, False, '["login", "name", "active", "administrator"]');
+
+* If the ``trytond-worker`` is configured, stop it and finish all dequeued
+  tasks:
+
+   .. code-block:: SQL
+
+      UPDATE "ir_queue" SET finished_at = CURRENT_TIMESTAMP WHERE dequeued_at IS NOT NULL AND finished_at IS NULL;
+
+.. _migration-8.2-after:
+
+After
+~~~~~
+
+* Set the administrator flag on the ``admin`` user:
+
+   .. code-block:: SQL
+
+        UPDATE "res_user" SET administrator = true WHERE login IN ('root', 'admin');
+
+   .. note::
+      Include in the clause all the users' login that are administrators.
+
+* If ``account`` module is activated, update the reconciliation date using
+  maturity date:
+
+  .. code-block:: SQL
+
+      UPDATE "account_move_reconciliation" AS r SET date = (SELECT GREATEST(MAX(l.maturity_date), MAX(m.date)) FROM account_move_line AS l JOIN account_move AS m ON l.move = m.id WHERE l.reconciliation = r.id);
+
+.. _migration-8.0:
+
+8.0
+---
+
+.. _migration-8.0-before:
+
+Before
+~~~~~~
+
+* Remove ``google_maps`` module:
+
+   .. code-block:: SQL
+
+      DELETE FROM "ir_module" WHERE name = 'google_maps';
+
+* Remove ``account_es`` and ``account_es_sii`` modules if you are not
+  installing external replacements:
+
+   .. code-block:: SQL
+
+      DELETE FROM "ir_module" WHERE name in ('account_es', 'account_es_sii');
+
+* Remove ``account_de_skr03`` module if you are not installing external
+  replacement:
+
+   .. code-block:: SQL
+
+      DELETE FROM "ir_module" WHERE name = 'account_de_skr03';
+
+.. _migration-7.8:
+
 7.8
 ---
+
+.. _migration-7.8-before:
 
 Before
 ~~~~~~
@@ -28,6 +108,7 @@ Before
      ALTER TABLE "incoterm_incoterm" ALTER COLUMN "before_carrier" DROP NOT NULL;
      ALTER TABLE "incoterm_incoterm" ALTER COLUMN "after_carrier" DROP NOT NULL;
 
+.. _migration-7.8-after:
 
 After
 ~~~~~
@@ -44,12 +125,17 @@ After
          ])
 
      for mandate in mandates:
-         mandate.address = mandate.on_change_party()
+         mandate.on_change_party()
 
      Mandate.save(mandates)
+     transaction.commit()
+
+.. _migration-7.6:
 
 7.6
 ---
+
+.. _migration-7.6-before:
 
 Before
 ~~~~~~
@@ -64,6 +150,8 @@ Before
 
 * ``pbkdf2_sha512`` and ``scrypt`` password hashes are no more supported.
   Make sure to enable ``argon2`` and update old passwords by logging in.
+
+.. _migration-7.6-after:
 
 After
 ~~~~~
@@ -96,8 +184,12 @@ After
 
       UPDATE "analytic_account_budget_line" SET amount = -amount;
 
+.. _migration-7.4:
+
 7.4
 ---
+
+.. _migration-7.4-before:
 
 Before
 ~~~~~~
@@ -109,8 +201,12 @@ Before
 
      DELETE FROM "ir_model_button" WHERE "name" = 'open_lines' AND "model" = 'product.price_list';
 
+.. _migration-7.2:
+
 7.2
 ---
+
+.. _migration-7.2-before:
 
 Before
 ~~~~~~
@@ -126,18 +222,24 @@ Before
      UPDATE "ir_action_report" SET "module" = NULL WHERE "module" = '';
      UPDATE "ir_translation" SET "module" = NULL WHERE "module" = '';
 
+.. _migration-7.0:
+
 7.0
 ---
+
+.. _migration-7.0-before:
 
 Before
 ~~~~~~
 
-* If ``account_payment`` module is activated, remove ``account`` if ``line`` is
+* If ``account_payment_clearing`` module is activated, remove ``account`` if ``line`` is
   set:
 
   .. code-block:: SQL
 
      UPDATE "account_payment" SET "account" = NULL WHERE "line" IS NOT NULL;
+
+.. _migration-7.0-after:
 
 After
 ~~~~~
@@ -165,8 +267,12 @@ After
 * If ``product_price_list`` module is activated, add a default price list line
   if price list does not have one and it was relying on the fallback price.
 
+.. _migration-6.0:
+
 6.0
 ---
+
+.. _migration-6.0-before:
 
 Before
 ~~~~~~
@@ -185,6 +291,8 @@ Before
      UPDATE "account_invoice_line" SET "currency" = (SELECT "currency" FROM "account_invoice" WHERE "id" = "account_invoice_line"."invoice") WHERE "invoice" IS NOT NULL;
      UPDATE "account_invoice_line" SET "invoice_type" = (SELECT "type" FROM "account_invoice" WHERE "id" = "account_invoice_line"."invoice") WHERE "invoice_type" IS NOT NULL AND "invoice" IS NOT NULL;
      UPDATE "account_invoice_line" SET "party" = (SELECT "party" FROM "account_invoice" WHERE "id" = "account_invoice_line"."invoice") WHERE "party" IS NOT NULL AND "invoice" IS NOT NULL;
+
+.. _migration-6.0-after:
 
 After
 ~~~~~

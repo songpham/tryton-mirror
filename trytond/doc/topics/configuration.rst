@@ -66,6 +66,16 @@ hostname
 Defines the hostname to use when generating a URL when there is no request
 context available, for example during a cron job.
 
+.. _config-web.root_path:
+
+root_path
+~~~~~~~~~
+
+Defines the prefix that the WSGI application is mounted under (with trailing slash).
+This must be the same as the ``SCRIPT_NAME`` set by the WSGI server.
+
+The default value is: ``/``.
+
 .. _config-web.root:
 
 root
@@ -155,15 +165,15 @@ The available databases are:
 PostgreSQL
 **********
 
-``psycopg2`` supports two type of connections:
+``psycopg`` supports two type of connections:
 
 - TCP/IP connection: ``postgresql://user:password@localhost:5432/``
 - Unix domain connection:
    - with password authentication: ``postgresql://username:password``
    - with operating system user name: ``postgresql://``
 
-Please refer to `psycopg2 for the complete specification of the URI
-<https://www.psycopg.org/docs/module.html#psycopg2.connect>`_.
+Please refer to `psycopg for the complete specification of the URI
+<https://www.psycopg.org/psycopg3/docs/api/connections.html#psycopg.Connection.connect>`_.
 
 A list of parameters supported by PostgreSQL can be found in the
 `documentation
@@ -285,6 +295,22 @@ maxconn
 
 The maximum number of simultaneous connections to the database per process.
 Default: ``64``
+
+.. _config-database.database_mixins:
+
+database_mixins
+~~~~~~~~~~~~~~~
+
+The qualified names of mixin_ as a one per line list to apply to the
+:class:`~trytond.backend.Database`
+
+.. _config-database.table_handler_mixins:
+
+table_handler_mixins
+~~~~~~~~~~~~~~~~~~~~
+
+The qualified names of mixin_ as a one per line list to apply to the
+:class:`~trytond.backend.TableHandler`
 
 .. _config-database.unaccent_function:
 
@@ -668,6 +694,19 @@ authentication method option.
 
 Default: ``''``
 
+.. _config-session.cookie_domain:
+
+cookie_domain
+~~~~~~~~~~~~~
+
+The cookie `Domain attribute`_ set when the authentication completes.
+
+Default: ``''``
+
+.. note::
+   When accessing the server through ``localhost`` this option should be left
+   empty as cookies with the domain ``localhost`` are not strored by browsers.
+
 .. _config-session.max_age:
 
 max_age
@@ -783,6 +822,16 @@ The prefix to use with the ``FileStore``.
 
 Default: ``None``
 
+.. _config-attachment.retention_delay:
+
+retention_days
+~~~~~~~~~~~~~~
+
+The number of days before unused files are actually removed from the
+:ref:`FileStore <ref-filestore>`.
+
+Default: 90
+
 .. _config-bus:
 
 bus
@@ -831,7 +880,7 @@ select_timeout
 
 The timeout duration of the select call when listening on a channel.
 
-Default: ``5``
+Default: ``60``
 
 .. _config-report:
 
@@ -942,3 +991,5 @@ Example::
 .. _STARTTLS: http://en.wikipedia.org/wiki/STARTTLS
 .. _WSGI middleware: https://en.wikipedia.org/wiki/Web_Server_Gateway_Interface#Specification_overview
 .. _`multi-factor authentication`: https://en.wikipedia.org/wiki/Multi-factor_authentication
+.. _`Domain attribute`: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie#domaindomain-value
+.. _mixin: https://en.wikipedia.org/wiki/Mixin

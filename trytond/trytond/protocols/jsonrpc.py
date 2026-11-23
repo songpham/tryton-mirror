@@ -9,12 +9,11 @@ from types import MappingProxyType
 from werkzeug.exceptions import (
     BadRequest, Conflict, Forbidden, HTTPException, InternalServerError,
     Locked, TooManyRequests)
-from werkzeug.wrappers import Response
 
 from trytond.exceptions import (
     ConcurrencyException, LoginException, MissingDependenciesException,
     RateLimitException, TrytonException, UserWarning)
-from trytond.protocols.wrappers import GzipStream, Request
+from trytond.protocols.wrappers import GzipStream, Request, Response
 from trytond.tools import cached_property
 
 
@@ -196,19 +195,19 @@ class JSONProtocol:
                 response['result'] = data
         else:
             if isinstance(data, UserWarning):
-                return Conflict(data)
+                return Conflict(str(data))
             elif isinstance(data, LoginException):
-                return Forbidden(data)
+                return Forbidden(str(data))
             elif isinstance(data, ConcurrencyException):
-                return Locked(data)
+                return Locked(str(data))
             elif isinstance(data, RateLimitException):
-                return TooManyRequests(data)
+                return TooManyRequests(str(data))
             elif isinstance(data, MissingDependenciesException):
-                return InternalServerError(data)
+                return InternalServerError(str(data))
             elif isinstance(data, TrytonException):
-                return BadRequest(data)
+                return BadRequest(str(data))
             elif isinstance(data, Exception):
-                return InternalServerError(data)
+                return InternalServerError(str(data))
             response = data
         headers = {}
 

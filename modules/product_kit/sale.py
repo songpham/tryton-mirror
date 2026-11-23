@@ -56,7 +56,7 @@ class Sale(order_mixin('sale'), metaclass=PoolMeta):
 
     @property
     def _invoice_grouping_origins(self):
-        return super()._shipment_grouping_origins + ['sale.line.component']
+        return super()._invoice_grouping_origins + ['sale.line.component']
 
     @property
     def _shipment_grouping_origins(self):
@@ -74,6 +74,22 @@ class Line(order_line_mixin('sale'), metaclass=PoolMeta):
     @classmethod
     def movable_types(cls):
         return super().movable_types() + ['kit']
+
+    def set_quantities(self):
+        super().set_quantities()
+        if self.components:
+            def quantity(component):
+                quantity = component.quantity_to_ship
+                if component.fixed:
+                    quantity *= component.quantity / self.quantity
+                else:
+                    quantity *= component.quantity_ratio
+                return quantity
+            quantity_to_ship = max(quantity(c) for c in self.components)
+            if self.unit:
+                quantity_to_ship = self.unit.ceil(quantity_to_ship)
+            if quantity_to_ship > (self.quantity_to_ship or 0):
+                self.quantity_to_ship = quantity_to_ship
 
 
 class LineComponent(
@@ -95,6 +111,13 @@ class LineComponent(
     @property
     def warehouse(self):
         return self.line.warehouse
+
+    @property
+    def quantity_to_ship(self):
+        shipment_type = 'out' if self.quantity >= 0 else 'in'
+        return self.unit.round(
+            self._get_move_quantity(shipment_type)
+            - self._get_shipped_quantity(shipment_type))
 
     def get_move(self, shipment_type):
         from trytond.modules.sale.exceptions import PartyLocationError
@@ -148,7 +171,7 @@ class LineComponent(
         pool = Pool()
         Uom = pool.get('product.uom')
 
-        if self.line.sale.shipment_method == 'order':
+        if self.line.sale.shipment_method in {'order', 'manual'}:
             return abs(self.quantity)
         elif self.line.sale.shipment_method == 'invoice':
             quantity = 0.0

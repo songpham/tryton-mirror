@@ -1,6 +1,6 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
-from itertools import chain, groupby
+from itertools import groupby
 
 from sql import For, Literal
 
@@ -8,8 +8,7 @@ from trytond.i18n import gettext
 from trytond.model import Index, ModelSQL, ModelView, Workflow, fields
 from trytond.pool import Pool
 from trytond.pyson import Eval
-from trytond.tools import grouped_slice
-from trytond.transaction import Transaction
+from trytond.transaction import Transaction, inactive_records
 
 from .exceptions import PeriodCloseError
 
@@ -78,18 +77,21 @@ class Period(Workflow, ModelSQL, ModelView):
         return Pool().get('ir.lang').get().strftime(self.date)
 
     @classmethod
+    def copy(cls, periods, default=None):
+        default = default.copy() if default is not None else {}
+        default.setdefault('caches')
+        return super().copy(periods, default=default)
+
+    @classmethod
     @ModelView.button
     @Workflow.transition('draft')
     def draft(cls, periods):
         for grouping in cls.groupings():
             Cache = cls.get_cache(grouping)
-            caches = []
-            for sub_periods in grouped_slice(periods):
-                caches.append(Cache.search([
-                            ('period', 'in',
-                                [p.id for p in sub_periods]),
-                            ], order=[]))
-            Cache.delete(list(chain(*caches)))
+            caches = Cache.search([
+                    ('period', 'in', periods),
+                    ], order=[])
+            Cache.delete(caches)
 
     @classmethod
     @ModelView.button
@@ -111,9 +113,11 @@ class Period(Workflow, ModelSQL, ModelView):
             with connection.cursor() as cursor:
                 cursor.execute(*query)
 
-        locations = Location.search([
-                ('type', 'not in', ['warehouse', 'view']),
-                ], order=[])
+        with inactive_records():
+            locations = Location.search([
+                    ('type', 'not in', ['warehouse', 'view']),
+                    ],
+                order=[])
 
         for company, c_periods in groupby(periods, key=lambda p: p.company):
             c_periods = list(c_periods)
@@ -144,29 +148,78 @@ class Period(Workflow, ModelSQL, ModelView):
 
         for grouping in cls.groupings():
             Cache = cls.get_cache(grouping)
-            to_create = []
-            for period in periods:
-                with Transaction().set_context(
-                        stock_date_end=period.date,
-                        stock_date_start=None,
-                        stock_assign=False,
-                        forecast=False,
-                        stock_destinations=None,
-                        ):
-                    pbl = Product.products_by_location(
-                        [l.id for l in locations], grouping=grouping)
-                for key, quantity in pbl.items():
-                    if quantity:
-                        values = {
-                            'location': key[0],
-                            'period': period.id,
-                            'internal_quantity': quantity,
-                            }
-                        for i, field in enumerate(grouping, 1):
-                            values[field] = key[i]
-                        to_create.append(values)
-            if to_create:
-                Cache.create(to_create)
+            with Cache.bulk_create() as create:
+                for period in periods:
+                    with Transaction().set_context(
+                            stock_date_end=period.date,
+                            stock_date_start=None,
+                            stock_assign=False,
+                            forecast=False,
+                            stock_destinations=None,
+                            ):
+                        pbl = Product.products_by_location(
+                            [l.id for l in locations], grouping=grouping)
+                    for key, quantity in pbl.items():
+                        if quantity:
+                            values = {
+                                'location': key[0],
+                                'period': period.id,
+                                'internal_quantity': quantity,
+                                }
+                            for i, field in enumerate(grouping, 1):
+                                values[field] = key[i]
+                            create.push(values)
+
+    @classmethod
+    def auto_create(cls):
+        pool = Pool()
+        Date = pool.get('ir.date')
+        Configuration = pool.get('stock.configuration')
+
+        company = Transaction().context.get('company')
+        if company is None:
+            return
+        config = Configuration(1)
+        interval = config.get_multivalue(
+            'period_creation_interval', company=company)
+        if interval is None:
+            return
+        today = Date.today()
+        last_period = cls.search([
+                ('company', '=', company),
+                ],
+            limit=1, order=[('date', 'DESC')])
+        if last_period:
+            next_date = last_period.date + interval
+        else:
+            next_date = today - interval
+        if next_date >= today:
+            return
+        return cls.create([{
+                    'date': next_date,
+                    'company': company,
+                    }])[0]
+
+    @classmethod
+    def auto_close(cls):
+        pool = Pool()
+        Date = pool.get('ir.date')
+        Configuration = pool.get('stock.configuration')
+        company = Transaction().context.get('company')
+        if company is None:
+            return
+        config = Configuration(1)
+        delay = config.get_multivalue(
+            'period_closing_delay', company=company)
+        if delay is None:
+            return
+        today = Date.today()
+        periods = cls.search([
+                ('company', '=', company),
+                ('date', '<', today - delay),
+                ('state', '=', 'draft'),
+                ])
+        cls.close(periods)
 
 
 class Cache(ModelSQL, ModelView):

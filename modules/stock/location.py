@@ -5,6 +5,7 @@ import operator
 from decimal import Decimal
 
 from sql import Column
+from sql.conditionals import Coalesce
 
 from trytond.cache import Cache
 from trytond.i18n import gettext
@@ -14,7 +15,6 @@ from trytond.model import (
 from trytond.modules.product import price_digits, round_price
 from trytond.pool import Pool
 from trytond.pyson import Eval, If, TimeDelta
-from trytond.tools import grouped_slice
 from trytond.transaction import (
     Transaction, inactive_records, without_check_access)
 
@@ -83,8 +83,6 @@ class Location(DeactivableMixin, tree(), ModelSQL, ModelView):
         "Flat Children",
         help="Check to enforce a single level of children with no "
         "grandchildren.")
-    warehouse = fields.Function(fields.Many2One('stock.location', 'Warehouse'),
-        'get_warehouse')
     input_location = fields.Many2One(
         "stock.location", "Input", states={
             'invisible': Eval('type') != 'warehouse',
@@ -198,7 +196,7 @@ class Location(DeactivableMixin, tree(), ModelSQL, ModelView):
         super().__setup__()
         t = cls.__table__()
         cls._sql_indexes.update({
-                Index(t, (t.code, Index.Similarity())),
+                Index(t, (Coalesce(t.code, ''), Index.Similarity())),
                 Index(
                     t,
                     (t.left, Index.Range(cardinality='high')),
@@ -314,18 +312,16 @@ class Location(DeactivableMixin, tree(), ModelSQL, ModelView):
             for (location_id, product), quantity in quantities.items():
                 if quantity and product not in consumables:
                     empty.discard(location_id)
-            for sub_ids in grouped_slice(list(empty)):
-                sub_ids = list(sub_ids)
-                moves = Move.search([
-                        ('state', 'not in', ['done', 'cancelled']),
-                        ['OR',
-                            ('from_location', 'in', sub_ids),
-                            ('to_location', 'in', sub_ids),
-                            ],
-                        ])
-                for move in moves:
-                    for location in [move.from_location, move.to_location]:
-                        empty.discard(location.id)
+            moves = Move.search([
+                    ('state', 'not in', ['done', 'cancelled']),
+                    ['OR',
+                        ('from_location', 'in', empty),
+                        ('to_location', 'in', empty),
+                        ],
+                    ])
+            for move in moves:
+                for location in [move.from_location, move.to_location]:
+                    empty.discard(location.id)
         return cls.browse(empty)
 
     @staticmethod
@@ -344,7 +340,8 @@ class Location(DeactivableMixin, tree(), ModelSQL, ModelView):
     def default_type():
         return 'storage'
 
-    def get_warehouse(self, name):
+    @property
+    def warehouse(self):
         # Order by descending left to get the first one in the tree
         with inactive_records():
             locations = self.search([
@@ -352,7 +349,7 @@ class Location(DeactivableMixin, tree(), ModelSQL, ModelView):
                     ('type', '=', 'warehouse'),
                     ], order=[('left', 'DESC')])
         if locations:
-            return locations[0].id
+            return locations[0]
 
     @classmethod
     def get_default_warehouse(cls):
@@ -434,15 +431,13 @@ class Location(DeactivableMixin, tree(), ModelSQL, ModelView):
         if not grouping:
             return {loc.id: None for loc in locations}
 
-        pbl = {}
-        for sub_locations in grouped_slice(locations):
-            location_ids = [l.id for l in sub_locations]
-            with Transaction().set_context(context):
-                pbl.update(Product.products_by_location(
-                        location_ids,
-                        grouping=grouping,
-                        grouping_filter=grouping_filter,
-                        with_childs=trans_context.get('with_childs', True)))
+        location_ids = [l.id for l in locations]
+        with Transaction().set_context(context):
+            pbl = Product.products_by_location(
+                location_ids,
+                grouping=grouping,
+                grouping_filter=grouping_filter,
+                with_childs=trans_context.get('with_childs', True))
 
         return dict((loc.id, pbl.get((loc.id,) + key, 0)) for loc in locations)
 
@@ -528,22 +523,21 @@ class Location(DeactivableMixin, tree(), ModelSQL, ModelView):
         '''
         Set the parent of child location of warehouse if not set
         '''
-        to_update = set()
-        to_save = []
-        for location in locations:
-            if location.type == 'warehouse':
-                if not location.input_location.parent:
-                    to_update.add(location.input_location)
-                if not location.output_location.parent:
-                    to_update.add(location.output_location)
-                if not location.storage_location.parent:
-                    to_update.add(location.storage_location)
-                if to_update:
-                    for child_location in to_update:
-                        child_location.parent = location
-                        to_save.append(child_location)
-                    to_update.clear()
-        cls.save(to_save)
+        with cls.bulk_save() as save:
+            to_update = set()
+            for location in locations:
+                if location.type == 'warehouse':
+                    if not location.input_location.parent:
+                        to_update.add(location.input_location)
+                    if not location.output_location.parent:
+                        to_update.add(location.output_location)
+                    if not location.storage_location.parent:
+                        to_update.add(location.storage_location)
+                    if to_update:
+                        for child_location in to_update:
+                            child_location.parent = location
+                            save.push(child_location)
+                        to_update.clear()
 
     @classmethod
     def on_modification(cls, mode, locations, field_names=None):

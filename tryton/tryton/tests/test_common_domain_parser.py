@@ -6,8 +6,9 @@ from unittest import TestCase
 
 from tryton.common import untimezoned_date
 from tryton.common.domain_parser import (
-    DomainParser, complete_value, convert_value, format_value, group_operator,
-    likify, operatorize, parenthesize, quote, rlist, split_target_value, udlex)
+    DomainParser, complete_value, contains_without_diacritics, convert_value,
+    format_value, group_operator, likify, operatorize, parenthesize, quote,
+    rlist, split_target_value, udlex)
 
 
 class DomainParserTestCase(TestCase):
@@ -433,6 +434,21 @@ class DomainParserTestCase(TestCase):
                 format_value(field, value), result,
                 msg="format_value(%r, %r)" % (field, value))
 
+    def test_contains_without_diacritics(self):
+        "Test contains without diacritics"
+        for main, sub, expected in [
+                ("Café au lait", "cafe", True),
+                ("Café au lait", "café", True),
+                ("Café au lait", "lait", True),
+                ("Café au lait", "the", False),
+                ("Héllò Wörld", "hello", True),
+                ("Héllò Wörld", "world", True),
+                ("Héllò Wörld", "hallo", False),
+                ]:
+            with self.subTest(main=main, sub=sub):
+                self.assertEqual(
+                    contains_without_diacritics(main, sub), expected)
+
     def test_complete_boolean(self):
         "Test complete boolean"
         field = {
@@ -457,7 +473,7 @@ class DomainParserTestCase(TestCase):
                 ],
             }
         for value, result in (
-                ('m', ['male']),
+                ('f', ['female']),
                 ('test', []),
                 ('', ['male', 'female']),
                 (None, ['male', 'female']),
@@ -472,7 +488,7 @@ class DomainParserTestCase(TestCase):
         field_with_empty['selection'] = (field_with_empty['selection']
             + [('', '')])
         for value, result in (
-                ('m', ['male']),
+                ('f', ['female']),
                 ('test', []),
                 ('', ['male', 'female', '']),
                 (None, ['male', 'female', '']),
@@ -943,6 +959,12 @@ class DomainParserTestCase(TestCase):
                     'name': 'integer',
                     'type': 'integer',
                     },
+                'timestamp': {
+                    'name': 'timestamp',
+                    'string': 'Timestamp',
+                    'type': 'timestamp',
+                    'format': '"%H:%M:%S"',
+                    },
                 'selection': {
                     'string': 'Selection',
                     'name': 'selection',
@@ -1001,166 +1023,126 @@ class DomainParserTestCase(TestCase):
                         },
                     },
                 })
-        self.assertEqual(
-            rlist(dom.parse_clause([('John',)])), [
-                ('rec_name', 'ilike', '%John%'),
-                ])
-        self.assertEqual(
-            rlist(dom.parse_clause([('Name', None, None)])), [
-                ('name', 'ilike', '%'),
-                ])
-        self.assertEqual(
-            rlist(dom.parse_clause([('Name', '', None)])), [
-                ('name', 'ilike', '%'),
-                ])
-        self.assertEqual(
-            rlist(dom.parse_clause([('Name', '=', None)])), [
-                ('name', '=', None),
-                ])
-        self.assertEqual(
-            rlist(dom.parse_clause([('Name', '=', '')])), [
-                ('name', '=', ''),
-                ])
-        self.assertEqual(
-            rlist(dom.parse_clause([('Name', None, 'Doe')])), [
-                ('name', 'ilike', '%Doe%'),
-                ])
-        self.assertEqual(
-            rlist(dom.parse_clause([('Name', '!', 'Doe')])), [
-                ('name', 'not ilike', '%Doe%'),
-                ])
-        self.assertEqual(
-            rlist(dom.parse_clause([('Name', None, ['John', 'Jane'])])), [
-                ('name', 'in', ['John', 'Jane']),
-                ])
-        self.assertEqual(
-            rlist(dom.parse_clause([('Name', '!', ['John', 'Jane'])])), [
-                ('name', 'not in', ['John', 'Jane']),
-                ])
-        self.assertEqual(
-            rlist(dom.parse_clause([('Selection', None, None)])), [
-                ('selection', '=', None),
-                ])
-        self.assertEqual(
-            rlist(dom.parse_clause([('Selection', None, '')])), [
-                ('selection', '=', ''),
-                ])
-        self.assertEqual(
-            rlist(dom.parse_clause([('Selection', None, ['Male', 'Female'])])),
-            [('selection', 'in', ['male', 'female'])])
-        self.assertEqual(
-            rlist(dom.parse_clause([('MultiSelection', None, None)])), [
-                ('multiselection', '=', None),
-                ])
-        self.assertEqual(
-            rlist(dom.parse_clause([('MultiSelection', None, '')])), [
-                ('multiselection', 'in', ['']),
-                ])
-        self.assertEqual(
-            rlist(dom.parse_clause([('MultiSelection', '=', '')])), [
-                ('multiselection', '=', ['']),
-                ])
-        self.assertEqual(
-            rlist(dom.parse_clause([('MultiSelection', '!', '')])), [
-                ('multiselection', 'not in', ['']),
-                ])
-        self.assertEqual(
-            rlist(dom.parse_clause([('MultiSelection', '!=', '')])), [
-                ('multiselection', '!=', ['']),
-                ])
-        self.assertEqual(
-            rlist(dom.parse_clause(
-                [('MultiSelection', None, ['Foo', 'Bar'])])), [
-                ('multiselection', 'in', ['foo', 'bar']),
-                ])
-        self.assertEqual(
-            rlist(dom.parse_clause(
-                [('MultiSelection', '=', ['Foo', 'Bar'])])), [
-                ('multiselection', '=', ['foo', 'bar']),
-                ])
-        self.assertEqual(
-            rlist(dom.parse_clause(
-                [('MultiSelection', '!', ['Foo', 'Bar'])])), [
-                ('multiselection', 'not in', ['foo', 'bar']),
-                ])
-        self.assertEqual(
-            rlist(dom.parse_clause(
-                [('MultiSelection', '!=', ['Foo', 'Bar'])])), [
-                ('multiselection', '!=', ['foo', 'bar']),
-                ])
-        self.assertEqual(
-            rlist(dom.parse_clause([('Integer', None, None)])), [
-                ('integer', '=', None),
-                ])
-        self.assertEqual(
-            rlist(dom.parse_clause([('Integer', None, '3..5')])), [[
-                    ('integer', '>=', 3),
-                    ('integer', '<=', 5),
-                    ]])
-        self.assertEqual(
-            rlist(dom.parse_clause([('Reference', None, 'foo')])), [
-                ('reference', 'ilike', '%foo%'),
-                ])
-        self.assertEqual(
-            rlist(dom.parse_clause([('Reference', None, 'Spam')])), [
-                ('reference', 'ilike', '%spam%'),
-                ])
-        self.assertEqual(
-            rlist(dom.parse_clause([('Reference', None, 'Spam,bar')])), [
-                ('reference.rec_name', 'ilike', '%bar%', 'spam'),
-                ])
-        self.assertEqual(
-            rlist(dom.parse_clause([('Reference', None, 'Spam,')])), [
-                ('reference.rec_name', 'ilike', '%', 'spam'),
-                ])
-        self.assertEqual(
-            rlist(dom.parse_clause([('Reference', None, ['foo', 'bar'])])), [
-                ('reference', 'in', ['foo', 'bar']),
-                ])
-        self.assertEqual(
-            rlist(dom.parse_clause(['OR',
-                    ('Name', None, 'John'), ('Name', None, 'Jane')])),
-            ['OR',
-                ('name', 'ilike', '%John%'),
-                ('name', 'ilike', '%Jane%'),
-                ])
-        self.assertEqual(
-            rlist(dom.parse_clause([('Many2One', None, 'John')])), [
-                ('many2one.rec_name', 'ilike', '%John%'),
-                ])
-        self.assertEqual(
-            rlist(dom.parse_clause([('Many2One', None, ['John', 'Jane'])])), [
-                ('many2one.rec_name', 'in', ['John', 'Jane']),
-                ])
-        self.assertEqual(
-            rlist(dom.parse_clause([('Many2One', '=', None)])), [
-                ('many2one', '=', None),
-                ])
-        self.assertEqual(
-            rlist(dom.parse_clause([('Many2One', '=', '')])), [
-                ('many2one', '=', None),
-                ])
-        self.assertEqual(
-            rlist(dom.parse_clause(iter([iter([['John']])]))), [
-                [('rec_name', 'ilike', '%John%')]])
-        self.assertEqual(
-            rlist(dom.parse_clause(iter([['Relation', None, "Test"]]))),
-            [('relation.rec_name', 'ilike', "%Test%")])
-        self.assertEqual(
-            rlist(dom.parse_clause(iter([['Relation.Name', None, "Test"]]))),
-            [('relation.name', 'ilike', "%Test%")])
-        self.assertEqual(
-            rlist(dom.parse_clause(iter([['Relation.M2O', None, "Foo"]]))),
-            [('relation.m2o.rec_name', 'ilike', "%Foo%")])
-        self.assertEqual(
-            rlist(dom.parse_clause(iter([['Relation.M2O.Foo', None, '42']]))),
-            [('relation.m2o.foo', '=', 42)])
-        self.assertEqual(
-            rlist(dom.parse_clause(iter([['OR']]))),
-            [('rec_name', 'ilike', "%OR%")])
-        self.assertEqual(
-            rlist(dom.parse_clause(iter([['AND']]))),
-            [('rec_name', 'ilike', "%AND%")])
+        for search_text, domain in [
+                ([('John',)], [('rec_name', 'ilike', '%John%')]),
+                ([('Name', None, None)], [('name', 'ilike', '%')]),
+                ([('Name', '', None)], [('name', 'ilike', '%')]),
+                ([('Name', '=', None)], [('name', '=', None)]),
+                ([('Name', '=', '')], [('name', '=', '')]),
+                ([('Name', None, 'Doe')], [('name', 'ilike', '%Doe%')]),
+                ([('Name', '!', 'Doe')], [('name', 'not ilike', '%Doe%')]),
+                (
+                    [('Name', None, ['John', 'Jane'])],
+                    [('name', 'in', ['John', 'Jane'])]),
+                (
+                    [('Name', '!', ['John', 'Jane'])],
+                    [('name', 'not in', ['John', 'Jane'])]),
+                ([('Selection', None, None)], [('selection', '=', None)]),
+                ([('Selection', None, '')], [('selection', '=', '')]),
+                (
+                    [('Selection', None, ['Male', 'Female'])],
+                    [('selection', 'in', ['male', 'female'])]),
+                (
+                    [('MultiSelection', None, None)],
+                    [('multiselection', '=', None)]),
+                (
+                    [('MultiSelection', None, '')],
+                    [('multiselection', 'in', [''])]),
+                (
+                    [('MultiSelection', '=', '')],
+                    [('multiselection', '=', [''])]),
+                (
+                    [('MultiSelection', '!', '')],
+                    [('multiselection', 'not in', [''])]),
+                (
+                    [('MultiSelection', '!=', '')],
+                    [('multiselection', '!=', [''])]),
+                (
+                    [('MultiSelection', None, ['Foo', 'Bar'])],
+                    [('multiselection', 'in', ['foo', 'bar'])]),
+                (
+                    [('MultiSelection', '=', ['Foo', 'Bar'])],
+                    [('multiselection', '=', ['foo', 'bar'])]),
+                (
+                    [('MultiSelection', '!', ['Foo', 'Bar'])],
+                    [('multiselection', 'not in', ['foo', 'bar'])]),
+                (
+                    [('MultiSelection', '!=', ['Foo', 'Bar'])],
+                    [('multiselection', '!=', ['foo', 'bar'])]),
+                ([('Integer', None, None)], [('integer', '=', None)]),
+                (
+                    [('Integer', None, '3..5')],
+                    [[('integer', '>=', 3), ('integer', '<=', 5)]]),
+                ([('Timestamp', None, None)], [('timestamp', '=', None)]),
+                (
+                    [('Timestamp', '=', dt.date(2002, 12, 4).strftime('%x'))],
+                    [[
+                            ('timestamp', '>=',
+                                untimezoned_date(dt.datetime(2002, 12, 4))),
+                            ('timestamp', '<',
+                                untimezoned_date(dt.datetime(2002, 12, 5)))]]),
+                (
+                    [('Timestamp', '=',
+                        dt.datetime(2002, 12, 4, 12, 30).strftime('%x %X'))
+                        ],
+                    [('timestamp', '=', untimezoned_date(
+                                dt.datetime(2002, 12, 4, 12, 30)))]),
+                (
+                    [('Timestamp', None, [
+                                f"{dt.date(2002, 12, 4).strftime('%x')}",
+                                f"{dt.date(2002, 12, 5).strftime('%x')}",
+                                ])],
+                    [('timestamp', 'in', [
+                                untimezoned_date(dt.datetime(2002, 12, 4)),
+                                untimezoned_date(dt.datetime(2002, 12, 5)),
+                                ])]),
+                (
+                    [('Reference', None, 'foo')],
+                    [('reference', 'ilike', '%foo%')]),
+                (
+                    [('Reference', None, 'Spam')],
+                    [('reference', 'ilike', '%spam%')]),
+                (
+                    [('Reference', None, 'Spam,bar')],
+                    [('reference.rec_name', 'ilike', '%bar%', 'spam')]),
+                (
+                    [('Reference', None, 'Spam,')],
+                    [('reference.rec_name', 'ilike', '%', 'spam')]),
+                (
+                    [('Reference', None, ['foo', 'bar'])],
+                    [('reference', 'in', ['foo', 'bar'])]),
+                (
+                    ['OR', ('Name', None, 'John'), ('Name', None, 'Jane')],
+                    ['OR',
+                        ('name', 'ilike', '%John%'),
+                        ('name', 'ilike', '%Jane%'),
+                        ]),
+                (
+                    [('Many2One', None, 'John')],
+                    [('many2one.rec_name', 'ilike', '%John%')]),
+                (
+                    [('Many2One', None, ['John', 'Jane'])],
+                    [('many2one.rec_name', 'in', ['John', 'Jane'])]),
+                ([('Many2One', '=', None)], [('many2one', '=', None)]),
+                ([('Many2One', '=', '')], [('many2one', '=', None)]),
+                ([iter([['John']])], [[('rec_name', 'ilike', '%John%')]]),
+                (
+                    iter([['Relation', None, "Test"]]),
+                    [('relation.rec_name', 'ilike', "%Test%")]),
+                (
+                    iter([['Relation.Name', None, "Test"]]),
+                    [('relation.name', 'ilike', "%Test%")]),
+                (
+                    iter([['Relation.M2O', None, "Foo"]]),
+                    [('relation.m2o.rec_name', 'ilike', "%Foo%")]),
+                (
+                    iter([['Relation.M2O.Foo', None, '42']]),
+                    [('relation.m2o.foo', '=', 42)]),
+                (iter([['OR']]), [('rec_name', 'ilike', "%OR%")]),
+                (iter([['AND']]), [('rec_name', 'ilike', "%AND%")]),
+                ]:
+            with self.subTest(f'parse_clause({search_text})'):
+                self.assertEqual(rlist(dom.parse_clause(search_text)), domain)
 
     def test_completion_char(self):
         "Test completion char"

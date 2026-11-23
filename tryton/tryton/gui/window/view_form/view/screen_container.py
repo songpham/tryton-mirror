@@ -626,8 +626,10 @@ class ScreenContainer(object):
                     for selection in selections:
                         entry.append_text(selection)
                 elif field['type'] in ['selection', 'multiselection']:
-                    selections = tuple(x[1] for x in field['selection'])
-                    entry = Selection(selections)
+                    selections = [x[1] for x in field['selection']]
+                    if field.get('sort', True):
+                        selections.sort()
+                    entry = Selection(tuple(selections))
                     entry.set_vexpand(True)
                 elif field['type'] in ('date', 'datetime', 'time'):
                     date_format = common.date_format(

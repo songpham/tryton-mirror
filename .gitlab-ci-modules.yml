@@ -118,23 +118,6 @@ test-modules-account_credit_limit-postgresql:
     PACKAGE: modules/account_credit_limit
     TAG_PATTERN: '/^account_credit_limit-.*/'
 
-check-doc-modules-account_de_skr03:
-  extends: .check-doc
-  variables:
-    PACKAGE: modules/account_de_skr03
-
-test-modules-account_de_skr03-sqlite:
-  extends: .test-sqlite
-  variables:
-    PACKAGE: modules/account_de_skr03
-    TAG_PATTERN: '/^account_de_skr03-.*/'
-
-test-modules-account_de_skr03-postgresql:
-  extends: .test-postgresql
-  variables:
-    PACKAGE: modules/account_de_skr03
-    TAG_PATTERN: '/^account_de_skr03-.*/'
-
 check-doc-modules-account_deposit:
   extends: .check-doc
   variables:
@@ -219,40 +202,6 @@ test-modules-account_dunning_letter-postgresql:
   variables:
     PACKAGE: modules/account_dunning_letter
     TAG_PATTERN: '/^account_dunning_letter-.*/'
-
-check-doc-modules-account_es:
-  extends: .check-doc
-  variables:
-    PACKAGE: modules/account_es
-
-test-modules-account_es-sqlite:
-  extends: .test-sqlite
-  variables:
-    PACKAGE: modules/account_es
-    TAG_PATTERN: '/^account_es-.*/'
-
-test-modules-account_es-postgresql:
-  extends: .test-postgresql
-  variables:
-    PACKAGE: modules/account_es
-    TAG_PATTERN: '/^account_es-.*/'
-
-check-doc-modules-account_es_sii:
-  extends: .check-doc
-  variables:
-    PACKAGE: modules/account_es_sii
-
-test-modules-account_es_sii-sqlite:
-  extends: .test-sqlite
-  variables:
-    PACKAGE: modules/account_es_sii
-    TAG_PATTERN: '/^account_es_sii-.*/'
-
-test-modules-account_es_sii-postgresql:
-  extends: .test-postgresql
-  variables:
-    PACKAGE: modules/account_es_sii
-    TAG_PATTERN: '/^account_es_sii-.*/'
 
 check-doc-modules-account_eu:
   extends: .check-doc
@@ -392,6 +341,23 @@ test-modules-account_invoice_defer-postgresql:
     PACKAGE: modules/account_invoice_defer
     TAG_PATTERN: '/^account_invoice_defer-.*/'
 
+check-doc-modules-account_invoice_factur_x:
+  extends: .check-doc
+  variables:
+    PACKAGE: modules/account_invoice_factur_x
+
+test-modules-account_invoice_factur_x-sqlite:
+  extends: .test-sqlite
+  variables:
+    PACKAGE: modules/account_invoice_factur_x
+    TAG_PATTERN: '/^account_invoice_factur_x-.*/'
+
+test-modules-account_invoice_factur_x-postgresql:
+  extends: .test-postgresql
+  variables:
+    PACKAGE: modules/account_invoice_factur_x
+    TAG_PATTERN: '/^account_invoice_factur_x-.*/'
+
 check-doc-modules-account_invoice_history:
   extends: .check-doc
   variables:
@@ -527,6 +493,23 @@ test-modules-account_payment_braintree-postgresql:
   variables:
     PACKAGE: modules/account_payment_braintree
     TAG_PATTERN: '/^account_payment_braintree-.*/'
+
+check-doc-modules-account_payment_check:
+  extends: .check-doc
+  variables:
+    PACKAGE: modules/account_payment_check
+
+test-modules-account_payment_check-sqlite:
+  extends: .test-sqlite
+  variables:
+    PACKAGE: modules/account_payment_check
+    TAG_PATTERN: '/^account_payment_check-.*/'
+
+test-modules-account_payment_check-postgresql:
+  extends: .test-postgresql
+  variables:
+    PACKAGE: modules/account_payment_check
+    TAG_PATTERN: '/^account_payment_check-.*/'
 
 check-doc-modules-account_payment_clearing:
   extends: .check-doc
@@ -818,6 +801,23 @@ test-modules-account_stock_eu-postgresql:
   variables:
     PACKAGE: modules/account_stock_eu
     TAG_PATTERN: '/^account_stock_eu-.*/'
+
+check-doc-modules-account_stock_eu_excise:
+  extends: .check-doc
+  variables:
+    PACKAGE: modules/account_stock_eu_excise
+
+test-modules-account_stock_eu_excise-sqlite:
+  extends: .test-sqlite
+  variables:
+    PACKAGE: modules/account_stock_eu_excise
+    TAG_PATTERN: '/^account_stock_eu_excise-.*/'
+
+test-modules-account_stock_eu_excise-postgresql:
+  extends: .test-postgresql
+  variables:
+    PACKAGE: modules/account_stock_eu_excise
+    TAG_PATTERN: '/^account_stock_eu_excise-.*/'
 
 check-doc-modules-account_stock_landed_cost:
   extends: .check-doc
@@ -1414,6 +1414,23 @@ test-modules-document_incoming_ocr-postgresql:
     PACKAGE: modules/document_incoming_ocr
     TAG_PATTERN: '/^document_incoming_ocr-.*/'
 
+check-doc-modules-document_incoming_ocr_eagle_doc:
+  extends: .check-doc
+  variables:
+    PACKAGE: modules/document_incoming_ocr_eagle_doc
+
+test-modules-document_incoming_ocr_eagle_doc-sqlite:
+  extends: .test-sqlite
+  variables:
+    PACKAGE: modules/document_incoming_ocr_eagle_doc
+    TAG_PATTERN: '/^document_incoming_ocr_eagle_doc-.*/'
+
+test-modules-document_incoming_ocr_eagle_doc-postgresql:
+  extends: .test-postgresql
+  variables:
+    PACKAGE: modules/document_incoming_ocr_eagle_doc
+    TAG_PATTERN: '/^document_incoming_ocr_eagle_doc-.*/'
+
 check-doc-modules-document_incoming_ocr_typless:
   extends: .check-doc
   variables:
@@ -1517,23 +1534,6 @@ test-modules-edocument_unece-postgresql:
   variables:
     PACKAGE: modules/edocument_unece
     TAG_PATTERN: '/^edocument_unece-.*/'
-
-check-doc-modules-google_maps:
-  extends: .check-doc
-  variables:
-    PACKAGE: modules/google_maps
-
-test-modules-google_maps-sqlite:
-  extends: .test-sqlite
-  variables:
-    PACKAGE: modules/google_maps
-    TAG_PATTERN: '/^google_maps-.*/'
-
-test-modules-google_maps-postgresql:
-  extends: .test-postgresql
-  variables:
-    PACKAGE: modules/google_maps
-    TAG_PATTERN: '/^google_maps-.*/'
 
 check-doc-modules-inbound_email:
   extends: .check-doc
@@ -2011,6 +2011,23 @@ test-modules-production-postgresql:
     PACKAGE: modules/production
     TAG_PATTERN: '/^production-.*/'
 
+check-doc-modules-production_ethanol:
+  extends: .check-doc
+  variables:
+    PACKAGE: modules/production_ethanol
+
+test-modules-production_ethanol-sqlite:
+  extends: .test-sqlite
+  variables:
+    PACKAGE: modules/production_ethanol
+    TAG_PATTERN: '/^production_ethanol-.*/'
+
+test-modules-production_ethanol-postgresql:
+  extends: .test-postgresql
+  variables:
+    PACKAGE: modules/production_ethanol
+    TAG_PATTERN: '/^production_ethanol-.*/'
+
 check-doc-modules-production_outsourcing:
   extends: .check-doc
   variables:
@@ -2112,6 +2129,23 @@ test-modules-project-postgresql:
   variables:
     PACKAGE: modules/project
     TAG_PATTERN: '/^project-.*/'
+
+check-doc-modules-project_disbursement:
+  extends: .check-doc
+  variables:
+    PACKAGE: modules/project_disbursement
+
+test-modules-project_disbursement-sqlite:
+  extends: .test-sqlite
+  variables:
+    PACKAGE: modules/project_disbursement
+    TAG_PATTERN: '/^project_disbursement-.*/'
+
+test-modules-project_disbursement-postgresql:
+  extends: .test-postgresql
+  variables:
+    PACKAGE: modules/project_disbursement
+    TAG_PATTERN: '/^project_disbursement-.*/'
 
 check-doc-modules-project_invoice:
   extends: .check-doc
@@ -2725,6 +2759,23 @@ test-modules-sale_product_recommendation_association_rule-postgresql:
     PACKAGE: modules/sale_product_recommendation_association_rule
     TAG_PATTERN: '/^sale_product_recommendation_association_rule-.*/'
 
+check-doc-modules-sale_project_task:
+  extends: .check-doc
+  variables:
+    PACKAGE: modules/sale_project_task
+
+test-modules-sale_project_task-sqlite:
+  extends: .test-sqlite
+  variables:
+    PACKAGE: modules/sale_project_task
+    TAG_PATTERN: '/^sale_project_task-.*/'
+
+test-modules-sale_project_task-postgresql:
+  extends: .test-postgresql
+  variables:
+    PACKAGE: modules/sale_project_task
+    TAG_PATTERN: '/^sale_project_task-.*/'
+
 check-doc-modules-sale_promotion:
   extends: .check-doc
   variables:
@@ -3030,6 +3081,40 @@ test-modules-stock_consignment-postgresql:
   variables:
     PACKAGE: modules/stock_consignment
     TAG_PATTERN: '/^stock_consignment-.*/'
+
+check-doc-modules-stock_conversion:
+  extends: .check-doc
+  variables:
+    PACKAGE: modules/stock_conversion
+
+test-modules-stock_conversion-sqlite:
+  extends: .test-sqlite
+  variables:
+    PACKAGE: modules/stock_conversion
+    TAG_PATTERN: '/^stock_conversion-.*/'
+
+test-modules-stock_conversion-postgresql:
+  extends: .test-postgresql
+  variables:
+    PACKAGE: modules/stock_conversion
+    TAG_PATTERN: '/^stock_conversion-.*/'
+
+check-doc-modules-stock_ethanol:
+  extends: .check-doc
+  variables:
+    PACKAGE: modules/stock_ethanol
+
+test-modules-stock_ethanol-sqlite:
+  extends: .test-sqlite
+  variables:
+    PACKAGE: modules/stock_ethanol
+    TAG_PATTERN: '/^stock_ethanol-.*/'
+
+test-modules-stock_ethanol-postgresql:
+  extends: .test-postgresql
+  variables:
+    PACKAGE: modules/stock_ethanol
+    TAG_PATTERN: '/^stock_ethanol-.*/'
 
 check-doc-modules-stock_forecast:
   extends: .check-doc

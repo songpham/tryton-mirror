@@ -124,6 +124,7 @@
             this.domain = kwargs.domain || null;
             this.context = kwargs.context || null;
             this.save_current = kwargs.save_current;
+            this.on_destroy = kwargs.on_destroy;
             var title_prm = jQuery.when(kwargs.title || '').then(
                 title => {
                     if (screen.breadcrumb.length) {
@@ -146,7 +147,7 @@
                     var revision = this.screen.context._datetime;
                     var label;
                     if (revision &&
-                        Sao.common.MODELHISTORY.contains(this.screen.model_name)) {
+                        Sao.common.MODELHISTORY.includes(this.screen.model_name)) {
                         var date_format = Sao.common.date_format(
                             this.screen.context.date_format);
                         var time_format = '%H:%M:%S.%f';
@@ -162,7 +163,12 @@
                     return label;
                 });
 
-            this.prev_view = screen.current_view;
+            // prev_view should stay null
+            if (kwargs.prev_view !== undefined) {
+                this.prev_view = kwargs.prev_view;
+            } else {
+                this.prev_view = screen.current_view;
+            }
             this.screen.screen_container.alternate_view = true;
             this.info_bar = new Sao.Window.InfoBar();
             var view_type = kwargs.view_type || 'form';
@@ -275,7 +281,7 @@
                 this.wid_text = jQuery('<input/>', {
                     type: 'input'
                 }).appendTo(menu);
-                this.wid_text.hide();
+                this.wid_text.sao_hide();
 
                 var buttons = jQuery('<div/>', {
                     'class': 'input-group-btn'
@@ -332,7 +338,7 @@
                 this.but_next.click(disable_during(this.next.bind(this)));
 
                 if (this.domain) {
-                    this.wid_text.show();
+                    this.wid_text.sao_show();
 
                     this.but_add = jQuery('<button/>', {
                         'class': 'btn btn-default btn-sm',
@@ -540,11 +546,29 @@
         undelete: function() {
             this.screen.unremove();
         },
+        validate: function() {
+            let prm = jQuery.Deferred();
+            this.screen.current_view.set_value();
+            var record = this.screen.current_record;
+            if (record) {
+                var fields = this.screen.current_view.get_fields();
+                if (!record.validate(fields)) {
+                    this.screen.display(true).always(() => prm.reject());
+                    return prm;
+                }
+                if (this.screen.pre_validate) {
+                    return record.pre_validate().then(
+                        prm.resolve, prm.reject);
+                }
+            }
+            prm.resolve();
+            return prm;
+        },
         previous: function() {
-            return this.screen.display_previous();
+            return this.validate().then(() => this.screen.display_previous());
         },
         next: function() {
-            return this.screen.display_next();
+            return this.validate().then(() => this.screen.display_next());
         },
         switch_: function() {
             return this.screen.switch_view();
@@ -553,7 +577,7 @@
             var result;
             this.screen.current_view.set_value();
             var readonly = this.screen.group.readonly;
-            if (~['RESPONSE_OK', 'RESPONSE_ACCEPT'].indexOf(response_id) &&
+            if (['RESPONSE_OK', 'RESPONSE_ACCEPT'].includes(response_id) &&
                     !readonly &&
                     this.screen.current_record) {
                 jQuery.when(this.screen.current_record.validate()).then(validate => {
@@ -660,6 +684,9 @@
                 this.screen.switch_view(this.prev_view.view_type);
             }
             this.el.modal('hide');
+            if (this.on_destroy) {
+                this.el.on('hidden.bs.modal', () => this.on_destroy());
+            }
         }
     });
 
@@ -668,10 +695,12 @@
             this.resource = record.model.name + ',' + record.id;
             this.attachment_callback = callback;
             var context = jQuery.extend({}, record.get_context());
+            let access = Sao.common.MODELACCESS.get(record.model.name);
             var screen = new Sao.Screen('ir.attachment', {
                 domain: [['resource', '=', this.resource]],
                 mode: ['tree', 'form'],
                 context: context,
+                readonly: !access.write,
             });
             var title = record.rec_name().then(function(rec_name) {
                 return Sao.i18n.gettext('Attachments (%1)', rec_name);
@@ -981,6 +1010,7 @@
             }
             this.title = title;
             this.exclude_field = kwargs.exclude_field || null;
+            let button = kwargs.button || Sao.Window.Search.Button.OK;
             var dialog = new Sao.Dialog(Sao.i18n.gettext(
                 'Search %1', this.title), '', 'lg', false);
             this.el = dialog.modal;
@@ -1015,11 +1045,26 @@
                     this.response('RESPONSE_ACCEPT');
                 }).appendTo(dialog.footer);
             }
+            let label;
+            switch (button) {
+                case Sao.Window.Search.Button.OK:
+                    label = Sao.i18n.gettext("OK");
+                    break;
+                case Sao.Window.Search.Button.ADD:
+                    label = Sao.i18n.gettext("Add");
+                    break;
+                case Sao.Window.Search.Button.REMOVE:
+                    label = Sao.i18n.gettext("Remove");
+                    break;
+                case Sao.Window.Search.Button.DELETE:
+                    label = Sao.i18n.gettext("Delete");
+                    break;
+            }
             jQuery('<button/>', {
                 'class': 'btn btn-primary',
                 'type': 'submit',
-                'title': Sao.i18n.gettext("OK"),
-            }).text(Sao.i18n.gettext('OK')).appendTo(dialog.footer);
+                'title': label,
+            }).text(label).appendTo(dialog.footer);
             dialog.content.submit(e => {
                 e.preventDefault();
                 this.response('RESPONSE_OK');
@@ -1047,10 +1092,15 @@
                     }
                     dialog.body.append(this.screen.screen_container.el);
                     this.el.modal('show');
-                    this.screen.display();
-                    if (kwargs.search_filter !== undefined) {
-                        this.screen.search_filter(kwargs.search_filter);
-                    }
+                    this.screen.display().then(() => {
+                        if (kwargs.search_filter !== undefined) {
+                            return this.screen.search_filter(kwargs.search_filter);
+                        }
+                    }).then(() => {
+                        if (kwargs.selected_nodes !== undefined) {
+                            return this.screen.current_view.display(kwargs.selected_nodes);
+                        }
+                    });
                 });
             });
             this.el.on('shown.bs.modal', () => {
@@ -1114,6 +1164,13 @@
             this.callback(value);
             this.el.modal('hide');
         }
+    });
+
+    Sao.Window.Search.Button = Object.freeze({
+        OK: 'ok',
+        ADD: 'add',
+        REMOVE: 'remove',
+        DELETE: 'delete',
     });
 
     Sao.Window.Preferences = Sao.class_(Object, {
@@ -2081,7 +2138,7 @@
                     this.fields[path] = node;
 
                     // Insert relation only to real field
-                    if (item.name.indexOf('.') == -1) {
+                    if (!item.name.includes('.')) {
                         if (item.field.relation) {
                             node.children = {};
                         } else if (item.field.translate) {
@@ -2379,7 +2436,9 @@
                     "%1 record saved", "%1 records saved", size, size), 'info');
         },
         set_url: function() {
-            var path = [this.session.database, 'data', this.screen.model_name];
+            var path = [
+                this.session.database, 'r', 'base', 'data',
+                this.screen.model_name];
             var query_string = [];
             var domain;
             if (JSON.parse(this.selected_records.val())) {
@@ -2429,7 +2488,7 @@
             query_string = query_string.map(function(param) {
                 return param.map(encodeURIComponent).join('=');
             }).join('&');
-            this.button_url.attr('href', '/' + path.join('/') + '?' + query_string);
+            this.button_url.attr('href', path.join('/') + '?' + query_string);
         },
     });
 
@@ -2699,15 +2758,16 @@
         },
         _fill_with: function(template) {
             var prm;
+            let context = this.record.get_context();
             if (template) {
                 prm = Sao.rpc({
                     'method': 'model.ir.email.template.get',
-                    'params': [template, this.record.id, {}],
+                    'params': [template, this.record.id, context],
                 }, this.record.model.session);
             } else {
                 prm = Sao.rpc({
                     'method': 'model.ir.email.template.get_default',
-                    'params': [this.record.model.name, this.record.id, {}],
+                    'params': [this.record.model.name, this.record.id, context],
                 }, this.record.model.session);
             }
             prm.then(values => {
@@ -2720,7 +2780,7 @@
                 for (var print_id in this.print_actions) {
                     var check = this.print_actions[print_id];
                     check.prop(
-                        'checked', ~print_ids.indexOf(parseInt(print_id, 10)));
+                        'checked', print_ids.includes(parseInt(print_id, 10)));
                 }
             });
         },

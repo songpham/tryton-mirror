@@ -9,11 +9,15 @@ from trytond.modules.company.model import (
     CompanyMultiValueMixin, CompanyValueMixin)
 from trytond.pool import Pool
 from trytond.pyson import Eval, Id, TimeDelta
+from trytond.transaction import Transaction
 
 sale_invoice_method = fields.Selection(
     'get_sale_invoice_methods', "Sale Invoice Method")
 sale_shipment_method = fields.Selection(
     'get_sale_shipment_methods', "Sale Shipment Method")
+sale_wait_shipment = fields.Boolean(
+    "Sale Wait Shipment",
+    help="Create customer shipments in a waiting state")
 sale_quotation_validity = fields.TimeDelta(
     "Sale Quotation Validity",
     domain=['OR',
@@ -54,6 +58,7 @@ class Configuration(
     sale_invoice_method = fields.MultiValue(sale_invoice_method)
     get_sale_invoice_methods = get_sale_methods('invoice_method')
     sale_shipment_method = fields.MultiValue(sale_shipment_method)
+    sale_wait_shipment = fields.MultiValue(sale_wait_shipment)
     get_sale_shipment_methods = get_sale_methods('shipment_method')
     sale_process_after = fields.TimeDelta(
         "Process Sale after",
@@ -68,7 +73,11 @@ class Configuration(
     @classmethod
     def multivalue_model(cls, field):
         pool = Pool()
-        if field in {'sale_invoice_method', 'sale_shipment_method'}:
+        if field in {
+                'sale_invoice_method',
+                'sale_shipment_method',
+                'sale_wait_shipment',
+                }:
             return pool.get('sale.configuration.sale_method')
         if field == 'sale_sequence':
             return pool.get('sale.configuration.sequence')
@@ -79,6 +88,7 @@ class Configuration(
     default_sale_sequence = default_func('sale_sequence')
     default_sale_invoice_method = default_func('sale_invoice_method')
     default_sale_shipment_method = default_func('sale_shipment_method')
+    default_sale_wait_shipment = default_func('sale_wait_shipment')
 
 
 class ConfigurationSequence(ModelSQL, CompanyValueMixin):
@@ -106,6 +116,19 @@ class ConfigurationSaleMethod(ModelSQL, ValueMixin):
     get_sale_invoice_methods = get_sale_methods('invoice_method')
     sale_shipment_method = sale_shipment_method
     get_sale_shipment_methods = get_sale_methods('shipment_method')
+    sale_wait_shipment = sale_wait_shipment
+
+    @classmethod
+    def __register__(cls, module_name):
+        cursor = Transaction().connection.cursor()
+        table = cls.__table__()
+
+        super().__register__(module_name)
+
+        # Migration from 7.8: rename invoice method shipment to fulfillment
+        cursor.execute(*table.update(
+                [table.sale_invoice_method], ['fulfillment'],
+                where=table.sale_invoice_method == 'shipment'))
 
     @classmethod
     def default_sale_invoice_method(cls):
@@ -114,6 +137,10 @@ class ConfigurationSaleMethod(ModelSQL, ValueMixin):
     @classmethod
     def default_sale_shipment_method(cls):
         return 'order'
+
+    @classmethod
+    def default_sale_wait_shipment(cls):
+        return True
 
 
 class ConfigurationQuotation(ModelSQL, ValueMixin):

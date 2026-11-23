@@ -229,7 +229,7 @@ class IconFactory:
                     cls._empty_gif, size, size)
             return cls._empty_pixbufs[size]
         else:
-            return cls._get_pixbuf_url(url, size, size_param)
+            return cls._get_pixbuf_url(url, size)
 
 
 IconFactory.load_local_icons()
@@ -595,7 +595,10 @@ def _slugify_filename(filename):
         name, ext = filename
     else:
         name, ext = os.path.splitext(filename)
-    return ''.join([slugify(name), os.extsep, slugify(ext)])
+    parts = [slugify(name)]
+    if ext:
+        parts.extend([os.extsep, slugify(ext)])
+    return ''.join(parts)
 
 
 def file_write(filename, data):
@@ -657,15 +660,19 @@ def file_open(filename, type=None, print_p=False):
     else:
         uri = GLib.filename_to_uri(filename)
         try:
-            Gio.AppInfo.launch_default_for_uri(uri)
+            result = Gio.AppInfo.launch_default_for_uri(uri)
         except GLib.Error:
+            result = False
+        if not result:
             save()
 
 
 def webbrowser_open(url):
     try:
-        Gio.AppInfo.launch_default_for_uri(url)
+        result = Gio.AppInfo.launch_default_for_uri(url)
     except GLib.Error:
+        result = False
+    if not result:
         webbrowser.open(url)
 
 
@@ -1157,7 +1164,7 @@ class Login(object):
                     message(
                         _('Too many requests. Try again later.'),
                         msg_type=Gtk.MessageType.ERROR)
-                    continue
+                    raise TrytonError('QueryCanceled')
                 elif (exception.faultCode
                         == str(int(HTTPStatus.NOT_FOUND))):
                     message(_("Not Found."), msg_type=Gtk.MessageType.ERROR)

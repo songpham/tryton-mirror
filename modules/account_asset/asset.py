@@ -15,8 +15,8 @@ from trytond.modules.account.exceptions import AccountMissing
 from trytond.modules.company import CompanyReport
 from trytond.modules.currency.fields import Monetary
 from trytond.pool import Pool
-from trytond.pyson import Bool, Eval, If
-from trytond.tools import cached_property, grouped_slice
+from trytond.pyson import Eval, If
+from trytond.tools import cached_property
 from trytond.transaction import Transaction, check_access, without_check_access
 from trytond.wizard import (
     Button, StateReport, StateTransition, StateView, Wizard)
@@ -57,7 +57,8 @@ class Asset(Workflow, ModelSQL, ModelView):
     number = fields.Char("Number", readonly=True)
     product = fields.Many2One('product.product', 'Product', required=True,
         states={
-            'readonly': (Eval('lines', [0]) | (Eval('state') != 'draft')),
+            'readonly': Eval('state') != 'draft',
+            'editable': ~Eval('lines', [0]),
             },
         context={
             'company': Eval('company', None),
@@ -81,7 +82,8 @@ class Asset(Workflow, ModelSQL, ModelView):
                 ],
             ],
         states={
-            'readonly': (Eval('lines', [0]) | (Eval('state') != 'draft')),
+            'readonly': Eval('state') != 'draft',
+            'editable': ~Eval('lines', [0])
             })
     customer_invoice_line = fields.Function(fields.Many2One(
             'account.invoice.line', 'Customer Invoice Line'),
@@ -102,19 +104,21 @@ class Asset(Workflow, ModelSQL, ModelView):
     quantity = fields.Float(
         "Quantity", digits='unit',
         states={
-            'readonly': (Bool(Eval('supplier_invoice_line', 1))
-                | Eval('lines', [0])
-                | (Eval('state') != 'draft')),
+            'readonly': Eval('state') != 'draft',
+            'editable': ~(
+                Eval('supplier_invoice_line', 1)
+                | Eval('lines', [0])),
             })
     unit = fields.Many2One('product.uom', 'Unit',
         states={
-            'readonly': (Bool(Eval('product'))
-                | (Eval('state') != 'draft')),
+            'readonly': Eval('state') != 'draft',
+            'editable': ~Eval('product'),
             })
     value = Monetary(
         "Value", currency='currency', digits='currency',
         states={
-            'readonly': (Eval('lines', [0]) | (Eval('state') != 'draft')),
+            'readonly': Eval('state') != 'draft',
+            'editable': ~Eval('lines', [0]),
             },
         required=True,
         help="The value of the asset when purchased.")
@@ -124,7 +128,8 @@ class Asset(Workflow, ModelSQL, ModelView):
             ('depreciated_amount', '<=', Eval('value')),
             ],
         states={
-            'readonly': (Eval('lines', [0]) | (Eval('state') != 'draft')),
+            'readonly': Eval('state') != 'draft',
+            'editable': ~Eval('lines', [0]),
             },
         required=True,
         help="The amount already depreciated at the start date.")
@@ -139,22 +144,26 @@ class Asset(Workflow, ModelSQL, ModelView):
             ('residual_value', '<=', Eval('depreciating_value')),
             ],
         states={
-            'readonly': (Eval('lines', [0]) | (Eval('state') != 'draft')),
+            'readonly': Eval('state') != 'draft',
+            'editable': ~Eval('lines', [0]),
             })
     purchase_date = fields.Date('Purchase Date', states={
-            'readonly': (Bool(Eval('supplier_invoice_line', 1))
-                | Eval('lines', [0])
-                | (Eval('state') != 'draft')),
+            'readonly': Eval('state') != 'draft',
+            'editable': ~(
+                Eval('supplier_invoice_line', 1)
+                | Eval('lines', [0])),
             },
         required=True)
     start_date = fields.Date('Start Date', states={
-            'readonly': (Eval('lines', [0]) | (Eval('state') != 'draft')),
+            'readonly': Eval('state') != 'draft',
+            'editable': ~Eval('lines', [0]),
             },
         required=True,
         domain=[('start_date', '<=', Eval('end_date', None))])
     end_date = fields.Date('End Date',
         states={
-            'readonly': (Eval('lines', [0]) | (Eval('state') != 'draft')),
+            'readonly': Eval('state') != 'draft',
+            'editable': ~Eval('lines', [0]),
             },
         required=True,
         domain=[('end_date', '>=', Eval('start_date', None))])
@@ -162,7 +171,8 @@ class Asset(Workflow, ModelSQL, ModelView):
             ('linear', 'Linear'),
             ], 'Depreciation Method',
         states={
-            'readonly': (Eval('lines', [0]) | (Eval('state') != 'draft')),
+            'readonly': Eval('state') != 'draft',
+            'editable': ~Eval('lines', [0]),
             },
         required=True)
     frequency = fields.Selection([
@@ -171,7 +181,8 @@ class Asset(Workflow, ModelSQL, ModelView):
             ], 'Frequency',
         required=True,
         states={
-            'readonly': (Eval('lines', [0]) | (Eval('state') != 'draft')),
+            'readonly': Eval('state') != 'draft',
+            'editable': ~Eval('lines', [0]),
             })
     state = fields.Selection([
             ('draft', 'Draft'),
@@ -502,14 +513,14 @@ class Asset(Workflow, ModelSQL, ModelView):
     @classmethod
     @ModelView.button
     def clear_lines(cls, assets):
-        Line = Pool().get('account.asset.line')
+        pool = Pool()
+        Line = pool.get('account.asset.line')
 
-        lines_to_delete = []
-        for asset in assets:
-            for line in asset.lines:
-                if not line.move or line.move.state != 'posted':
-                    lines_to_delete.append(line)
-        Line.delete(lines_to_delete)
+        with Line.bulk_delete() as delete:
+            for asset in assets:
+                for line in asset.lines:
+                    if not line.move or line.move.state != 'posted':
+                        delete.push(line)
 
     @classmethod
     @ModelView.button_action('account_asset.wizard_update')
@@ -559,13 +570,11 @@ class Asset(Workflow, ModelSQL, ModelView):
         cls.create_lines(assets)
 
         moves = []
-        lines = []
-        for asset_ids in grouped_slice(assets):
-            lines += Line.search([
-                    ('asset', 'in', list(asset_ids)),
-                    ('date', '<=', date),
-                    ('move', '=', None),
-                    ])
+        lines = Line.search([
+                ('asset', 'in', assets),
+                ('date', '<=', date),
+                ('move', '=', None),
+                ])
         for line in lines:
             moves.append(line.asset.get_move(line))
         Move.save(moves)
@@ -719,12 +728,12 @@ class Asset(Workflow, ModelSQL, ModelView):
             default = {}
         else:
             default = default.copy()
-        default.setdefault('lines', [])
-        default.setdefault('update_moves', [])
+        default.setdefault('lines')
+        default.setdefault('update_moves')
         default.setdefault('number', None)
         default.setdefault('supplier_invoice_line', None)
         default.setdefault('move')
-        default.setdefault('revisions', [])
+        default.setdefault('revisions')
         return super().copy(assets, default=default)
 
     @classmethod

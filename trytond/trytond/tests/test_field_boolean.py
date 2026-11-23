@@ -4,17 +4,12 @@
 from sql import Literal
 
 from trytond.pool import Pool
-from trytond.tests.test_tryton import (
-    TestCase, activate_module, with_transaction)
+from trytond.tests.test_tryton import DBTestCase, with_transaction
 
 
-class FieldBooleanTestCase(TestCase):
+class FieldBooleanTestCase(DBTestCase):
     "Test Field Boolean"
-
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        activate_module('tests')
+    module = 'tests'
 
     @with_transaction()
     def test_create(self):
@@ -228,6 +223,32 @@ class FieldBooleanTestCase(TestCase):
                 ('boolean', '!=', False),
                 ])
         self.assertListEqual(booleans, [])
+
+    @with_transaction()
+    def test_search_equals_true_with_none(self):
+        "Test search boolean equals True with None"
+        Boolean = Pool().get('test.boolean')
+        boolean, = Boolean.create([{
+                    'boolean': None,
+                    }])
+
+        booleans = Boolean.search([
+                ('boolean', '=', True),
+                ])
+        self.assertListEqual(booleans, [])
+
+    @with_transaction()
+    def test_search_non_equals_true_with_none(self):
+        "Test search boolean non equals True with None"
+        Boolean = Pool().get('test.boolean')
+        boolean, = Boolean.create([{
+                    'boolean': None,
+                    }])
+
+        booleans = Boolean.search([
+                ('boolean', '!=', True),
+                ])
+        self.assertListEqual(booleans, [boolean])
 
     @with_transaction()
     def test_write_false(self):

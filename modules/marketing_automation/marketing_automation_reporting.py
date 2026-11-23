@@ -99,8 +99,8 @@ class Scenario(Abstract):
     def _columns(cls, tables, withs):
         record = tables['record']
 
-        record_count = Count(Literal('*'))
-        record_count_blocked = Count(Literal('*'), filter_=record.blocked)
+        record_count = Count()
+        record_count_blocked = Count(filter_=record.blocked)
 
         return super()._columns(tables, withs) + [
             record.scenario.as_('scenario'),
@@ -127,7 +127,7 @@ class Scenario(Abstract):
     @classmethod
     def _group_by(cls, tables, withs):
         record = tables['record']
-        return [record.scenario, cls._column_date(tables, withs)]
+        return [record.scenario, cls._column_date(tables, withs).as_('date')]
 
     @classmethod
     def _where(cls, tables, withs):
@@ -203,12 +203,9 @@ class Activity(Abstract):
     def _columns(cls, tables, withs):
         record_activity = tables['record_activity']
 
-        record_count = Count(
-            Literal('*'), filter_=record_activity.state == 'done')
-        email_opened = Count(
-            Literal('*'), filter_=record_activity.email_opened)
-        email_clicked = Count(
-            Literal('*'), filter_=record_activity.email_clicked)
+        record_count = Count(filter_=record_activity.state == 'done')
+        email_opened = Count(filter_=record_activity.email_opened)
+        email_clicked = Count(filter_=record_activity.email_clicked)
 
         return super()._columns(tables, withs) + [
             record_activity.activity.as_('activity'),
@@ -242,7 +239,9 @@ class Activity(Abstract):
     @classmethod
     def _group_by(cls, tables, withs):
         record_activity = tables['record_activity']
-        return [record_activity.activity, cls._column_date(tables, withs)]
+        return [
+            record_activity.activity,
+            cls._column_date(tables, withs).as_('date')]
 
     @classmethod
     def _where(cls, tables, withs):

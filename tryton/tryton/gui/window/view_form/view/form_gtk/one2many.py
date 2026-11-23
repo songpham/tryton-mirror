@@ -11,7 +11,7 @@ from tryton.common.domain_parser import quote
 from tryton.common.underline import set_underline
 from tryton.gui.window.view_form.screen import Screen
 from tryton.gui.window.win_form import WinForm
-from tryton.gui.window.win_search import WinSearch
+from tryton.gui.window.win_search import WinSearch, WinSearchButton
 
 from .widget import Widget
 
@@ -30,17 +30,16 @@ class One2Many(Widget):
         vbox = Gtk.VBox(homogeneous=False, spacing=2)
         self.widget.add(vbox)
         self._readonly = True
-        self._required = False
         self._position = None
         self._length = 0
 
         self.title_box = hbox = Gtk.HBox(homogeneous=False, spacing=0)
         hbox.set_border_width(2)
 
-        self.title = Gtk.Label(
+        self.label = Gtk.Label(
             label=set_underline(attrs.get('string', '')),
             use_underline=True, halign=Gtk.Align.START)
-        hbox.pack_start(self.title, expand=True, fill=True, padding=0)
+        hbox.pack_start(self.label, expand=True, fill=True, padding=0)
 
         hbox.pack_start(Gtk.VSeparator(), expand=False, fill=True, padding=0)
 
@@ -62,8 +61,8 @@ class One2Many(Widget):
         self.but_pre.set_relief(Gtk.ReliefStyle.NONE)
         hbox.pack_start(self.but_pre, expand=False, fill=False, padding=0)
 
-        self.label = Gtk.Label(label='(_/0)')
-        hbox.pack_start(self.label, expand=False, fill=False, padding=0)
+        self.badge = Gtk.Label(label='(_/0)')
+        hbox.pack_start(self.badge, expand=False, fill=False, padding=0)
 
         self.but_next = Gtk.Button(can_focus=False)
         tooltips.set_tip(self.but_next, _('Next'))
@@ -175,7 +174,7 @@ class One2Many(Widget):
 
         vbox.pack_start(self.screen.widget, expand=True, fill=True, padding=0)
 
-        self.title.set_mnemonic_widget(
+        self.label.set_mnemonic_widget(
             self.screen.current_view.mnemonic_widget)
 
         self.screen.widget.connect('key_press_event', self.on_keypress)
@@ -183,6 +182,10 @@ class One2Many(Widget):
             self.wid_text.connect('key_press_event', self.on_keypress)
 
         self._popup = False
+
+    @property
+    def _styled_widget(self):
+        return
 
     def get_access(self, type_):
         model = self.attrs['relation']
@@ -262,25 +265,16 @@ class One2Many(Widget):
         string = self.attrs.get('string', '')
         if mnemonic_widget:
             string = set_underline(string)
-        self.title.set_mnemonic_widget(mnemonic_widget)
-        self.title.set_label(string)
+        self.label.set_mnemonic_widget(mnemonic_widget)
+        self.label.set_label(string)
 
     @property
     def modified(self):
         return self.screen.current_view.modified
 
     def _readonly_set(self, value):
-        self._readonly = value
+        super()._readonly_set(value)
         self._set_button_sensitive()
-        self._set_label_state()
-
-    def _required_set(self, value):
-        self._required = value
-        self._set_label_state()
-
-    def _set_label_state(self):
-        common.apply_label_attributes(
-            self.title, self._readonly, self._required)
 
     def _set_button_sensitive(self):
         if self.record and self.field:
@@ -296,11 +290,14 @@ class One2Many(Widget):
         if isinstance(self._position, int):
             first = self._position <= 1
             last = self._position >= self._length
+        has_selection = bool(self.screen.selected_records)
+        searchable = all(r.id >= 0 for r in self.screen.listed_records)
         deletable = (
             self.screen.deletable
             and any(
                 not r.deleted and not r.removed
-                for r in self.screen.selected_records))
+                for r in self.screen.group)
+            and (has_selection or searchable))
         undeletable = any(
             r.deleted or r.removed for r in self.screen.selected_records)
         view_type = self.screen.current_view.view_type
@@ -316,8 +313,7 @@ class One2Many(Widget):
         self.but_del.set_sensitive(bool(
                 not self._readonly
                 and self.delete_access
-                and deletable
-                and self._position is not None))
+                and deletable))
         self.but_undel.set_sensitive(bool(
                 not self._readonly
                 and not size_limit
@@ -334,6 +330,10 @@ class One2Many(Widget):
                 self._length
                 and not first))
         if self.attrs.get('add_remove'):
+            removable = (any(
+                    not r.deleted and not r.removed
+                    for r in self.screen.group)
+                and (has_selection or searchable))
             self.but_add.set_sensitive(bool(
                     not self._readonly
                     and not size_limit
@@ -341,9 +341,9 @@ class One2Many(Widget):
                     and self.read_access))
             self.but_remove.set_sensitive(bool(
                     not self._readonly
-                    and self._position is not None
                     and self.write_access
-                    and self.read_access))
+                    and self.read_access
+                    and removable))
             self.wid_text.set_sensitive(self.but_add.get_sensitive())
             self.wid_text.set_editable(self.but_add.get_sensitive())
 
@@ -402,7 +402,8 @@ class One2Many(Widget):
             field_size -= len(self.field.get_eval(self.record)) + 1
             WinForm(
                 self.screen, lambda a: update_sequence(), new=True,
-                defaults=defaults, many=field_size)
+                defaults=defaults, many=field_size,
+                prev_view=self.screen.current_view)
 
     def _new_product(self, defaults=None):
         fields = self.attrs['product'].split(',')
@@ -467,16 +468,28 @@ class One2Many(Widget):
             return
         if not self._validate():
             return
-        record = self.screen.current_record
-        if record:
+        records = list(self.screen.selected_records)
+        size = len(records)
+        if records:
             if self._popup:
                 return
-            else:
-                self._popup = True
 
             def callback(result):
                 self._popup = False
-            WinForm(self.screen, callback)
+                if not result:
+                    records.clear()
+
+            def edit_next_record():
+                if records:
+                    self.screen.current_record = records.pop(0)
+                    self._popup = True
+                    WinForm(
+                        self.screen, callback,
+                        title=('(%s/%s)' % (size - len(records), size)
+                            if size > 1 else ''),
+                        prev_view=self.screen.current_view,
+                        on_destroy=edit_next_record)
+            edit_next_record()
 
     def _sig_next(self, widget):
         if not self._validate():
@@ -497,7 +510,37 @@ class One2Many(Widget):
         else:
             if not self.delete_access or not deletable:
                 return
-        self.screen.remove(remove=remove)
+        if (not (0 < len(self.screen.selected_records) < 20)
+                and all(r.id >= 0 for r in self.screen.listed_records)):
+            domain = [('id', 'in', self.field.get_eval(self.record))]
+            context = self.field.get_search_context(self.record)
+            order = self.field.attrs.get('order')
+
+            def callback(result):
+                if result:
+                    records = []
+                    for id, _ in result:
+                        records.append(self.screen.group.get(id))
+                    self.screen.remove(remove=True, records=records)
+            if remove:
+                button = WinSearchButton.REMOVE
+                title = _("%s to remove") % self.attrs.get('string')
+            else:
+                button = WinSearchButton.DELETE
+                title = _("%s to delete") % self.attrs.get('string')
+            win = WinSearch(
+                self.attrs['relation'], callback, sel_multi=True,
+                context=context, domain=domain, order=order,
+                view_ids=self.attrs.get('view_ids', '').split(','),
+                views_preload=self.attrs.get('views', {}),
+                title=title, new=False, button=button)
+            win.screen.search_filter()
+            if self.screen.selected_records:
+                nodes = [[r.id] for r in self.screen.selected_records]
+                win.screen.current_view.select_nodes(nodes)
+            win.show()
+        else:
+            self.screen.remove(remove=remove)
 
     def _sig_undelete(self, button):
         self.screen.unremove()
@@ -538,8 +581,9 @@ class One2Many(Widget):
             view_ids=self.attrs.get('view_ids', '').split(','),
             views_preload=self.attrs.get('views', {}),
             new=self.but_new.get_property('sensitive'),
-            title=self.attrs.get('string'),
-            exclude_field=self.attrs.get('relation_field'))
+            title=_("%s to add") % self.attrs.get('string'),
+            exclude_field=self.attrs.get('relation_field'),
+            button=WinSearchButton.ADD)
         win.screen.search_filter(quote(text))
         win.show()
 
@@ -551,7 +595,7 @@ class One2Many(Widget):
         if selected > 1:
             name += '#%i' % selected
         name = '(%s/%s)' % (name, common.humanize(size))
-        self.label.set_text(name)
+        self.badge.set_text(name)
         self._set_button_sensitive()
 
     def display(self):
@@ -590,8 +634,6 @@ class One2Many(Widget):
 
     def set_value(self):
         self.screen.current_view.set_value()
-        if self.screen.modified():  # TODO check if required
-            self.view.screen.record_modified(display=False)
         return True
 
     def _completion_match_selected(self, completion, model, iter_):

@@ -112,6 +112,14 @@ class Invoice(metaclass=PoolMeta):
                     ])
             if len(companies) == 1:
                 self.consolidation_company, = companies
+            elif not companies:
+                self.consolidation_company = None
+        else:
+            self.consolidation_company = None
+        if self.consolidation_company:
+            if (self.consolidation_company.party != self.party
+                    or self.consolidation_company == self.company):
+                self.consolidation_company = None
 
     @classmethod
     def set_number(cls, invoices):
@@ -126,7 +134,8 @@ class Invoice(metaclass=PoolMeta):
             for party, companies in groupby(companies, attrgetter('party'))}
         for invoice in invoices:
             if not invoice.consolidation_company:
-                companies = party2company.get(invoice.party, [])
+                companies = set(party2company.get(invoice.party, []))
+                companies.discard(invoice.company)
                 if len(companies) == 1:
                     invoice.consolidation_company, = companies
                 elif companies:

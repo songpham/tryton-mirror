@@ -46,7 +46,7 @@ class Location(metaclass=PoolMeta):
 class Move(metaclass=PoolMeta):
     __name__ = 'stock.move'
     production_input = fields.Many2One(
-        'production', "Production Input", readonly=True, ondelete='CASCADE',
+        'production', "Production Input", ondelete='CASCADE',
         domain=[
             ('company', '=', Eval('company', -1)),
             If(Eval('production_output', None),
@@ -55,9 +55,10 @@ class Move(metaclass=PoolMeta):
             ],
         states={
             'invisible': ~Eval('production_input'),
+            'readonly': Eval('id', -1) >= 0,
             })
     production_output = fields.Many2One(
-        'production', "Production Output", readonly=True, ondelete='CASCADE',
+        'production', "Production Output", ondelete='CASCADE',
         domain=[
             ('company', '=', Eval('company', -1)),
             If(Eval('production_input', None),
@@ -66,15 +67,17 @@ class Move(metaclass=PoolMeta):
             ],
         states={
             'invisible': ~Eval('production_output'),
+            'readonly': Eval('id', -1) >= 0,
             })
     production = fields.Function(fields.Many2One(
             'production', "Production",
             states={
                 'invisible': ~Eval('production'),
-                }),
+                },
+            depends=['production_input', 'production_output']),
         'on_change_with_production', searcher='search_production')
     production_cost_price_updated = fields.Boolean(
-        "Cost Price Updated", readonly=True,
+        "Production Cost Price Updated", readonly=True,
         states={
             'invisible': ~Eval('production_input') & (Eval('state') == 'done'),
             })
@@ -92,10 +95,29 @@ class Move(metaclass=PoolMeta):
         cls._allow_modify_closed_period.add('production_cost_price_updated')
 
     @fields.depends(
-        'production_output', '_parent_production_output.company',
-        'to_location')
+        'production_input',
+        '_parent_production_input.warehouse',
+        '_parent_production_input.location',
+        'from_location', 'to_location')
+    def on_change_production_input(self):
+        if self.production_input:
+            if not self.from_location:
+                self.from_location = self.production_input.picking_location
+            if not self.to_location:
+                self.to_location = self.production_input.location
+
+    @fields.depends(
+        'production_output',
+        '_parent_production_output.company',
+        '_parent_production_output.warehouse',
+        '_parent_production_output.location',
+        'from_location', 'to_location')
     def on_change_production_output(self):
         if self.production_output:
+            if not self.from_location:
+                self.from_location = self.production_output.location
+            if not self.to_location:
+                self.to_location = self.production_output.output_location
             if self.production_output.company:
                 self.currency = self.production_output.company.currency
             if self.to_location and self.to_location.type == 'lost_found':
@@ -117,9 +139,9 @@ class Move(metaclass=PoolMeta):
         'production_input', '_parent_production_input.id',
         'production_output', '_parent_production_output.id')
     def on_change_with_production(self, name=None):
-        if self.production_input:
+        if self.production_input and self.production_input.id >= 0:
             return self.production_input
-        elif self.production_output:
+        elif self.production_output and self.production_output.id >= 0:
             return self.production_output
 
     @classmethod
@@ -134,6 +156,10 @@ class Move(metaclass=PoolMeta):
             ('production_input' + nested, operator, operand, *extra),
             ('production_output' + nested, operator, operand, *extra),
             ]
+
+    @classmethod
+    def default_production_cost_price_updated(cls):
+        return False
 
     def set_effective_date(self):
         if not self.effective_date and self.production_input:
@@ -152,6 +178,14 @@ class Move(metaclass=PoolMeta):
 
     def _rec_name_origin(self):
         return super()._rec_name_origin() or self.production
+
+    @classmethod
+    def copy(cls, moves, default=None):
+        default = default.copy() if default is not None else {}
+        default.setdefault(
+            'production_cost_price_updated',
+            cls.default_production_cost_price_updated())
+        return super().copy(moves, default=default)
 
 
 class ProductQuantitiesByWarehouseMove(metaclass=PoolMeta):

@@ -6,6 +6,10 @@ msgctxt "field:ir.email.template,contact_mechanism:"
 msgid "Contact Mechanism"
 msgstr "Mitjà de contacte"
 
+msgctxt "field:party.address,attn:"
+msgid "Attn"
+msgstr "A l'atenció de"
+
 msgctxt "field:party.address,building_name:"
 msgid "Building Name"
 msgstr "Nom de l'edifici"
@@ -158,13 +162,9 @@ msgctxt "field:party.category,parent:"
 msgid "Parent"
 msgstr "Pare"
 
-msgctxt "field:party.check_vies.result,parties_failed:"
-msgid "Parties Failed"
-msgstr "Tercer erroni"
-
-msgctxt "field:party.check_vies.result,parties_succeed:"
-msgid "Parties Succeed"
-msgstr "Tercers correctes"
+msgctxt "field:party.configuration,identifier_eu_vat_validation_period:"
+msgid "European VAT Number Validation Period"
+msgstr "Període validació Identificador fiscal Europeu"
 
 msgctxt "field:party.configuration,identifier_types:"
 msgid "Identifier Types"
@@ -265,6 +265,18 @@ msgstr "Adreça"
 msgctxt "field:party.identifier,code:"
 msgid "Code"
 msgstr "Codi"
+
+msgctxt "field:party.identifier,code_compact:"
+msgid "Code Compact"
+msgstr "Codi compacte"
+
+msgctxt "field:party.identifier,eu_vat_valid:"
+msgid "European VAT Number Valid"
+msgstr "Identificador fiscal Europeu vàlid"
+
+msgctxt "field:party.identifier,eu_vat_validated_at:"
+msgid "European VAT Number Validated At"
+msgstr "Identificador fiscal Europeu validat el"
 
 msgctxt "field:party.identifier,party:"
 msgid "Party"
@@ -482,6 +494,10 @@ msgctxt "help:party.category,parent:"
 msgid "Add the category below the parent."
 msgstr "Afegeix la categoria davall del pare."
 
+msgctxt "help:party.configuration,identifier_eu_vat_validation_period:"
+msgid "The period during which the number is still considered valid."
+msgstr "El període durant el que el número es considera vàlid."
+
 msgctxt "help:party.configuration,identifier_types:"
 msgid ""
 "Defines which identifier types are available.\n"
@@ -521,6 +537,10 @@ msgstr "El tercer que serà eliminat."
 msgctxt "help:party.identifier,address:"
 msgid "The address identified by this record."
 msgstr "L'adreça identificada per aquest registre."
+
+msgctxt "help:party.identifier,eu_vat_valid:"
+msgid "Checked if the number has been validated on VIES service."
+msgstr "Marcat si el número ha estat validat al servei VIES."
 
 msgctxt "help:party.identifier,party:"
 msgid "The party identified by this record."
@@ -586,6 +606,10 @@ msgctxt "model:ir.action,name:act_contact_mechanism_form"
 msgid "Contact Mechanisms"
 msgstr "Mitjans de contacte"
 
+msgctxt "model:ir.action,name:act_identifier_form"
+msgid "Identifiers"
+msgstr "Identificadors"
+
 msgctxt "model:ir.action,name:act_party_by_category"
 msgid "Parties by Category"
 msgstr "Tercers per categoria"
@@ -601,10 +625,6 @@ msgstr "Tercers"
 msgctxt "model:ir.action,name:report_label"
 msgid "Labels"
 msgstr "Etiqueta"
-
-msgctxt "model:ir.action,name:wizard_check_vies"
-msgid "Check VIES"
-msgstr "Comprova VIES"
 
 msgctxt "model:ir.action,name:wizard_erase"
 msgid "Erase"
@@ -678,6 +698,11 @@ msgid "Invalid format \"%(format)s\" with exception \"%(exception)s\"."
 msgstr "El format \"%(format)s\" es invàlid amb la excepció \"%(exception)s\"."
 
 #, python-format
+msgctxt "model:ir.message,text:msg_invalid_format_strip"
+msgid "Invalid format \"%(format)s\". Empty address generates \"%(value)s\"."
+msgstr "El format \"%(format)s\" es invàlid. Una adreça buida genera \"%(value)s\"."
+
+#, python-format
 msgctxt "model:ir.message,text:msg_invalid_phone_number"
 msgid "The phone number \"%(phone)s\" for party \"%(party)s\" is not valid."
 msgstr "El número de telèfon \"%(phone)s\" del tercer \"%(party)s\" no és vàlid."
@@ -697,6 +722,12 @@ msgid "The party \"%(party)s\" has the same %(type)s \"%(code)s\"."
 msgstr "El tercer \"%(party)s\" té el mateix \"%(type)s\" \"%(code)s\"."
 
 #, python-format
+msgctxt "model:ir.message,text:msg_party_identifier_eu_vat_invalid"
+msgid "The VAT numbers \"%(identifiers)s\" are not valid for the VIES service."
+msgstr ""
+"Els identificadors fiscals \"%(identifiers)s\" no son vàlids al servei VIES."
+
+#, python-format
 msgctxt "model:ir.message,text:msg_party_set_contact_mechanism"
 msgid ""
 "To change the \"%(field)s\" for party \"%(party)s\", you must edit their "
@@ -708,6 +739,10 @@ msgstr ""
 msgctxt "model:ir.message,text:msg_vies_unavailable"
 msgid "The VIES service is unavailable, try again later."
 msgstr "El servei VIES no està disponible, intenteu-ho de nou més tard."
+
+msgctxt "model:ir.model.button,string:identifier_check_view_button"
+msgid "Check VIES"
+msgstr "Comprova VIES"
 
 msgctxt "model:ir.sequence,name:sequence_party"
 msgid "Party"
@@ -745,6 +780,10 @@ msgctxt "model:ir.ui.menu,name:menu_contact_mechanism_form"
 msgid "Contact Mechanisms"
 msgstr "Mitjans de contacte"
 
+msgctxt "model:ir.ui.menu,name:menu_identifier_form"
+msgid "Identifiers"
+msgstr "Identificadors"
+
 msgctxt "model:ir.ui.menu,name:menu_party"
 msgid "Parties"
 msgstr "Tercers"
@@ -772,10 +811,6 @@ msgstr "Tipus de subdivisió per adreça"
 msgctxt "model:party.category,string:"
 msgid "Party Category"
 msgstr "Categoria de tercer"
-
-msgctxt "model:party.check_vies.result,string:"
-msgid "Party Check Vies Result"
-msgstr "Resultat comprovaió VIES"
 
 msgctxt "model:party.configuration,string:"
 msgid "Party Configuration"
@@ -824,6 +859,10 @@ msgstr "Inici substituïr tercer"
 msgctxt "model:res.group,name:group_party_admin"
 msgid "Party Administration"
 msgstr "Administració de tercers"
+
+msgctxt "selection:ir.cron,method:"
+msgid "Check European VAT Number with VIES"
+msgstr "Comprova l'Identificador fiscal Europeu mitjançant VIES"
 
 msgctxt "selection:party.configuration,identifier_types:"
 msgid "Albanian VAT Number"
@@ -874,6 +913,10 @@ msgid "Austrian Umsatzsteuer-Identifikationsnummer"
 msgstr "Número d'identificació IVA austríac"
 
 msgctxt "selection:party.configuration,identifier_types:"
+msgid "Azerbaijan Tax Number"
+msgstr "Identificador fiscal d'Azerbaijan"
+
+msgctxt "selection:party.configuration,identifier_types:"
 msgid "Belarus VAT Number"
 msgstr "Identificador fiscal Búlgar"
 
@@ -888,6 +931,10 @@ msgstr "Número d'empresa belga"
 msgctxt "selection:party.configuration,identifier_types:"
 msgid "Belgian National Number"
 msgstr "Número nacional Belga"
+
+msgctxt "selection:party.configuration,identifier_types:"
+msgid "Belgian Social Security Number"
+msgstr "Número de la seguretat social Belga"
 
 msgctxt "selection:party.configuration,identifier_types:"
 msgid "Belgian VAT Number"
@@ -1082,6 +1129,10 @@ msgid "French Tax Identification Number"
 msgstr "Número identificador fiscal Francès"
 
 msgctxt "selection:party.configuration,identifier_types:"
+msgid "French Trade Registration Number"
+msgstr "Número de registre del contribuent frances"
+
+msgctxt "selection:party.configuration,identifier_types:"
 msgid "French VAT Number"
 msgstr "Identificador fiscal Francès"
 
@@ -1242,6 +1293,10 @@ msgid "Moroccan Tax Number"
 msgstr "Identificador fiscal Marroquí"
 
 msgctxt "selection:party.configuration,identifier_types:"
+msgid "Mozambique Tax Number"
+msgstr "Identificador fiscal de Moçambic"
+
+msgctxt "selection:party.configuration,identifier_types:"
 msgid "New Zealand Inland Revenue Department Number"
 msgstr "Número de departament d'ingresos de Nova Zelanda"
 
@@ -1306,6 +1361,10 @@ msgid "Romanian VAT Number"
 msgstr "Identificador fiscal Romanès"
 
 msgctxt "selection:party.configuration,identifier_types:"
+msgid "Russian Primary State Registration Number"
+msgstr "Número de registre estatal primari rus"
+
+msgctxt "selection:party.configuration,identifier_types:"
 msgid "Russian Tax identifier"
 msgstr "Identificador fiscal Rus"
 
@@ -1318,12 +1377,16 @@ msgid "San Marino National Tax Number"
 msgstr "Identificador fiscal nacional de San Marino"
 
 msgctxt "selection:party.configuration,identifier_types:"
+msgid "Senegal Tax Number"
+msgstr "Identificador fiscal del Senegal"
+
+msgctxt "selection:party.configuration,identifier_types:"
 msgid "Serbian Tax Identification"
 msgstr "Identificador fiscal Serbi"
 
 msgctxt "selection:party.configuration,identifier_types:"
 msgid "Singapore's Unique Entity Number"
-msgstr "Número d'entitat únic de Singapur"
+msgstr "Indentificador fiscal de Singapur"
 
 msgctxt "selection:party.configuration,identifier_types:"
 msgid "Slovak Birth Number"
@@ -1360,6 +1423,10 @@ msgstr "Número de registre d'empreses de Corea del Sud"
 msgctxt "selection:party.configuration,identifier_types:"
 msgid "South Korean Resident Registration Number"
 msgstr "Número de registre de resident de Corea del Sud"
+
+msgctxt "selection:party.configuration,identifier_types:"
+msgid "Spanish Activity Establishment Code"
+msgstr "Codi d'establiment d'activitats Espanyol"
 
 msgctxt "selection:party.configuration,identifier_types:"
 msgid "Spanish Company Tax"
@@ -1529,6 +1596,14 @@ msgctxt "view:party.address:"
 msgid "General"
 msgstr "General"
 
+msgctxt "view:party.identifier:"
+msgid "Valid:"
+msgstr "Vàlid:"
+
+msgctxt "view:party.identifier:"
+msgid "at"
+msgstr "el"
+
 msgctxt "view:party.party:"
 msgid "General"
 msgstr "General"
@@ -1540,10 +1615,6 @@ msgstr "Tercer"
 msgctxt "view:party.replace.ask:"
 msgid "Replaced By"
 msgstr "Substituït per"
-
-msgctxt "wizard_button:party.check_vies,result,end:"
-msgid "OK"
-msgstr "D'acord"
 
 msgctxt "wizard_button:party.erase,ask,end:"
 msgid "Cancel"

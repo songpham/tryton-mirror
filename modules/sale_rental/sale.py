@@ -5,6 +5,8 @@ import datetime as dt
 from decimal import Decimal
 from functools import partial
 
+from sql.conditionals import Coalesce
+
 from trytond.i18n import gettext
 from trytond.ir.attachment import AttachmentCopyMixin
 from trytond.ir.note import NoteCopyMixin
@@ -128,7 +130,8 @@ class Rental(
     company = fields.Many2One(
         'company.company', "Company", required=True,
         states={
-            'readonly': (Eval('state') != 'draft') | Eval('party', True),
+            'readonly': Eval('state') != 'draft',
+            'editable': ~Eval('party', True),
             },
         help="Make the sale rental belong to the company.")
 
@@ -147,9 +150,8 @@ class Rental(
     party = fields.Many2One(
         'party.party', "Party", required=True,
         states={
-            'readonly': (
-                (Eval('state') != 'draft')
-                | (Eval('lines', [0]) & Eval('party'))),
+            'readonly': Eval('state') != 'draft',
+            'editable': ~(Eval('lines', [0]) & Eval('party')),
             },
         context={
             'company': Eval('company', -1),
@@ -167,8 +169,8 @@ class Rental(
         depends={'company', 'party'})
     invoice_party = fields.Many2One('party.party', "Invoice Party",
         states={
-            'readonly': ((Eval('state') != 'draft')
-                | Eval('lines', [0])),
+            'readonly': Eval('state') != 'draft',
+            'editable': ~Eval('lines', [0]),
             },
         context={
             'company': Eval('company', -1),
@@ -205,8 +207,8 @@ class Rental(
     currency = fields.Many2One(
         'currency.currency', "Currency", required=True,
         states={
-            'readonly': ((Eval('state') != 'draft')
-                | (Eval('lines', [0]) & Eval('currency', 0))),
+            'readonly': Eval('state') != 'draft',
+            'editable': ~(Eval('lines', [0]) & Eval('currency', None)),
             })
 
     start = fields.Function(
@@ -277,7 +279,7 @@ class Rental(
         super().__setup__()
         t = cls.__table__()
         cls._sql_indexes.update({
-                Index(t, (t.reference, Index.Similarity())),
+                Index(t, (Coalesce(t.reference, ''), Index.Similarity())),
                 Index(t, (t.party, Index.Equality())),
                 Index(
                     t,
@@ -614,6 +616,12 @@ class Rental(
         return language
 
     @classmethod
+    def get_resources_to_copy(cls, name):
+        return {
+            'account.invoice',
+            }
+
+    @classmethod
     def copy(cls, rentals, default=None):
         default = default.copy() if default is not None else {}
         default.setdefault('number', None)
@@ -692,14 +700,12 @@ class Rental(
 
     @dualmethod
     def try_picked_up(cls, rentals):
-        to_picked_up = []
-        for rental in rentals:
-            if all(
-                    l.rental_state in {'picked up', 'done'}
-                    for l in rental.lines):
-                to_picked_up.append(rental)
-        if to_picked_up:
-            cls.picked_up(to_picked_up)
+        with cls.bulk_func('picked_up') as picked_up:
+            for rental in rentals:
+                if all(
+                        l.rental_state in {'picked up', 'done'}
+                        for l in rental.lines):
+                    picked_up.push(rental)
 
     @classmethod
     @Workflow.transition('picked up')
@@ -731,12 +737,10 @@ class Rental(
 
     @dualmethod
     def try_done(cls, rentals):
-        to_do = []
-        for rental in rentals:
-            if all(l.rental_state == 'done' for l in rental.lines):
-                to_do.append(rental)
-        if to_do:
-            cls.do(to_do)
+        with cls.bulk_func('do') as do:
+            for rental in rentals:
+                if all(l.rental_state == 'done' for l in rental.lines):
+                    do.push(rental)
 
     @classmethod
     @Workflow.transition('done')

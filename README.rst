@@ -17,6 +17,7 @@ From the root directory of the repository run:
 
 .. code-block:: console
 
+   pip install packaging build
    .hooks/update_requirements
    .hooks/link_modules
 
@@ -41,9 +42,13 @@ the ``.hg/hgrc``:
    [hooks]
    update.modules = .hooks/link_modules
    update.requirements = .hooks/update_requirements
+   update.trytond = trytond/hatch_build.py
+   update.tryton = tryton/hatch_build.py
 
-On ``hg update``, the first hook will automatically create symlinks for modules
-and the second hook will automatically generate requirements files.
+On ``hg update``, the first hook will automatically create symlinks for
+modules, the second hook will automatically generate requirements files, the
+third generate the ``RNG`` files for ``trytond`` and the last compile the
+translation files for ``tryton``.
 
 Submit Change
 =============

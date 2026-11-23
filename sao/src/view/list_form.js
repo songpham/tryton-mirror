@@ -12,6 +12,7 @@
         },
         button_clicked: function(event) {
             if (Sao.common.compare(this.screen.selected_records, [this.record])) {
+                event.stopPropagation();
                 Sao.View.ListGroupViewForm._super.button_clicked.call(this, event);
             }
         }
@@ -55,8 +56,8 @@
                     view_form.record = record;
                 }
 
-                if (~this.group.record_deleted.indexOf(record) ||
-                        ~this.group.record_removed.indexOf(record)) {
+                if (this.group.record_deleted.includes(record) ||
+                        this.group.record_removed.includes(record)) {
                     view_form_frame.addClass('disabled');
                 } else {
                     view_form_frame.removeClass('disabled');
@@ -114,6 +115,12 @@
             return this.group.slice();
         },
         set_cursor: function(new_, reset_view) {
+            if (!this.record) {
+                return;
+            }
+            if (reset_view) {
+                this.display([this.record.id]);
+            }
             if (new_) {
                 this.el.animate({
                     scrollTop: this.el[0].scrollHeight

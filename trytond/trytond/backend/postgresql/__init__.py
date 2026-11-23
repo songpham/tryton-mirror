@@ -3,10 +3,21 @@
 
 from .database import (
     Database, DatabaseDataError, DatabaseIntegrityError,
-    DatabaseOperationalError, DatabaseTimeoutError)
+    DatabaseOperationalError, DatabaseTimeoutError, dict_row, namedtuple_row,
+    scalar_row)
 from .table import TableHandler
 
+MAX_QUERY_PARAMS = 50_000  # rounded down from 65_535
+
 __all__ = [
-    Database, TableHandler,
-    DatabaseIntegrityError, DatabaseDataError, DatabaseOperationalError,
-    DatabaseTimeoutError]
+    Database,
+    DatabaseDataError,
+    DatabaseIntegrityError,
+    DatabaseOperationalError,
+    DatabaseTimeoutError,
+    dict_row,
+    namedtuple_row,
+    scalar_row,
+    MAX_QUERY_PARAMS,
+    TableHandler,
+    ]

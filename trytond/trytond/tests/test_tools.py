@@ -5,14 +5,15 @@
 import datetime as dt
 import doctest
 import email.message
-import sys
+import os
+import threading
 import unittest
 from copy import deepcopy
 from decimal import Decimal
 from io import BytesIO
-from multiprocessing import Process
+from multiprocessing import Process, set_start_method
 from multiprocessing.managers import SharedMemoryManager
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from uuid import uuid4
 
 import sql
@@ -27,10 +28,10 @@ from trytond.pool import Pool
 from trytond.tests.test_tryton import TestCase
 from trytond.tools import (
     cached_property, decimal_, email_, escape_wildcard, file_open, firstline,
-    grouped_slice, is_full_text, is_instance_method, likify, lstrip_wildcard,
-    pair, pairwise_longest, reduce_domain, reduce_ids, remove_forbidden_chars,
-    rstrip_wildcard, slugify, sortable_values, sqlite_apply_types,
-    strip_wildcard, timezone, unescape_wildcard, unpair)
+    is_full_text, is_instance_method, likify, lstrip_wildcard, pair,
+    pairwise_longest, reduce_domain, remove_forbidden_chars, rstrip_wildcard,
+    slugify, sortable_values, sqlite_apply_types, strip_wildcard, timezone,
+    unescape_wildcard, unpair)
 from trytond.tools.chart import sparkline
 from trytond.tools.domain_inversion import (
     canonicalize, concat, domain_inversion, eval_domain,
@@ -38,7 +39,7 @@ from trytond.tools.domain_inversion import (
     prepare_reference_domain, simplify, sort, unique_value)
 from trytond.tools.immutabledict import ImmutableDict
 from trytond.tools.logging import format_args
-from trytond.tools.multiprocessing import local
+from trytond.tools.multiprocessing import _local_impl, local
 from trytond.tools.string_ import LazyString, StringPartitioned
 
 try:
@@ -54,51 +55,6 @@ except ImportError:
 class ToolsTestCase(TestCase):
     'Test tools'
     table = sql.Table('test')
-
-    def test_reduce_ids_empty(self):
-        'Test reduce_ids empty list'
-        self.assertEqual(reduce_ids(self.table.id, []), sql.Literal(False))
-
-    def test_reduce_ids_continue(self):
-        'Test reduce_ids continue list'
-        self.assertEqual(reduce_ids(self.table.id, list(range(10))),
-            sql.operators.Or(((self.table.id >= 0) & (self.table.id <= 9),)))
-
-    def test_reduce_ids_one_hole(self):
-        'Test reduce_ids continue list with one hole'
-        self.assertEqual(reduce_ids(
-                self.table.id, list(range(10)) + list(range(20, 30))),
-            ((self.table.id >= 0) & (self.table.id <= 9))
-            | ((self.table.id >= 20) & (self.table.id <= 29)))
-
-    def test_reduce_ids_short_continue(self):
-        'Test reduce_ids short continue list'
-        self.assertEqual(reduce_ids(self.table.id, list(range(4))),
-            sql.operators.Or((self.table.id.in_(list(range(4))),)))
-
-    def test_reduce_ids_complex(self):
-        'Test reduce_ids complex list'
-        self.assertEqual(reduce_ids(self.table.id,
-                list(range(10)) + list(range(25, 30)) + list(range(15, 20))),
-            (((self.table.id >= 0) & (self.table.id <= 14))
-                | (self.table.id.in_(list(range(25, 30))))))
-
-    def test_reduce_ids_complex_small_continue(self):
-        'Test reduce_ids complex list with small continue'
-        self.assertEqual(reduce_ids(self.table.id,
-                [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 15, 18, 19, 21]),
-            (((self.table.id >= 1) & (self.table.id <= 12))
-                | (self.table.id.in_([15, 18, 19, 21]))))
-
-    @unittest.skipIf(sys.flags.optimize, "assert removed by optimization")
-    def test_reduce_ids_float(self):
-        'Test reduce_ids with integer as float'
-        self.assertEqual(reduce_ids(self.table.id,
-                [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
-                    15.0, 18.0, 19.0, 21.0]),
-            (((self.table.id >= 1.0) & (self.table.id <= 12.0))
-                | (self.table.id.in_([15.0, 18.0, 19.0, 21.0]))))
-        self.assertRaises(AssertionError, reduce_ids, self.table.id, [1.1])
 
     def test_reduce_domain(self):
         'Test reduce_domain'
@@ -127,23 +83,6 @@ class ToolsTestCase(TestCase):
         for i, j in tests:
             self.assertEqual(reduce_domain(i), j,
                     '%s -> %s != %s' % (i, reduce_domain(i), j))
-
-    def test_grouped_slice(self):
-        "Test grouped slice"
-        for (values, count, result) in [
-                (list(range(10)), 5, [[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]]),
-                (list(range(5)), 5, [[0, 1, 2, 3, 4]]),
-                (list(range(5)), 2, [[0, 1], [2, 3], [4]]),
-                ]:
-            with self.subTest(values=values, count=count):
-                self.assertEqual(
-                    list(map(list, grouped_slice(values, count))), result)
-
-    def test_grouped_slice_generator(self):
-        "Test grouped slice"
-        self.assertEqual(
-            list(map(list, grouped_slice((x for x in range(10)), 5))),
-            [[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]])
 
     def test_pairwise_longest(self):
         "Test pairwise_longest"
@@ -187,11 +126,13 @@ class ToolsTestCase(TestCase):
             with file_open('ir/noexist'):
                 pass
 
-        with self.assertRaisesRegex(IOError, "Permission denied:"):
+        with self.assertRaisesRegex(
+                FileNotFoundError, "No such file or directory:"):
             with file_open('/etc/passwd'):
                 pass
 
-        with self.assertRaisesRegex(IOError, "Permission denied:"):
+        with self.assertRaisesRegex(
+                FileNotFoundError, "No such file or directory:"):
             with file_open('../../foo'):
                 pass
 
@@ -658,6 +599,39 @@ class DomainInversionTestCase(TestCase):
         domain = [['x.id', '>', 5]]
         self.assertEqual(domain_inversion(domain, 'x'), [['x.id', '>', 5]])
 
+    def test_unconstrained_inversion(self):
+        domain = [['x', '=', 3], ['y', 'in', ['a', 'b']]]
+
+        self.assertEqual(domain_inversion(domain, 'x'), [['x', '=', 3]])
+        self.assertEqual(
+            domain_inversion(domain, 'x', {'y': 'a'}),
+            [['x', '=', 3]])
+        self.assertEqual(
+            domain_inversion(domain, 'x', {'y': 'c'}),
+            False)
+
+    def test_constrained_equal_inversion(self):
+        domain = [['x', '=', 3], ['y', '=', 'a']]
+
+        self.assertEqual(domain_inversion(domain, 'x'), [['x', '=', 3]])
+        self.assertEqual(
+            domain_inversion(domain, 'x', {'y': 'a'}),
+            [['x', '=', 3]])
+        self.assertEqual(
+            domain_inversion(domain, 'x', {'y': 'c'}),
+            [['x', '=', 3]])
+
+    def test_constrained_in_inversion(self):
+        domain = [['x', '=', 3], ['y', 'in', ['a']]]
+
+        self.assertEqual(domain_inversion(domain, 'x'), [['x', '=', 3]])
+        self.assertEqual(
+            domain_inversion(domain, 'x', {'y': 'a'}),
+            [['x', '=', 3]])
+        self.assertEqual(
+            domain_inversion(domain, 'x', {'y': 'c'}),
+            [['x', '=', 3]])
+
     def test_and_inversion(self):
         domain = [['x', '=', 3], ['y', '>', 5]]
         self.assertEqual(domain_inversion(domain, 'x'), [['x', '=', 3]])
@@ -945,6 +919,63 @@ class DomainInversionTestCase(TestCase):
             unique_value(domain, single_value=False), (False, None, None))
 
     def test_evaldomain(self):
+
+        domain = [['x', '=', 42]]
+        self.assertTrue(eval_domain(domain, {'x': 42}))
+        self.assertTrue(eval_domain(domain, {'x': Decimal('42')}))
+        self.assertFalse(eval_domain(domain, {'x': 0}))
+        self.assertFalse(eval_domain(domain, {'x': Decimal('0')}))
+        self.assertFalse(eval_domain(domain, {'x': None}))
+
+        domain = [['x', '=', Decimal('42')]]
+        self.assertTrue(eval_domain(domain, {'x': 42}))
+        self.assertTrue(eval_domain(domain, {'x': Decimal('42')}))
+        self.assertFalse(eval_domain(domain, {'x': 0}))
+        self.assertFalse(eval_domain(domain, {'x': Decimal('0')}))
+        self.assertFalse(eval_domain(domain, {'x': None}))
+
+        domain = [['x', '=', 0]]
+        self.assertTrue(eval_domain(domain, {'x': 0}))
+        self.assertTrue(eval_domain(domain, {'x': Decimal('0')}))
+        self.assertFalse(eval_domain(domain, {'x': None}))
+
+        domain = [['x', '=', Decimal('0')]]
+        self.assertTrue(eval_domain(domain, {'x': 0}))
+        self.assertTrue(eval_domain(domain, {'x': Decimal('0')}))
+        self.assertFalse(eval_domain(domain, {'x': None}))
+
+        domain = [['x', '=', None]]
+        self.assertFalse(eval_domain(domain, {'x': 0}))
+        self.assertFalse(eval_domain(domain, {'x': Decimal('0')}))
+        self.assertTrue(eval_domain(domain, {'x': None}))
+
+        domain = [['x', '!=', 42]]
+        self.assertFalse(eval_domain(domain, {'x': 42}))
+        self.assertFalse(eval_domain(domain, {'x': Decimal('42')}))
+        self.assertTrue(eval_domain(domain, {'x': Decimal('0')}))
+        self.assertTrue(eval_domain(domain, {'x': None}))
+
+        domain = [['x', '!=', Decimal('42')]]
+        self.assertFalse(eval_domain(domain, {'x': 42}))
+        self.assertFalse(eval_domain(domain, {'x': Decimal('42')}))
+        self.assertTrue(eval_domain(domain, {'x': Decimal('0')}))
+        self.assertTrue(eval_domain(domain, {'x': None}))
+
+        domain = [['x', '!=', 0]]
+        self.assertFalse(eval_domain(domain, {'x': 0}))
+        self.assertFalse(eval_domain(domain, {'x': Decimal('0')}))
+        self.assertTrue(eval_domain(domain, {'x': None}))
+
+        domain = [['x', '!=', Decimal('0')]]
+        self.assertFalse(eval_domain(domain, {'x': 0}))
+        self.assertFalse(eval_domain(domain, {'x': Decimal('0')}))
+        self.assertTrue(eval_domain(domain, {'x': None}))
+
+        domain = [['x', '!=', None]]
+        self.assertTrue(eval_domain(domain, {'x': 0}))
+        self.assertTrue(eval_domain(domain, {'x': Decimal('0')}))
+        self.assertFalse(eval_domain(domain, {'x': None}))
+
         domain = [['x', '>', 5]]
         self.assertTrue(eval_domain(domain, {'x': 6}))
         self.assertFalse(eval_domain(domain, {'x': 4}))
@@ -1531,30 +1562,94 @@ class EmailTestCase(TestCase):
                 self.assertEqual(email_.format_address(address, name), result)
 
 
+@unittest.skipUnless(hasattr(os, 'fork'), "missing fork")
 class ProcessLocalTestCase(TestCase):
 
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        set_start_method('fork', force=True)
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        set_start_method(None, force=True)
+
     def test_without_fork(self):
-        mydata = local()
-        mydata.number = 42
+        initialize = Mock(wraps=_local_impl.initialize)
+
+        def initialize_wrapper(self, local_obj):
+            initialize(self, local_obj)
+
+        with patch.object(
+                _local_impl, 'initialize', initialize_wrapper):
+            mydata = local()
+            mydata.number = 42
+            initialize.assert_called_once()
         self.assertEqual(mydata.number, 42)
         self.assertEqual(mydata.__dict__, {'number': 42})
 
     def test_fork(self):
-        mydata = local()
-        mydata.number = 42
+        initialize = Mock(wraps=_local_impl.initialize)
 
-        def f(l, num):
-            mydata.number = num
-            l[0] = mydata.number
+        def initialize_wrapper(self, local_obj):
+            initialize(self, local_obj)
 
-        with SharedMemoryManager() as smm:
-            sl = smm.ShareableList([None])
-            p = Process(target=f, args=(sl, 1))
-            p.start()
-            p.join()
-            self.assertEqual(list(sl), [1])
+        with patch.object(
+                _local_impl, 'initialize', initialize_wrapper):
+            mydata = local()
+            mydata.number = 42
+            initialize.assert_called_once()
 
-        self.assertEqual(mydata.number, 42)
+            def f(l, num):
+                mydata.number = num
+                l[0] = mydata.number
+                l[1] = initialize.call_count
+
+            with SharedMemoryManager() as smm:
+                sl = smm.ShareableList([None, None])
+                p = Process(target=f, args=(sl, 1))
+                p.start()
+                p.join()
+                self.assertEqual(list(sl), [1, 2])
+
+            initialize.assert_called_once()
+            self.assertEqual(mydata.number, 42)
+
+    def test_fork_with_threads(self):
+        initialize = Mock(wraps=_local_impl.initialize)
+
+        def initialize_wrapper(self, local_obj):
+            initialize(self, local_obj)
+
+        with patch.object(
+                _local_impl, 'initialize', initialize_wrapper):
+            mydata = local()
+            initialize.assert_not_called()
+
+            def worker_thread():
+                mydata.number = 0
+
+            def f(l):
+                threads = []
+                for _ in range(4):
+                    t = threading.Thread(target=worker_thread)
+                    t.start()
+                    threads.append(t)
+                for t in threads:
+                    t.join()
+
+                l[0] = mydata.number
+                l[1] = initialize.call_count
+
+            with SharedMemoryManager() as smm:
+                sl = smm.ShareableList([None, None])
+                p = Process(target=f, args=(sl,))
+                p.start()
+                p.join()
+                self.assertEqual(list(sl), [0, 1])
+
+            initialize.assert_not_called()
 
     def test_inheritance_setattr(self):
         class MyLocal(local):

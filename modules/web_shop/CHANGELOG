@@ -1,4 +1,16 @@
 
+Version 8.2.0 - 2026-10-05
+--------------------------
+* Bug fixes (see mercurial logs for details)
+* Add scheduled task to cancel abandoned draft sale
+
+Version 8.0.0 - 2026-04-20
+--------------------------
+* Bug fixes (see mercurial logs for details)
+* Add support for Python 3.14
+* Remove support for Python 3.9
+* Add an URL to sales
+
 Version 7.8.0 - 2025-12-15
 --------------------------
 * Bug fixes (see mercurial logs for details)
@@ -39,16 +51,20 @@ Version 6.6.0 - 2022-10-31
 * Bug fixes (see mercurial logs for details)
 
 Version 6.4.0 - 2022-05-02
+--------------------------
 * Bug fixes (see mercurial logs for details)
 * Add support for Python 3.10
 * Remove support for Python 3.6
 
 Version 6.2.0 - 2021-11-01
+--------------------------
 * Bug fixes (see mercurial logs for details)
 * Add web shop check box to product image
 
 Version 6.0.0 - 2021-05-03
+--------------------------
 * Bug fixes (see mercurial logs for details)
 
 Version 5.8.0 - 2020-11-02
+--------------------------
 * Initial release

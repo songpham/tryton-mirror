@@ -42,7 +42,8 @@ class Amendment(Workflow, ModelSQL, ModelView):
             ('state', 'in', ['processing', 'done']),
             ],
         states={
-            'readonly': (Eval('state') != 'draft') | Eval('lines', [0]),
+            'readonly': Eval('state') != 'draft',
+            'editable': ~Eval('lines', [0]),
             })
     date = fields.Date(
         "Date", required=True,
@@ -211,6 +212,7 @@ class AmendmentLine(ModelSQL, ModelView):
     payment_term = fields.Many2One(
         'account.invoice.payment_term', "Payment Term", ondelete='RESTRICT',
         states={
+            'readonly': Eval('state') != 'draft',
             'invisible': Eval('action') != 'payment_term',
             })
 
@@ -285,9 +287,8 @@ class AmendmentLine(ModelSQL, ModelView):
             ('default_uom_category', '=', Eval('product_uom_category', -1)),
             ],
         states={
-            'readonly': (
-                (Eval('state') != 'draft')
-                | ~Eval('product_uom_category', None)),
+            'readonly': Eval('state') != 'draft',
+            'editable': Bool(Eval('product_uom_category', None)),
             'invisible': Eval('action') != 'line',
             })
     quantity = fields.Float(
@@ -398,7 +399,9 @@ class AmendmentLine(ModelSQL, ModelView):
             self.product = self.quantity = self.unit = self.unit_price = None
             self.description = None
 
-    @fields.depends('party', 'invoice_party', 'shipment_party', 'warehouse')
+    @fields.depends(
+        'party', 'invoice_party', 'invoice_address',
+        'shipment_party', 'shipment_address', 'warehouse')
     def on_change_party(self):
         if not self.invoice_party:
             self.invoice_address = None
@@ -407,7 +410,7 @@ class AmendmentLine(ModelSQL, ModelView):
         if self.party:
             if not self.invoice_address:
                 self.invoice_address = self.party.address_get(type='invoice')
-            if not self.shipment_party:
+            if not self.shipment_address:
                 with Transaction().set_context(
                         warehouse=(
                             self.warehouse.id if self.warehouse else None)):

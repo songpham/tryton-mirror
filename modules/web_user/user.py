@@ -5,7 +5,7 @@ import logging
 import random
 import time
 import urllib.parse
-from secrets import token_hex
+from secrets import compare_digest, token_hex
 
 from sql import Literal, Null
 from sql.conditionals import Coalesce
@@ -89,10 +89,12 @@ class User(avatar_mixin(100), DeactivableMixin, ModelSQL, ModelView):
             ]
         cls._sql_indexes.update({
                 Index(
-                    table, (table.email, Index.Equality(cardinality='high'))),
+                    table, (Coalesce(table.email, ''),
+                        Index.Equality(cardinality='high'))),
                 Index(
                     table,
-                    (table.email_token, Index.Equality(cardinality='high')),
+                    (Coalesce(table.email_token, ''),
+                        Index.Equality(cardinality='high')),
                     where=table.email_token != Null),
                 })
         cls._buttons.update({
@@ -272,14 +274,12 @@ class User(avatar_mixin(100), DeactivableMixin, ModelSQL, ModelView):
     @ModelView.button
     def reset_password(cls, users, from_=None):
         now = datetime.datetime.now()
-
-        # Prevent abusive reset
-        def reset(user):
-            return not (user.reset_password_token_expire
-                and user.reset_password_token_expire > now)
-        users = list(filter(reset, users))
-
         for user in users:
+            if (user.reset_password_token
+                    and user.reset_password_token_expire
+                    and user.reset_password_token_expire > now):
+                # Prevent abusive reset
+                continue
             user.set_reset_password_token()
         cls.save(users)
         _send_email(from_, users, cls.get_email_reset_password)
@@ -331,7 +331,7 @@ class User(avatar_mixin(100), DeactivableMixin, ModelSQL, ModelView):
                 ])
         if users:
             user, = users
-            if user.reset_password_token == token:
+            if compare_digest(user.reset_password_token, token):
                 now = datetime.datetime.now()
                 expire = user.reset_password_token_expire
                 user.clear_reset_password_token()
@@ -442,8 +442,7 @@ class UserSession(ModelSQL):
     @property
     def expired(self):
         now = datetime.datetime.now()
-        timestamp = self.write_date or self.create_date
-        return abs(timestamp - now) > self.timeout()
+        return abs(self.last_modified_at - now) > self.timeout()
 
     @classmethod
     def reset(cls, session):

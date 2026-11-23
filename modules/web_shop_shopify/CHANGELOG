@@ -1,4 +1,20 @@
 
+Version 8.2.0 - 2026-10-05
+--------------------------
+* Bug fixes (see mercurial logs for details)
+* Webhooks URL path updated with /r/ prefix
+
+Version 8.0.0 - 2026-04-20
+--------------------------
+* Bug fixes (see mercurial logs for details)
+* Replace ShopifyAPI by shopifyapp
+* Add support for pick-up delivery method
+* Log the update of sales
+* Add support for gift card products
+* Add support for Python 3.14
+* Remove support for Python 3.9
+* Manage payment terms
+
 Version 7.8.0 - 2025-12-15
 --------------------------
 * Bug fixes (see mercurial logs for details)

@@ -6,8 +6,9 @@ from collections import defaultdict
 from decimal import Decimal
 from itertools import chain, groupby
 
-from sql import Literal, Null
+from sql import Null
 from sql.aggregate import Count
+from sql.conditionals import Coalesce
 from sql.functions import CharLength
 
 from trytond import backend
@@ -16,7 +17,7 @@ from trytond.ir.attachment import AttachmentCopyMixin
 from trytond.ir.note import NoteCopyMixin
 from trytond.model import (
     ChatMixin, Index, ModelSQL, ModelView, Unique, Workflow, fields,
-    sequence_ordered)
+    sequence_ordered, sort)
 from trytond.model.exceptions import AccessError
 from trytond.modules.account.tax import TaxableMixin
 from trytond.modules.account_product.exceptions import AccountError
@@ -43,13 +44,16 @@ def samesign(a, b):
 def get_shipments_returns(model_name):
     "Computes the returns or shipments"
     def method(self, name):
-        Model = Pool().get(model_name)
+        pool = Pool()
+        Model = pool.get(model_name)
+        field = getattr(self.__class__, name)
+        order = field.order if field.order is not None else Model._order
         shipments = set()
         for line in self.line_lines:
             for move in line.moves:
                 if isinstance(move.shipment, Model):
-                    shipments.add(move.shipment.id)
-        return list(shipments)
+                    shipments.add(move.shipment)
+        return sort(shipments, order)
     return method
 
 
@@ -81,9 +85,9 @@ class Purchase(
     company = fields.Many2One(
         'company.company', "Company", required=True,
         states={
-            'readonly': (
-                (Eval('state') != 'draft')
-                | Eval('lines', [0])
+            'readonly': Eval('state') != 'draft',
+            'editable': ~(
+                Eval('lines', [0])
                 | Eval('party', True)
                 | Eval('invoice_party', True)),
             })
@@ -108,8 +112,8 @@ class Purchase(
             })
     party = fields.Many2One('party.party', 'Party', required=True,
         states={
-            'readonly': ((Eval('state') != 'draft')
-                | (Eval('lines', [0]) & Eval('party'))),
+            'readonly': Eval('state') != 'draft',
+            'editable': ~(Eval('lines', [0]) & Eval('party')),
             },
         context={
             'company': Eval('company', -1),
@@ -128,8 +132,8 @@ class Purchase(
         depends={'company'})
     invoice_party = fields.Many2One('party.party', "Invoice Party",
         states={
-            'readonly': ((Eval('state') != 'draft')
-                | Eval('lines', [0])),
+            'readonly': Eval('state') != 'draft',
+            'editable': ~Eval('lines', [0]),
             },
         context={
             'company': Eval('company', -1),
@@ -153,16 +157,14 @@ class Purchase(
         domain=[('type', '=', 'warehouse')], states=_states)
     currency = fields.Many2One('currency.currency', 'Currency', required=True,
         states={
-            'readonly': ((Eval('state') != 'draft')
-                | (Eval('lines', [0]) & Eval('currency'))),
+            'readonly': Eval('state') != 'draft',
+            'editable': ~(Eval('lines', [0]) & Eval('currency')),
             })
     lines = fields.One2Many(
         'purchase.line', 'purchase', "Lines",
         states={
-            'readonly': (
-                (Eval('state') != 'draft')
-                | ~Eval('company')
-                | ~Eval('currency')),
+            'readonly': Eval('state') != 'draft',
+            'editable': Eval('company', None) & Eval('currency', None),
             })
     line_lines = fields.One2Many(
         'purchase.line', 'purchase', "Line - Lines", readonly=True,
@@ -187,9 +189,10 @@ class Purchase(
         "Total Cache", currency='currency', digits='currency')
     invoice_method = fields.Selection([
             ('manual', 'Manual'),
-            ('order', 'Based On Order'),
-            ('shipment', 'Based On Shipment'),
-            ], 'Invoice Method', required=True, states=_states)
+            ('order', "On Order"),
+            ('fulfillment', "On Fulfillment"),
+            ],
+        "Invoice Method", required=True, states=_states)
     invoice_state = fields.Selection([
             ('none', 'None'),
             ('pending', "Pending"),
@@ -198,8 +201,10 @@ class Purchase(
             ('paid', 'Paid'),
             ('exception', 'Exception'),
             ], 'Invoice State', readonly=True, required=True, sort=False)
+    to_invoice = fields.Boolean("To Invoice", readonly=True)
     invoices = fields.Function(fields.Many2Many(
-            'account.invoice', None, None, "Invoices"),
+            'account.invoice', None, None, "Invoices",
+            order=[('id', 'ASC')]),
         'get_invoices', searcher='search_invoices')
     invoices_ignored = fields.Many2Many(
         'purchase.purchase-ignored-account.invoice',
@@ -208,12 +213,14 @@ class Purchase(
             ('id', 'in', Eval('invoices', [])),
             ('state', '=', 'cancelled'),
             ],
+        order=[('id', 'ASC')],
         states={
             'invisible': ~Eval('invoices_ignored', []),
             })
     invoices_recreated = fields.Many2Many(
-            'purchase.purchase-recreated-account.invoice',
-            'purchase', 'invoice', 'Recreated Invoices', readonly=True)
+        'purchase.purchase-recreated-account.invoice',
+        'purchase', 'invoice', 'Recreated Invoices', readonly=True,
+        order=[('id', 'ASC')])
     origin = fields.Reference(
         "Origin", selection='get_origin',
         states={
@@ -234,10 +241,12 @@ class Purchase(
             ('exception', 'Exception'),
             ], 'Shipment State', readonly=True, required=True, sort=False)
     shipments = fields.Function(fields.Many2Many(
-            'stock.shipment.in', None, None, "Shipments"),
+            'stock.shipment.in', None, None, "Shipments",
+            order=[('id', 'ASC')]),
         'get_shipments', searcher='search_shipments')
     shipment_returns = fields.Function(fields.Many2Many(
-            'stock.shipment.in.return', None, None, "Shipment Returns"),
+            'stock.shipment.in.return', None, None, "Shipment Returns",
+            order=[('id', 'ASC')]),
         'get_shipment_returns', searcher='search_shipment_returns')
     moves = fields.Function(
         fields.Many2Many('stock.move', None, None, "Stock Moves"),
@@ -267,7 +276,7 @@ class Purchase(
         super().__setup__()
         t = cls.__table__()
         cls._sql_indexes.update({
-                Index(t, (t.reference, Index.Similarity())),
+                Index(t, (Coalesce(t.reference, ''), Index.Similarity())),
                 Index(t, (t.party, Index.Range())),
                 Index(
                     t,
@@ -337,9 +346,10 @@ class Purchase(
                     },
                 'manual_invoice': {
                     'invisible': (
-                        (Eval('invoice_method') != 'manual')
+                        ~Eval('to_invoice', False)
+                        | (Eval('invoice_method') != 'manual')
                         | ~Eval('state').in_(['processing', 'done'])),
-                    'depends': ['invoice_method', 'state'],
+                    'depends': ['to_invoice', 'invoice_method', 'state'],
                     },
                 'handle_invoice_exception': {
                     'invisible': ((Eval('invoice_state') != 'exception')
@@ -371,6 +381,11 @@ class Purchase(
         cursor.execute(*sql_table.update(
                 [sql_table.invoice_state], ['pending'],
                 where=sql_table.invoice_state == 'waiting'))
+
+        # Migration from 7.8: rename invoice method shipment to fulfillment
+        cursor.execute(*sql_table.update(
+                [sql_table.invoice_method], ['fulfillment'],
+                where=sql_table.invoice_method == 'shipment'))
 
     @classmethod
     def order_number(cls, tables):
@@ -418,6 +433,10 @@ class Purchase(
     def default_invoice_state():
         return 'none'
 
+    @classmethod
+    def default_to_invoice(cls):
+        return False
+
     @staticmethod
     def default_shipment_state():
         return 'none'
@@ -458,7 +477,7 @@ class Purchase(
                             subquery.payment_term,
                             subquery.invoice_method,
                             ],
-                        order_by=Count(Literal(1)).desc))
+                        order_by=Count().desc))
                 row = cursor.fetchone()
                 if row:
                     self.currency, self.payment_term, self.invoice_method = row
@@ -485,11 +504,11 @@ class Purchase(
                 return self.party.lang.code
         return Config.get_language()
 
-    @fields.depends('party', 'company')
+    @fields.depends('party_lang', 'company')
     def _get_tax_context(self):
         context = {}
-        if self.party and self.party.lang:
-            context['language'] = self.party.lang.code
+        if self.party_lang:
+            context['language'] = self.party_lang
         if self.company:
             context['company'] = self.company.id
         return context
@@ -578,12 +597,16 @@ class Purchase(
         return result
 
     def get_invoices(self, name):
+        pool = Pool()
+        Invoice = pool.get('account.invoice')
+        field = getattr(self.__class__, name)
+        order = field.order if field.order is not None else Invoice._order
         invoices = set()
         for line in self.line_lines:
             for invoice_line in line.invoice_lines:
                 if invoice_line.invoice:
-                    invoices.add(invoice_line.invoice.id)
-        return list(invoices)
+                    invoices.add(invoice_line.invoice)
+        return sort(invoices, order)
 
     @classmethod
     def search_invoices(cls, name, clause):
@@ -736,7 +759,7 @@ class Purchase(
     def chat_language(self, audience='internal'):
         language = super().chat_language(audience=audience)
         if audience == 'public':
-            language = self.party.lang.code if self.party.lang else None
+            language = self.party_lang
         return language
 
     @classmethod
@@ -755,6 +778,7 @@ class Purchase(
         default.setdefault('number', None)
         default.setdefault('reference')
         default.setdefault('invoice_state', 'none')
+        default.setdefault('to_invoice', cls.default_to_invoice())
         default.setdefault('invoices_ignored', None)
         default.setdefault('shipment_state', 'none')
         default.setdefault('purchase_date', None)
@@ -1005,8 +1029,8 @@ class Purchase(
         purchases = [p for p in purchases if p.state in states]
         cls.lock(purchases)
         cls._process_invoice(purchases)
-        cls._process_shipment(purchases)
-        cls._process_invoice_shipment_states(purchases)
+        cls._process_fulfillment(purchases)
+        cls._process_invoice_fulfillment_states(purchases)
         cls._process_state(purchases)
 
     @classmethod
@@ -1029,7 +1053,7 @@ class Purchase(
             purchase.copy_resources_to(invoice)
 
     @classmethod
-    def _process_shipment(cls, purchases):
+    def _process_fulfillment(cls, purchases):
         pool = Pool()
         Move = pool.get('stock.move')
         ShipmentInReturn = pool.get('stock.shipment.in.return')
@@ -1050,10 +1074,11 @@ class Purchase(
             purchase.copy_resources_to(shipment)
 
     @classmethod
-    def _process_invoice_shipment_states(cls, purchases):
+    def _process_invoice_fulfillment_states(cls, purchases):
         pool = Pool()
         Line = pool.get('purchase.line')
         lines = []
+        purchases_to_invoice = defaultdict(list)
         invoice_states, shipment_states = defaultdict(list), defaultdict(list)
         for purchase in purchases:
             invoice_state = purchase.get_invoice_state()
@@ -1063,10 +1088,16 @@ class Purchase(
             if purchase.shipment_state != shipment_state:
                 shipment_states[shipment_state].append(purchase)
 
+            to_invoice = False
             for line in purchase.line_lines:
-                line.set_actual_quantity()
+                line.set_quantities()
+                to_invoice |= bool(line.quantity_to_invoice)
                 lines.append(line)
+            if purchase.to_invoice != to_invoice:
+                purchases_to_invoice[to_invoice].append(purchase)
 
+        for to_invoice, purchases in purchases_to_invoice.items():
+            cls.write(purchases, {'to_invoice': to_invoice})
         for invoice_state, purchases in invoice_states.items():
             cls.write(purchases, {'invoice_state': invoice_state})
             cls.log(purchases, 'transition', f'invoice_state:{invoice_state}')
@@ -1148,8 +1179,8 @@ class Line(sequence_ordered(), ModelSQL, ModelView):
     purchase = fields.Many2One(
         'purchase.purchase', "Purchase", ondelete='CASCADE', required=True,
         states={
-            'readonly': ((Eval('purchase_state') != 'draft')
-                & Bool(Eval('purchase'))),
+            'readonly': Eval('purchase_state') != 'draft',
+            'editable': ~Eval('purchase'),
             })
     type = fields.Selection([
         ('line', 'Line'),
@@ -1181,6 +1212,11 @@ class Line(sequence_ordered(), ModelSQL, ModelView):
             ],
         states={
             'invisible': ((Eval('type') != 'line') | ~Eval('actual_quantity')),
+            })
+    quantity_to_invoice = fields.Float(
+        "Quantity to Invoice", digits='unit', readonly=True,
+        states={
+            'invisible': ~Eval('quantity_to_invoice'),
             })
     unit = fields.Many2One('product.uom', 'Unit',
         ondelete='RESTRICT',
@@ -1369,9 +1405,9 @@ class Line(sequence_ordered(), ModelSQL, ModelView):
     delivery_date = fields.Function(fields.Date('Delivery Date',
             states={
                 'invisible': Eval('type') != 'line',
-                'readonly': (Eval('purchase_state').in_(
-                        ['processing', 'done', 'cancelled'])
-                    | ~Eval('delivery_date_edit', False)),
+                'readonly': Eval('purchase_state').in_(
+                        ['processing', 'done', 'cancelled']),
+                'editable': Eval('delivery_date_edit', False),
                 }),
         'on_change_with_delivery_date', setter='set_delivery_date')
     delivery_date_edit = fields.Boolean(
@@ -1391,7 +1427,7 @@ class Line(sequence_ordered(), ModelSQL, ModelView):
             },
         help="Check to edit the delivery date.")
     delivery_date_store = fields.Date(
-        "Delivery Date", readonly=True,
+        "Delivery Date",
         domain=[
             If(Eval('type') != 'line',
                 ('delivery_date_store', '=', None),
@@ -1399,6 +1435,7 @@ class Line(sequence_ordered(), ModelSQL, ModelView):
             ],
         states={
             'invisible': Eval('type') != 'line',
+            'editable': False
             })
     purchase_state = fields.Function(
         fields.Selection('get_purchase_states', 'Purchase State'),
@@ -1459,7 +1496,7 @@ class Line(sequence_ordered(), ModelSQL, ModelView):
             return
         skips = set(self.purchase.invoices_ignored)
         quantity = self.quantity
-        if self.purchase.invoice_method == 'shipment':
+        if self.purchase.invoice_method == 'fulfillment':
             moves_ignored = set(self.moves_ignored)
             for move in self.moves:
                 if move in moves_ignored:
@@ -1910,7 +1947,7 @@ class Line(sequence_ordered(), ModelSQL, ModelView):
                 or not self.product
                 or self.product.type == 'service'):
             return self.quantity
-        elif self.purchase.invoice_method == 'shipment':
+        elif self.purchase.invoice_method == 'fulfillment':
             quantity = 0.0
             for move in self.moves:
                 if move.state != 'done':
@@ -1951,7 +1988,7 @@ class Line(sequence_ordered(), ModelSQL, ModelView):
         moves = []
         if self.purchase.invoice_method in {'order', 'manual'}:
             moves.extend(self.moves)
-        elif (self.purchase.invoice_method == 'shipment'
+        elif (self.purchase.invoice_method == 'fulfillment'
                 and samesign(self.quantity, quantity)):
             for move in self.moves:
                 if move.state == 'done':
@@ -2063,7 +2100,7 @@ class Line(sequence_ordered(), ModelSQL, ModelView):
                 lambda l: samesign(self.quantity, l.quantity), lines)
         return list(lines)
 
-    def set_actual_quantity(self):
+    def set_quantities(self):
         pool = Pool()
         Uom = pool.get('product.uom')
         if self.type != 'line':
@@ -2091,16 +2128,33 @@ class Line(sequence_ordered(), ModelSQL, ModelView):
         if self.actual_quantity != actual_quantity:
             self.actual_quantity = actual_quantity
 
+        quantity_to_invoice = (
+            self._get_invoice_line_quantity()
+            - self._get_invoiced_quantity())
+        if self.unit:
+            quantity_to_invoice = self.unit.round(quantity_to_invoice)
+        if self.quantity_to_invoice != quantity_to_invoice:
+            self.quantity_to_invoice = quantity_to_invoice
+
     def get_rec_name(self, name):
         pool = Pool()
         Lang = pool.get('ir.lang')
-        if self.product:
+        name = self.product.rec_name if self.product else self.summary
+        if self.type == 'line':
             lang = Lang.get()
-            return (lang.format_number_symbol(
+            if self.unit:
+                quantity = lang.format_number_symbol(
                     self.quantity or 0, self.unit, digits=self.unit.digits)
-                + ' %s @ %s' % (self.product.rec_name, self.purchase.rec_name))
-        else:
-            return self.purchase.rec_name
+            else:
+                quantity = lang.format_number(self.quantity or 0)
+            if name:
+                name = f'{quantity} {name}'
+            else:
+                name = quantity
+        elif not name:
+            name = f'({self.id})'
+
+        return f'{name} @ {self.purchase.rec_name}'
 
     @classmethod
     def search_rec_name(cls, name, clause):
@@ -2112,6 +2166,7 @@ class Line(sequence_ordered(), ModelSQL, ModelView):
         return [bool_op,
             ('purchase.rec_name', *clause[1:]),
             ('product.rec_name', *clause[1:]),
+            ('summary', *clause[1:]),
             ]
 
     @classmethod
@@ -2153,6 +2208,7 @@ class Line(sequence_ordered(), ModelSQL, ModelView):
         default.setdefault('moves_recreated', None)
         default.setdefault('invoice_lines', None)
         default.setdefault('actual_quantity')
+        default.setdefault('quantity_to_invoice')
         return super().copy(lines, default=default)
 
 

@@ -6,12 +6,20 @@ Imports::
 
     >>> import datetime as dt
     >>> from decimal import Decimal
+    >>> from unittest.mock import patch
 
     >>> from proteus import Model, Wizard
     >>> from trytond.modules.company.tests.tools import create_company, get_company
+    >>> from trytond.modules.stock.move import Move as StockMove
     >>> from trytond.tests.tools import activate_modules, assertEqual, assertFalse
 
     >>> today = dt.date.today()
+
+Patch on_change_with_assignation_required::
+
+    >>> _ = patch.object(
+    ...     StockMove, 'on_change_with_assignation_required',
+    ...     return_value=False).start()
 
 Activate modules::
 
@@ -20,6 +28,8 @@ Activate modules::
 Get company::
 
     >>> company = get_company()
+
+    >>> Move = Model.get('stock.move')
 
 Create product::
 
@@ -121,8 +131,10 @@ Update unit price of a move::
     ...         ])
     >>> bool(move.unit_price_updated)
     False
-    >>> move.unit_price = Decimal('130')
-    >>> move.save()
+    >>> Move.write(
+    ...     [move], {'unit_price': Decimal('130')},
+    ...     {**config._context, '_check_access': False})
+    >>> move.reload()
     >>> bool(move.unit_price_updated)
     True
 
@@ -143,8 +155,10 @@ Update unit price of a move::
 
 Launch cron task::
 
-    >>> move.unit_price = Decimal('120')
-    >>> move.save()
+    >>> Move.write(
+    ...     [move], {'unit_price': Decimal('120')},
+    ...     {**config._context, '_check_access': False})
+    >>> move.reload()
 
     >>> Cron = Model.get('ir.cron')
     >>> Company = Model.get('company.company')

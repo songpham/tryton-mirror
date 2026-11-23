@@ -11,7 +11,6 @@ from trytond.model.exceptions import AccessError
 from trytond.modules.stock.exceptions import PeriodCloseError
 from trytond.pool import Pool, PoolMeta
 from trytond.pyson import Eval
-from trytond.tools import grouped_slice
 from trytond.transaction import Transaction
 
 from .exceptions import LotExpiredError, LotExpiredWarning
@@ -122,23 +121,21 @@ class Lot(LotSledMixin, metaclass=PoolMeta):
         if not periods:
             return
         period, = periods
-        for lots in grouped_slice(lots):
-            lot_ids = [l.id for l in lots]
-            moves = Move.search([
-                    ('lot', 'in', lot_ids),
-                    ['OR', [
-                            ('effective_date', '=', None),
-                            ('planned_date', '<=', period.date),
-                            ],
-                        ('effective_date', '<=', period.date),
-                        ]], limit=1)
-            if moves:
-                move, = moves
-                raise AccessError(
-                    gettext('stock_lot_sled'
-                        '.msg_lot_modify_expiration_date_period_close',
-                        lot=move.lot.rec_name,
-                        move=move.rec_name))
+        moves = Move.search([
+                ('lot', 'in', lots),
+                ['OR', [
+                        ('effective_date', '=', None),
+                        ('planned_date', '<=', period.date),
+                        ],
+                    ('effective_date', '<=', period.date),
+                    ]], limit=1)
+        if moves:
+            move, = moves
+            raise AccessError(
+                gettext('stock_lot_sled'
+                    '.msg_lot_modify_expiration_date_period_close',
+                    lot=move.lot.rec_name,
+                    move=move.rec_name))
 
 
 class MoveAddLotsStartLot(LotSledMixin, metaclass=PoolMeta):
@@ -323,7 +320,8 @@ class Move(metaclass=PoolMeta):
                 if add_join(sub_query.from_, lot):
                     clause = (
                         (lot.shelf_life_expiration_date == Null)
-                        | (lot.shelf_life_expiration_date >= expiration_date))
+                        | (lot.shelf_life_expiration_date >= expiration_date)
+                        | (lot.shelf_life_expiration_date < today))
                     if sub_query.where:
                         sub_query.where &= clause
                     else:
@@ -341,10 +339,11 @@ class Move(metaclass=PoolMeta):
                     for sub_query in find_queries(union_expired):
                         lot = Lot.__table__()
                         if add_join(sub_query.from_, lot):
-                            # only lot expiring during the period
+                            # only lot expiring during the future part of the
+                            # period
                             clause = (
                                 (lot.shelf_life_expiration_date
-                                    >= stock_date_start)
+                                    >= max(stock_date_start, today))
                                 & (lot.shelf_life_expiration_date
                                     < stock_date_end))
                             if sub_query.where:

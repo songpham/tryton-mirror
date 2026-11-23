@@ -17,7 +17,6 @@ from trytond.model import fields
 from trytond.model.exceptions import AccessError
 from trytond.modules.stock_package_shipping.exceptions import (
     PackingValidationError)
-from trytond.modules.stock_package_shipping.stock import address_name
 from trytond.pool import Pool, PoolMeta
 from trytond.transaction import Transaction
 from trytond.wizard import StateAction, StateTransition, Wizard
@@ -235,8 +234,8 @@ class CreateShippingUPS(Wizard):
             }
 
     def get_shipping_party(self, party, address, usage=None):
-        name = address_name(address, party)
-        attention_name = party.full_name
+        name = address.party_full_name
+        attention_name = address.attn or name
         shipping_party = {
             'Name': name[:35],
             'AttentionName': attention_name[:35],
@@ -422,13 +421,29 @@ class CreateShippingUPS_Customs_Incoterm(metaclass=PoolMeta):
         if (shipment.customs_international
                 and shipment.incoterm
                 and shipment.incoterm.import_duties == 'seller'):
-            payment_information['ShipmentCharge'].append({
-                    # Type 02 is for Duties and Taxes
-                    'Type': '02',
-                    'BillShipper': {
-                        'AccountNumber': credential.account_number,
+            charge = {
+                # Type 02 is for Duties and Taxes
+                'Type': '02',
+                }
+            if ((customs_agent := shipment.customs_agent)
+                    and (customs_agent.ups_account_number
+                        != credential.account_number)):
+                address = customs_agent.address
+                charge['BillThirdParty'] = {
+                    'AccountNumber': customs_agent.ups_account_number,
+                    'Address': {
+                        'CountryCode': (
+                            address.country.code if address.country else ''),
                         },
-                    })
+                    }
+                if address.postal_code:
+                    charge['BillThirdParty']['Address']['PostalCode'] = (
+                        (address.postal_code or '').replace(' ', '')[:9])
+            else:
+                charge['BillShipper'] = {
+                    'AccountNumber': credential.account_number,
+                    }
+            payment_information['ShipmentCharge'].append(charge)
         return payment_information
 
     def get_international_form(self, shipment, credential):

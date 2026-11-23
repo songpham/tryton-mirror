@@ -7,7 +7,6 @@ from collections import defaultdict
 from trytond.model import ModelSQL, ValueMixin, fields
 from trytond.pool import Pool, PoolMeta
 from trytond.pyson import TimeDelta
-from trytond.tools import grouped_slice
 from trytond.transaction import Transaction
 
 supply_period = fields.TimeDelta(
@@ -65,12 +64,12 @@ class PurchaseRequest(metaclass=PoolMeta):
 
         if products is None:
             # fetch goods and assets
-            # ordered by ids to speedup reduce_ids in products_by_location
             products = Product.search([
                     ('type', 'in', ['goods', 'assets']),
                     ('consumable', '=', False),
                     ('purchasable', '=', True),
-                    ], order=[('id', 'ASC')])
+                    ],
+                order=[])
         # aggregate product by minimum supply date
         date2products = defaultdict(list)
         for product in products:
@@ -80,60 +79,59 @@ class PurchaseRequest(metaclass=PoolMeta):
 
         # compute requests
         new_requests = []
-        for (min_date, max_date), dates_products in date2products.items():
-            for sub_products in grouped_slice(dates_products):
-                sub_products = Product.browse(sub_products)
+        for (min_date, max_date), sub_products in date2products.items():
+            sub_products = Product.browse(sub_products)
 
-                product2ops = {}
-                product2ops_other = {}
+            product2ops = {}
+            product2ops_other = {}
+            for product in sub_products:
+                for order_point in product.order_points:
+                    if (order_point.company != company
+                            or not order_point.warehouse_location):
+                        continue
+                    if order_point.type == 'purchase':
+                        dict_ = product2ops
+                    else:
+                        dict_ = product2ops_other
+                    dict_[
+                        (order_point.warehouse_location.id,
+                            order_point.product.id)
+                        ] = order_point
+
+            product_ids = [p.id for p in sub_products]
+            with Transaction().set_context(
+                    forecast=True,
+                    stock_date_end=min_date):
+                pbl = Product.products_by_location(warehouse_ids,
+                    with_childs=True, grouping_filter=(product_ids,))
+            for warehouse_id in warehouse_ids:
+                min_date_qties = defaultdict(int,
+                    ((x, pbl.pop((warehouse_id, x), 0))
+                        for x in product_ids))
+                # Do not compute shortage for product
+                # with different order point
+                product_ids = [
+                    p.id for p in sub_products
+                    if (warehouse_id, p.id) not in product2ops_other]
+                # Search for shortage between min-max
+                shortages = cls.get_shortage(
+                    warehouse_id, product_ids, min_date, max_date,
+                    min_date_qties=min_date_qties,
+                    order_points=product2ops)
+
                 for product in sub_products:
-                    for order_point in product.order_points:
-                        if (order_point.company != company
-                                or not order_point.warehouse_location):
-                            continue
-                        if order_point.type == 'purchase':
-                            dict_ = product2ops
-                        else:
-                            dict_ = product2ops_other
-                        dict_[
-                            (order_point.warehouse_location.id,
-                                order_point.product.id)
-                            ] = order_point
-
-                product_ids = [p.id for p in sub_products]
-                with Transaction().set_context(
-                        forecast=True,
-                        stock_date_end=min_date):
-                    pbl = Product.products_by_location(warehouse_ids,
-                        with_childs=True, grouping_filter=(product_ids,))
-                for warehouse_id in warehouse_ids:
-                    min_date_qties = defaultdict(int,
-                        ((x, pbl.pop((warehouse_id, x), 0))
-                            for x in product_ids))
-                    # Do not compute shortage for product
-                    # with different order point
-                    product_ids = [
-                        p.id for p in sub_products
-                        if (warehouse_id, p.id) not in product2ops_other]
-                    # Search for shortage between min-max
-                    shortages = cls.get_shortage(
-                        warehouse_id, product_ids, min_date, max_date,
-                        min_date_qties=min_date_qties,
-                        order_points=product2ops)
-
-                    for product in sub_products:
-                        if product.id not in shortages:
-                            continue
-                        shortage_date, product_quantity = shortages[product.id]
-                        if shortage_date is None or product_quantity is None:
-                            continue
-                        order_point = product2ops.get(
-                            (warehouse_id, product.id))
-                        # generate request values
-                        request = cls.compute_request(product,
-                            warehouse_id, shortage_date, product_quantity,
-                            company, order_point)
-                        new_requests.append(request)
+                    if product.id not in shortages:
+                        continue
+                    shortage_date, product_quantity = shortages[product.id]
+                    if shortage_date is None or product_quantity is None:
+                        continue
+                    order_point = product2ops.get(
+                        (warehouse_id, product.id))
+                    # generate request values
+                    request = cls.compute_request(product,
+                        warehouse_id, shortage_date, product_quantity,
+                        company, order_point)
+                    new_requests.append(request)
 
         # delete purchase requests without a purchase line
         products = set(products)
@@ -143,22 +141,23 @@ class PurchaseRequest(metaclass=PoolMeta):
                 ('company', '=', company.id),
                 ('origin', 'like', 'stock.order_point,%'),
                 ])
-        reqs = [r for r in reqs
-            if r.product in products and r.warehouse in warehouses]
-        cls.delete(reqs)
+        with cls.bulk_delete() as delete:
+            for request in reqs:
+                if (request.product in products
+                        and request.warehouse in warehouses):
+                    delete.push(request)
         new_requests = cls.compare_requests(new_requests, company)
 
         cls.create_requests(new_requests)
 
     @classmethod
     def create_requests(cls, new_requests):
-        to_save = []
-        for new_req in new_requests:
-            if new_req.supply_date == datetime.date.max:
-                new_req.supply_date = None
-            if new_req.computed_quantity > 0:
-                to_save.append(new_req)
-        cls.save(to_save)
+        with cls.bulk_save() as save:
+            for new_req in new_requests:
+                if new_req.supply_date == datetime.date.max:
+                    new_req.supply_date = None
+                if new_req.computed_quantity > 0:
+                    save.push(new_req)
 
     @classmethod
     def compare_requests(cls, new_requests, company):

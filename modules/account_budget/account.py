@@ -17,7 +17,7 @@ from trytond.modules.currency.fields import Monetary
 from trytond.pool import Pool
 from trytond.pyson import Bool, Eval, If
 from trytond.rpc import RPC
-from trytond.tools import grouped_slice, reduce_ids, sqlite_apply_types
+from trytond.tools import sqlite_apply_types
 from trytond.transaction import Transaction
 from trytond.wizard import (
     Button, StateAction, StateTransition, StateView, Wizard)
@@ -55,12 +55,11 @@ class AmountMixin:
         balances = defaultdict(Decimal)
         for keys, grouped_records in groupby(
                 records, key=cls._get_amount_group_key):
-            for sub_records in grouped_slice(list(grouped_records)):
-                query = cls._get_amount_query(sub_records, dict(keys))
-                if backend.name == 'sqlite':
-                    sqlite_apply_types(query, [None, 'NUMERIC'])
-                cursor.execute(*query)
-                balances.update(cursor)
+            query = cls._get_amount_query(list(grouped_records), dict(keys))
+            if backend.name == 'sqlite':
+                sqlite_apply_types(query, [None, 'NUMERIC'])
+            cursor.execute(*query)
+            balances.update(cursor)
 
         total = {n: {} for n in names}
         for record in records:
@@ -94,7 +93,8 @@ class BudgetMixin(ChatMixin):
     company = fields.Many2One(
         'company.company', "Company", required=True,
         states={
-            'readonly': Eval('company') & Eval('lines', [-1]),
+            'readonly': Eval('id', -1) >= 0,
+            'editable': ~Eval('lines', [-1]),
             },
         help="The company that the budget is associated with.")
     lines = None
@@ -212,10 +212,9 @@ class BudgetLineMixin(
         if backend.name == 'sqlite':
             sqlite_apply_types(query, [None, 'NUMERIC'])
 
-        for sub_ids in grouped_slice(ids):
-            query.where = reduce_ids(table.id, sub_ids)
-            cursor.execute(*query)
-            amounts.update(cursor)
+        query.where = fields.SQL_OPERATORS['in'](table.id, ids)
+        cursor.execute(*query)
+        amounts.update(cursor)
 
         for record in records:
             amount = amounts[record.id]
@@ -307,13 +306,13 @@ class Budget(BudgetMixin, ModelSQL, ModelView):
     lines = fields.One2Many(
         'account.budget.line', 'budget', "Lines",
         states={
-            'readonly': Eval('id', -1) < 0,
+            'editable': Eval('id', -1) >= 0,
             },
         order=[('left', 'ASC'), ('id', 'ASC')])
     root_lines = fields.One2Many(
         'account.budget.line', 'budget', "Lines",
         states={
-            'readonly': Eval('id', -1) < 0,
+            'editable': Eval('id', -1) >= 0,
             },
         filter=[
             ('parent', '=', None),
@@ -549,7 +548,7 @@ class BudgetLine(BudgetLineMixin, ModelSQL, ModelView):
         line = Line.__table__()
 
         amount = Sum(Coalesce(line.credit, 0) - Coalesce(line.debit, 0))
-        red_sql = reduce_ids(table.id, [r.id for r in records])
+        red_sql = fields.SQL_OPERATORS['in'](table.id, [r.id for r in records])
         periods = Transaction().context.get('periods')
         if not periods:
             periods = [p.id for p in Period.search([
@@ -693,7 +692,7 @@ class BudgetLinePeriod(AmountMixin, ModelSQL, ModelView):
         line = MoveLine.__table__()
 
         amount = Sum(Coalesce(line.credit, 0) - Coalesce(line.debit, 0))
-        red_sql = reduce_ids(table.id, [r.id for r in records])
+        red_sql = fields.SQL_OPERATORS['in'](table.id, [r.id for r in records])
         periods = Transaction().context.get('periods')
         if not periods:
             periods = [p.id for p in Period.search([
@@ -734,17 +733,19 @@ class BudgetLinePeriod(AmountMixin, ModelSQL, ModelView):
         transaction = Transaction()
         cursor = transaction.connection.cursor()
         table = cls.__table__()
-        for sub_ids in grouped_slice({p.budget_line.id for p in periods}):
-            cursor.execute(*table.select(
-                    table.budget_line,
-                    where=reduce_ids(table.budget_line, sub_ids),
-                    group_by=table.budget_line,
-                    having=Sum(table.ratio) > 1,
-                    limit=1))
-            try:
-                line_id, = cursor.fetchone()
-            except TypeError:
-                continue
+        line_ids = {p.budget_line.id for p in periods}
+        cursor.execute(*table.select(
+                table.budget_line,
+                where=fields.SQL_OPERATORS['in'](
+                    table.budget_line, line_ids),
+                group_by=table.budget_line,
+                having=Sum(table.ratio) > 1,
+                limit=1))
+        try:
+            line_id, = cursor.fetchone()
+        except TypeError:
+            pass
+        else:
             line = Line(line_id)
             raise BudgetValidationError(
                 gettext('account_budget.msg_budget_line_period_ratio',

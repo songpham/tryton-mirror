@@ -1232,7 +1232,7 @@
             ['id', '=', -1]));
 
         QUnit.assert.strictEqual(expr.toString(),
-            'If(Not(Eval("context", {}).contains("company")), "=", "!=")');
+            'If(Not(Eval("context", {}).includes("company")), "=", "!=")');
         });
     QUnit.test('PYSON noeval', function() {
         var decoder = new Sao.PYSON.Decoder({}, true);
@@ -1933,6 +1933,12 @@
                 'name': 'integer',
                 'type': 'integer'
             },
+            'timestamp': {
+                'name': 'timestamp',
+                'string': 'Timestamp',
+                'type': 'timestamp',
+                'format': '"%H:%M:%S"',
+            },
             'selection': {
                 'string': 'Selection',
                 'name': 'selection',
@@ -2033,6 +2039,7 @@
             c(['integer', '>=', 3]),
             c(['integer', '<=', 5])
             ]]],
+        [[c(['Timestamp', null, null])], [c(['timestamp', '=', null])]],
         [[c(['Reference', null, 'foo'])],
             [c(['reference', 'ilike', '%foo%'])]],
         [[c(['Reference', null, 'Spam'])],
@@ -2073,6 +2080,33 @@
             QUnit.assert.deepEqual(parser.parse_clause(value), result,
                 'parse_clause(' + JSON.stringify(value) + ')');
         });
+
+        let clause = parser.parse_clause([c(
+            ['Timestamp', '=', Sao.common.format_date('%x', Sao.Date(2002, 12, 4))])]);
+        QUnit.assert.strictEqual(clause[0].length, 2);
+        let [ , operator, value] = clause[0][0];
+        QUnit.assert.strictEqual(operator, '>=');
+        QUnit.assert.ok(value.isSame(Sao.Date(2002, 12, 4)));
+        [ , operator, value] = clause[0][1];
+        QUnit.assert.strictEqual(operator, '<');
+        QUnit.assert.ok(value.isSame(Sao.Date(2002, 12, 5)));
+
+        clause = parser.parse_clause([c(
+            ['Timestamp', '=',
+                Sao.common.format_datetime('%x %X', Sao.DateTime(2002, 12, 4, 12, 30))])]);
+        [ , operator, value] = clause[0];
+        QUnit.assert.strictEqual(operator, '=');
+        QUnit.assert.ok(value.isSame(Sao.DateTime(2002, 12, 4, 12, 30)));
+
+        clause = parser.parse_clause([c(
+            ['Timestamp', null, [
+                        `${Sao.common.format_date('%x', Sao.Date(2002, 12, 4))}`,
+                        `${Sao.common.format_date('%x', Sao.Date(2002, 12, 5))}`,
+                        ]])]);
+        [ , operator, value] = clause[0];
+        QUnit.assert.strictEqual(operator, 'in');
+        QUnit.assert.ok(value[0].isSame(Sao.DateTime(2002, 12, 4)));
+        QUnit.assert.ok(value[1].isSame(Sao.DateTime(2002, 12, 5)));
     });
 
     QUnit.test('DomainParser.format_value', function() {
@@ -2393,6 +2427,25 @@
         });
     });
 
+    QUnit.test('DomainParser.contains_without_diacritics', function() {
+        let parser = new Sao.common.DomainParser();
+        for (let [main, sub, expected] of [
+            ["Café au lait", "cafe", true],
+            ["Café au lait", "café", true],
+            ["Café au lait", "lait", true],
+            ["Café au lait", "the", false],
+            ["Héllò Wörld", "hello", true],
+            ["Héllò Wörld", "world", true],
+            ["Héllò Wörld", "hallo", false],
+        ]) {
+            QUnit.assert.strictEqual(
+                parser.contains_without_diacritics(main, sub), expected,
+                'contains_without_diacritics('
+                + JSON.stringify(main) + ',' + JSON.stringify(sub) + ')');
+        }
+
+    });
+
     QUnit.test('DomainParser.complete_value', function () {
         var parser = new Sao.common.DomainParser();
         var field;
@@ -2422,7 +2475,7 @@
                 ],
         };
         [
-            ['m', ['male']],
+            ['f', ['female']],
             ['test', []],
             ['', ['male', 'female']],
             [null, ['male', 'female']],
@@ -2439,7 +2492,7 @@
                 ],
         };
         [
-            ['m', ['male']],
+            ['f', ['female']],
             ['test', []],
             ['', ['male', 'female', '']],
             [null, ['male', 'female', '']],
@@ -2492,6 +2545,60 @@
         domain = [['x.id', '>', 5]];
         QUnit.assert.ok(compare(domain_inversion(domain, 'x'), [['x.id', '>', 5]]),
             'domain_inversion(' + JSON.stringify(domain) + ', \'x\')');
+    });
+
+    QUnit.test('DomainInversion unconstrained_inversion', function() {
+        let domain_inversion = new Sao.common.DomainInversion();
+        domain_inversion = domain_inversion.domain_inversion.bind(
+            domain_inversion);
+        let compare = Sao.common.compare;
+
+        let domain = [['x', '=', 3], ['y', 'in', ['a', 'b']]];
+        QUnit.assert.ok(
+            compare(domain_inversion(domain, 'x'), [['x', '=', 3]]),
+            `domain_inversion(${domain}, 'x')`);
+        QUnit.assert.ok(
+            compare(domain_inversion(domain, 'x', {'y': 'a'}), [['x', '=', 3]]),
+            `domain_inversion(${domain}, 'x', {'y': 'a'})`);
+        QUnit.assert.strictEqual(
+            domain_inversion(domain, 'x', {'y': 'c'}), false,
+            `domain_inversion(${domain}, 'x', {'y': 'c'})`);
+    });
+
+    QUnit.test('DomainInversion constrained_equal_inversion', function() {
+        let domain_inversion = new Sao.common.DomainInversion();
+        domain_inversion = domain_inversion.domain_inversion.bind(
+            domain_inversion);
+        let compare = Sao.common.compare;
+
+        let domain = [['x', '=', 3], ['y', '=', 'a']];
+        QUnit.assert.ok(
+            compare(domain_inversion(domain, 'x'), [['x', '=', 3]]),
+            `domain_inversion(${domain}, 'x')`);
+        QUnit.assert.ok(
+            compare(domain_inversion(domain, 'x', {'y': 'a'}), [['x', '=', 3]]),
+            `domain_inversion(${domain}, 'x', {'y': 'a'})`);
+        QUnit.assert.ok(
+            compare(domain_inversion(domain, 'x', {'y': 'c'}), [['x', '=', 3]]),
+            `domain_inversion(${domain}, 'x', {'y': 'c'})`);
+    });
+
+    QUnit.test('DomainInversion constrained_in_inversion', function() {
+        let domain_inversion = new Sao.common.DomainInversion();
+        domain_inversion = domain_inversion.domain_inversion.bind(
+            domain_inversion);
+        let compare = Sao.common.compare;
+
+        let domain = [['x', '=', 3], ['y', 'in', ['a']]];
+        QUnit.assert.ok(
+            compare(domain_inversion(domain, 'x'), [['x', '=', 3]]),
+            `domain_inversion(${domain}, 'x')`);
+        QUnit.assert.ok(
+            compare(domain_inversion(domain, 'x', {'y': 'a'}), [['x', '=', 3]]),
+            `domain_inversion(${domain}, 'x', {'y': 'a'})`);
+        QUnit.assert.ok(
+            compare(domain_inversion(domain, 'x', {'y': 'c'}), [['x', '=', 3]]),
+            `domain_inversion(${domain}, 'x', {'y': 'c'})`);
     });
 
     QUnit.test('DomainInversion and_inversion', function() {
@@ -2935,6 +3042,44 @@
         var now = new Date();
 
         [
+        [[['x', '=', 42]], {'x': 42}, true],
+        [[['x', '=', 42]], {'x': new Number(42)}, true],
+        [[['x', '=', 42]], {'x': 0}, false],
+        [[['x', '=', 42]], {'x': new Number(0)}, false],
+        [[['x', '=', 42]], {'x': null}, false],
+        [[['x', '=', new Number(42)]], {'x': 42}, true],
+        [[['x', '=', new Number(42)]], {'x': new Number(42)}, true],
+        [[['x', '=', new Number(42)]], {'x': 0}, false],
+        [[['x', '=', new Number(42)]], {'x': new Number(0)}, false],
+        [[['x', '=', new Number(42)]], {'x': null}, false],
+        [[['x', '=', 0]], {'x': 0}, true],
+        [[['x', '=', 0]], {'x': new Number(0)}, true],
+        [[['x', '=', 0]], {'x': null}, false],
+        [[['x', '=', new Number(0)]], {'x': 0}, true],
+        [[['x', '=', new Number(0)]], {'x': new Number(0)}, true],
+        [[['x', '=', new Number(0)]], {'x': null}, false],
+        [[['x', '=', null]], {'x': 0}, false],
+        [[['x', '=', null]], {'x': new Number(0)}, false],
+        [[['x', '=', null]], {'x': null}, true],
+        [[['x', '!=', 42]], {'x': 42}, false],
+        [[['x', '!=', 42]], {'x': new Number(42)}, false],
+        [[['x', '!=', 42]], {'x': 0}, true],
+        [[['x', '!=', 42]], {'x': new Number(0)}, true],
+        [[['x', '!=', 42]], {'x': null}, true],
+        [[['x', '!=', new Number(42)]], {'x': 42}, false],
+        [[['x', '!=', new Number(42)]], {'x': new Number(42)}, false],
+        [[['x', '!=', new Number(42)]], {'x': 0}, true],
+        [[['x', '!=', new Number(42)]], {'x': new Number(0)}, true],
+        [[['x', '!=', new Number(42)]], {'x': null}, true],
+        [[['x', '!=', 0]], {'x': 0}, false],
+        [[['x', '!=', 0]], {'x': new Number(0)}, false],
+        [[['x', '!=', 0]], {'x': null}, true],
+        [[['x', '!=', new Number(0)]], {'x': 0}, false],
+        [[['x', '!=', new Number(0)]], {'x': new Number(0)}, false],
+        [[['x', '!=', new Number(0)]], {'x': null}, true],
+        [[['x', '!=', null]], {'x': 0}, true],
+        [[['x', '!=', null]], {'x': new Number(0)}, true],
+        [[['x', '!=', null]], {'x': null}, false],
         [[['x', '>', 5]], {'x': 6}, true],
         [[['x', '>', 5]], {'x': 4}, false],
         [[['x', '>', null]], {'x': today}, false],

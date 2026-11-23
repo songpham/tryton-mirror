@@ -3,7 +3,8 @@
 
 from trytond.model import fields
 from trytond.pool import Pool, PoolMeta
-from trytond.pyson import Eval
+from trytond.pyson import Bool, Eval, If
+from trytond.transaction import Transaction
 
 
 class TaxRule(metaclass=PoolMeta):
@@ -32,9 +33,29 @@ class TaxRule(metaclass=PoolMeta):
 
 class _TaxRuleLineMixin:
     __slots__ = ()
+
+    from_organization = fields.Many2One(
+        'country.organization', "From Organization", ondelete='RESTRICT',
+        domain=[
+            If(Eval('from_country'),
+                ('id', '=', -1),
+                ()),
+            ],
+        states={
+            'invisible': Bool(Eval('from_country')),
+            },
+        help="Apply only to the addresses from this organization.")
     from_country = fields.Many2One(
         'country.country', 'From Country', ondelete='RESTRICT',
-        help="Apply only to addresses of this country.")
+        domain=[
+            If(Eval('from_organization'),
+                ('id', '=', -1),
+                ()),
+            ],
+        states={
+            'invisible': Bool(Eval('from_organization')),
+            },
+        help="Apply only to the addresses from this country.")
     from_subdivision = fields.Many2One(
         'country.subdivision', "From Subdivision", ondelete='RESTRICT',
         domain=[
@@ -43,10 +64,29 @@ class _TaxRuleLineMixin:
         states={
             'invisible': ~Eval('from_country'),
             },
-        help="Apply only to addresses in this subdivision.")
+        help="Apply only to the addresses from this subdivision.")
+    to_organization = fields.Many2One(
+        'country.organization', "To Organization", ondelete='RESTRICT',
+        domain=[
+            If(Eval('to_country'),
+                ('id', '=', -1),
+                ()),
+            ],
+        states={
+            'invisible': Bool(Eval('to_country')),
+            },
+        help="Apply only to the addresses of this organization.")
     to_country = fields.Many2One(
         'country.country', 'To Country', ondelete='RESTRICT',
-        help="Apply only to addresses of this country.")
+        domain=[
+            If(Eval('to_organization'),
+                ('id', '=', -1),
+                ()),
+            ],
+        states={
+            'invisible': Bool(Eval('to_organization')),
+            },
+        help="Apply only to the addresses to this country.")
     to_subdivision = fields.Many2One(
         'country.subdivision', "To Subdivision", ondelete='RESTRICT',
         domain=[
@@ -55,7 +95,7 @@ class _TaxRuleLineMixin:
         states={
             'invisible': ~Eval('to_country'),
             },
-        help="Apply only to addresses in this subdivision.")
+        help="Apply only to the addresses to this subdivision.")
 
 
 class TaxRuleLineTemplate(_TaxRuleLineMixin, metaclass=PoolMeta):
@@ -85,6 +125,26 @@ class TaxRuleLine(_TaxRuleLineMixin, metaclass=PoolMeta):
     __name__ = 'account.tax.rule.line'
 
     def match(self, pattern):
+        pool = Pool()
+        Date = pool.get('ir.date')
+        Country = pool.get('country.country')
+
+        with Transaction().set_context(company=self.rule.company.id):
+            date = pattern.get('date') or Date.today()
+
+        for organization, name in [
+                (self.from_organization, 'from_country'),
+                (self.to_organization, 'to_country'),
+                ]:
+            if organization:
+                pattern = pattern.copy()
+                country = pattern.pop(name, None)
+                if not country:
+                    return False
+                country = Country(country)
+                if not country.is_member(organization, date=date):
+                    return False
+
         for name in ['from_subdivision', 'to_subdivision']:
             subdivision = getattr(self, name)
             if name not in pattern:
@@ -124,30 +184,34 @@ class InvoiceLine(metaclass=PoolMeta):
         pattern = super()._get_tax_rule_pattern()
 
         from_country = from_subdivision = to_country = to_subdivision = None
+        origin = self.origin
+        # find the first origin which is not an invoice line
+        while isinstance(origin, self.__class__) and origin.id >= 0:
+            origin = origin.origin
         if (SaleLine
-                and isinstance(self.origin, SaleLine)
-                and self.origin.id >= 0):
-            warehouse = self.origin.warehouse
+                and isinstance(origin, SaleLine)
+                and origin.id >= 0):
+            warehouse = origin.warehouse
             if warehouse and warehouse.address:
                 from_country = warehouse.address.country
                 from_subdivision = warehouse.address.subdivision
-            shipment_address = self.origin.sale.shipment_address
+            shipment_address = origin.sale.shipment_address
             to_country = shipment_address.country
             to_subdivision = shipment_address.subdivision
         elif (PurchaseLine
-                and isinstance(self.origin, PurchaseLine)
-                and self.origin.id >= 0):
-            invoice_address = self.origin.purchase.invoice_address
+                and isinstance(origin, PurchaseLine)
+                and origin.id >= 0):
+            invoice_address = origin.purchase.invoice_address
             from_country = invoice_address.country
             from_subdivision = invoice_address.subdivision
-            warehouse = self.origin.warehouse
+            warehouse = origin.warehouse
             if warehouse and warehouse.address:
                 to_country = warehouse.address.country
                 to_subdivision = warehouse.address.subdivision
         elif (Move
-                and isinstance(self.origin, Move)
-                and self.origin.id >= 0):
-            move = self.origin
+                and isinstance(origin, Move)
+                and origin.id >= 0):
+            move = origin
             if move.from_location.warehouse:
                 warehouse_address = move.from_location.warehouse.address
                 if warehouse_address:

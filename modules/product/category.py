@@ -7,7 +7,7 @@ from sql.operators import Equal
 
 from trytond.model import Exclude, ModelSQL, ModelView, fields, tree
 from trytond.pool import Pool
-from trytond.pyson import Eval, PYSONEncoder
+from trytond.pyson import Eval
 from trytond.tools import is_full_text, lstrip_wildcard
 
 
@@ -41,11 +41,6 @@ class Category(tree(separator=' / '), ModelSQL, ModelView):
                 'product.msg_category_code_unique'),
             ]
         cls._order.insert(0, ('name', 'ASC'))
-        cls._buttons.update({
-                'add_products': {
-                    'icon': 'tryton-add',
-                    },
-                })
 
     @classmethod
     def default_code_readonly(cls):
@@ -78,16 +73,8 @@ class Category(tree(separator=' / '), ModelSQL, ModelView):
         return [bool_op,
             ('name', operator, operand, *extra),
             ('code', operator, code_value, *extra),
+            super().search_rec_name(name, clause),
             ]
-
-    @classmethod
-    @ModelView.button_action('product.act_category_product')
-    def add_products(cls, categories):
-        return {
-            'res_id': [categories[0].id if categories else None],
-            'pyson_domain': PYSONEncoder().encode(
-                [('id', '=', categories[0].id if categories else None)]),
-             }
 
     @classmethod
     def _code_sequence(cls):

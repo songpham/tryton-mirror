@@ -2,30 +2,119 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
 
+from trytond.model import ModelAccessProxy
 from trytond.model.exceptions import AccessError
 from trytond.pool import Pool
 from trytond.tests.test_tryton import (
-    TestCase, activate_module, with_transaction)
+    DB_NAME, USER, DBTestCase, with_transaction)
 from trytond.transaction import Transaction
 
 _context = {'_check_access': True}
 
 
-class _ModelAccessTestCase(TestCase):
+class ReadonlyTestCase(DBTestCase):
+    module = 'tests'
+
+    @with_transaction(context=_context)
+    def test_create_readonly(self):
+        "Test create readonly field"
+        pool = Pool()
+        Model = pool.get('test.access')
+
+        with self.assertRaises(AccessError):
+            Model.create([{'field_readonly': "test"}])
+
+    @with_transaction(context=_context)
+    def test_write_readonly(self):
+        pool = Pool()
+        Model = pool.get('test.access')
+
+        record, = Model.create([{}])
+
+        with self.assertRaises(AccessError):
+            Model.write([record], {'field_readonly': "test"})
+
+    @with_transaction(context=_context)
+    def test_create_readonly_state(self):
+        "Test create field with readonly states"
+        pool = Pool()
+        Model = pool.get('test.access')
+
+        Model.create([{
+                    'field1': 'not readonly',
+                    'field_readonly_state': 'test',
+                    }])
+        Model.create([{
+                    'field1': 'readonly',
+                    }])
+        with self.assertRaises(AccessError):
+            Model.create([{
+                        'field1': 'readonly',
+                        'field_readonly_state': 'test',
+                        }])
+
+    @with_transaction(context=_context)
+    def test_write_readonly_state(self):
+        "Test write field with readonly states"
+        pool = Pool()
+        Model = pool.get('test.access')
+
+        record, = Model.create([{}])
+
+        Model.write([record], {
+                'field1': 'not readonly',
+                'field_readonly_state': 'foo',
+                })
+        Model.write([record], {
+                'field1': 'readonly',
+                })
+        with self.assertRaises(AccessError):
+            Model.write([record], {
+                    'field_readonly_state': 'bar',
+                    })
+
+    @with_transaction(context=_context)
+    def test_readonly_id(self):
+        "Test field with readonly based on id"
+        pool = Pool()
+        Model = pool.get('test.access')
+
+        record, = Model.create([{'field_readonly_id': 'foo'}])
+        with self.assertRaises(AccessError):
+            Model.write([record], {
+                    'field_readonly_id': 'bar',
+                    })
+
+
+class _ModelAccessTestCase(DBTestCase):
+    module = 'tests'
     _perm = None
+    model_name = model_access_name = 'test.access'
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        activate_module('tests')
+        with Transaction().start(DB_NAME, USER):
+            pool = Pool()
+            User = pool.get('res.user')
+            Group = pool.get('res.group')
 
-    model_name = model_access_name = 'test.access'
+            user, = User.create([{
+                        'login': 'user',
+                        'administrator': False,
+                        }])
+            cls.user_id = user.id
+
+            Group.create([{
+                        'name': 'Group',
+                        'users': [('add', [user.id])],
+                        }])
 
     @property
     def group(self):
         pool = Pool()
         Group = pool.get('res.group')
-        group, = Group.search([('users', '=', Transaction().user)])
+        group, = Group.search([('users', '=', self.user_id)])
         return group
 
     def _assert(self, record):
@@ -41,7 +130,8 @@ class _ModelAccessTestCase(TestCase):
         TestAccess = pool.get(self.model_name)
         record, = TestAccess.create([{}])
 
-        self._assert(record)
+        with Transaction().set_user(self.user_id):
+            self._assert(record)
 
     @with_transaction(context=_context)
     def test_access_without_group(self):
@@ -56,7 +146,8 @@ class _ModelAccessTestCase(TestCase):
                     self._perm: True,
                     }])
 
-        self._assert(record)
+        with Transaction().set_user(self.user_id):
+            self._assert(record)
 
     @with_transaction(context=_context)
     def test_no_access_without_group(self):
@@ -71,7 +162,8 @@ class _ModelAccessTestCase(TestCase):
                     self._perm: False,
                     }])
 
-        self._assert_raises(record)
+        with Transaction().set_user(self.user_id):
+            self._assert_raises(record)
 
     @with_transaction(context=_context)
     def test_one_access_with_groups(self):
@@ -91,7 +183,8 @@ class _ModelAccessTestCase(TestCase):
                     self._perm: True,
                     }])
 
-        self._assert(record)
+        with Transaction().set_user(self.user_id):
+            self._assert(record)
 
     @with_transaction(context=_context)
     def test_one_access_without_group(self):
@@ -111,7 +204,8 @@ class _ModelAccessTestCase(TestCase):
                     self._perm: False,
                     }])
 
-        self._assert(record)
+        with Transaction().set_user(self.user_id):
+            self._assert(record)
 
     @with_transaction(context=_context)
     def test_all_access_with_groups(self):
@@ -131,7 +225,8 @@ class _ModelAccessTestCase(TestCase):
                     self._perm: True,
                     }])
 
-        self._assert(record)
+        with Transaction().set_user(self.user_id):
+            self._assert(record)
 
     @with_transaction(context=_context)
     def test_no_access_with_groups(self):
@@ -151,7 +246,8 @@ class _ModelAccessTestCase(TestCase):
                     self._perm: False,
                     }])
 
-        self._assert_raises(record)
+        with Transaction().set_user(self.user_id):
+            self._assert_raises(record)
 
     @with_transaction(context=_context)
     def test_one_access_with_group(self):
@@ -166,7 +262,8 @@ class _ModelAccessTestCase(TestCase):
                     self._perm: True,
                     }])
 
-        self._assert(record)
+        with Transaction().set_user(self.user_id):
+            self._assert(record)
 
     @with_transaction(context=_context)
     def test_no_access_with_group(self):
@@ -181,7 +278,8 @@ class _ModelAccessTestCase(TestCase):
                     self._perm: False,
                     }])
 
-        self._assert_raises(record)
+        with Transaction().set_user(self.user_id):
+            self._assert_raises(record)
 
     @with_transaction(context=_context)
     def test_one_access_with_other_group(self):
@@ -203,7 +301,8 @@ class _ModelAccessTestCase(TestCase):
                     self._perm: True,
                     }])
 
-        self._assert(record)
+        with Transaction().set_user(self.user_id):
+            self._assert(record)
 
     @with_transaction(context=_context)
     def test_no_access_with_other_group(self):
@@ -225,7 +324,8 @@ class _ModelAccessTestCase(TestCase):
                     self._perm: True,
                     }])
 
-        self._assert_raises(record)
+        with Transaction().set_user(self.user_id):
+            self._assert_raises(record)
 
     @with_transaction(context=_context)
     def test_no_access_with_inactive_group(self):
@@ -235,7 +335,9 @@ class _ModelAccessTestCase(TestCase):
         ModelAccess = pool.get('ir.model.access')
         TestAccess = pool.get(self.model_name)
 
-        inactive_group, = Group.create([{'name': 'Test', 'active': False}])
+        inactive_group, = Group.create([{'name': 'Test'}])
+        inactive_group.active = False
+        inactive_group.save()
         record, = TestAccess.create([{}])
         ModelAccess.create([{
                     'model': self.model_name,
@@ -248,7 +350,8 @@ class _ModelAccessTestCase(TestCase):
                     self._perm: True,
                     }])
 
-        self._assert_raises(record)
+        with Transaction().set_user(self.user_id):
+            self._assert_raises(record)
 
     @with_transaction(context=_context)
     def test_no_access_with_member_inactive_group(self):
@@ -260,9 +363,10 @@ class _ModelAccessTestCase(TestCase):
 
         inactive_group, = Group.create([{
                     'name': 'Test',
-                    'active': False,
                     'users': [('add', [Transaction().user])],
                     }])
+        inactive_group.active = False
+        inactive_group.save()
         record, = TestAccess.create([{}])
         ModelAccess.create([{
                     'model': self.model_name,
@@ -275,7 +379,8 @@ class _ModelAccessTestCase(TestCase):
                     self._perm: True,
                     }])
 
-        self._assert_raises(record)
+        with Transaction().set_user(self.user_id):
+            self._assert_raises(record)
 
     @with_transaction(context=_context)
     def test_one_access_with_other_group_no_perm(self):
@@ -297,7 +402,8 @@ class _ModelAccessTestCase(TestCase):
                     self._perm: False,
                     }])
 
-        self._assert(record)
+        with Transaction().set_user(self.user_id):
+            self._assert(record)
 
     @with_transaction(context=_context)
     def test_access_inherited_from_parent(self):
@@ -322,7 +428,8 @@ class _ModelAccessTestCase(TestCase):
                     self._perm: True,
                     }])
 
-        self._assert(record)
+        with Transaction().set_user(self.user_id):
+            self._assert(record)
 
 
 class ModelAccessReadTestCase(_ModelAccessTestCase):
@@ -338,9 +445,11 @@ class ModelAccessReadTestCase(_ModelAccessTestCase):
         pool = Pool()
         TestAccess = pool.get(self.model_name)
         with self.assertRaises(AccessError):
-            TestAccess.read([record.id], ['field1'])
+            with Transaction().set_user(self.user_id):
+                TestAccess.read([record.id], ['field1'])
         with self.assertRaises(AccessError):
-            TestAccess.search([])
+            with Transaction().set_user(self.user_id):
+                TestAccess.search([])
 
     @with_transaction(context=_context)
     def test_access_relate_empty(self):
@@ -349,9 +458,12 @@ class ModelAccessReadTestCase(_ModelAccessTestCase):
         TestAccess = pool.get(self.model_name)
         record, = TestAccess.create([{}])
 
-        TestAccess.read([record.id], ['relate.value'])
-        TestAccess.search([('relate.value', '=', 42)])
-        TestAccess.search([('reference.value', '=', 42, 'test.access.relate')])
+        with Transaction().set_user(self.user_id):
+            TestAccess.read([record.id], ['relate.value'])
+            TestAccess.search([('relate.value', '=', 42)])
+            TestAccess.search([
+                    ('reference.value', '=', 42, 'test.access.relate'),
+                    ])
 
     @with_transaction(context=_context)
     def test_access_relate(self):
@@ -365,12 +477,15 @@ class ModelAccessReadTestCase(_ModelAccessTestCase):
                     'perm_read': True,
                     }])
 
-        TestAccess.read([record.id], ['relate.value'])
-        TestAccess.search([('relate.value', '=', 42)])
-        TestAccess.search([('reference.value', '=', 42, 'test.access.relate')])
-        TestAccess.search([('dict_.key', '=', 42)])
-        TestAccess.search([], order=[('relate.value', 'ASC')])
-        TestAccess.search([], order=[('dict_.key', 'ASC')])
+        with Transaction().set_user(self.user_id):
+            TestAccess.read([record.id], ['relate.value'])
+            TestAccess.search([('relate.value', '=', 42)])
+            TestAccess.search([
+                    ('reference.value', '=', 42, 'test.access.relate'),
+                    ])
+            TestAccess.search([('dict_.key', '=', 42)])
+            TestAccess.search([], order=[('relate.value', 'ASC')])
+            TestAccess.search([], order=[('dict_.key', 'ASC')])
 
     @with_transaction(context=_context)
     def test_no_access_relate(self):
@@ -384,15 +499,47 @@ class ModelAccessReadTestCase(_ModelAccessTestCase):
                     'perm_read': False,
                     }])
 
-        with self.assertRaises(AccessError):
-            TestAccess.read([record.id], ['relate.value'])
-        with self.assertRaises(AccessError):
-            TestAccess.search([('relate.value', '=', 42)])
-        with self.assertRaises(AccessError):
-            TestAccess.search(
-                [('reference.value', '=', 42, 'test.access.relate')])
-        with self.assertRaises(AccessError):
-            TestAccess.search([], order=[('relate.value', 'ASC')])
+        with Transaction().set_user(self.user_id):
+            with self.assertRaises(AccessError):
+                TestAccess.read([record.id], ['relate.value'])
+            with self.assertRaises(AccessError):
+                TestAccess.search([('relate.value', '=', 42)])
+            with self.assertRaises(AccessError):
+                TestAccess.search(
+                    [('reference.value', '=', 42, 'test.access.relate')])
+            with self.assertRaises(AccessError):
+                TestAccess.search([], order=[('relate.value', 'ASC')])
+
+    @with_transaction()
+    def test_model_access_proxy(self):
+        "Test model access proxy"
+        pool = Pool()
+        ModelAccess = pool.get('ir.model.access')
+        TestAccess = pool.get(self.model_name)
+        record, = TestAccess.create([{}])
+        ModelAccess.create([{
+                    'model': self.model_name,
+                    'perm_read': True,
+                    }])
+
+        with Transaction().set_user(self.user_id):
+            ModelAccessProxy(record, {})
+
+    @with_transaction()
+    def test_model_access_proxy_no_access(self):
+        "Test model access proxy without access"
+        pool = Pool()
+        ModelAccess = pool.get('ir.model.access')
+        TestAccess = pool.get(self.model_name)
+        record, = TestAccess.create([{}])
+        ModelAccess.create([{
+                    'model': self.model_name,
+                    'perm_read': False,
+                    }])
+
+        with Transaction().set_user(self.user_id):
+            with self.assertRaises(AccessError):
+                ModelAccessProxy(record, {})
 
 
 class ModelAccessWriteTestCase(_ModelAccessTestCase):
@@ -459,19 +606,34 @@ class ModelAccessModelTestCase(_ModelAccessTestCase):
             TestAccess.search([])
 
 
-class _ModelFieldAccessTestCase(TestCase):
+class _ModelFieldAccessTestCase(DBTestCase):
+    module = 'tests'
     _perm = None
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        activate_module('tests')
+        with Transaction().start(DB_NAME, USER):
+            pool = Pool()
+            User = pool.get('res.user')
+            Group = pool.get('res.group')
+
+            user, = User.create([{
+                        'login': 'user',
+                        'administrator': False,
+                        }])
+            cls.user_id = user.id
+
+            Group.create([{
+                        'name': 'Group',
+                        'users': [('add', [user.id])],
+                        }])
 
     @property
     def group(self):
         pool = Pool()
         Group = pool.get('res.group')
-        group, = Group.search([('users', '=', Transaction().user)])
+        group, = Group.search([('users', '=', self.user_id)])
         return group
 
     def _assert1(self, record):
@@ -493,8 +655,9 @@ class _ModelFieldAccessTestCase(TestCase):
         TestAccess = pool.get('test.access')
         record, = TestAccess.create([{}])
 
-        self._assert1(record)
-        self._assert2(record)
+        with Transaction().set_user(self.user_id):
+            self._assert1(record)
+            self._assert2(record)
 
     @with_transaction(context=_context)
     def test_access_without_group(self):
@@ -510,8 +673,9 @@ class _ModelFieldAccessTestCase(TestCase):
                     self._perm: True,
                     }])
 
-        self._assert1(record)
-        self._assert2(record)
+        with Transaction().set_user(self.user_id):
+            self._assert1(record)
+            self._assert2(record)
 
     @with_transaction(context=_context)
     def test_no_access_without_group(self):
@@ -527,8 +691,9 @@ class _ModelFieldAccessTestCase(TestCase):
                     self._perm: False,
                     }])
 
-        self._assert_raises1(record)
-        self._assert2(record)
+        with Transaction().set_user(self.user_id):
+            self._assert_raises1(record)
+            self._assert2(record)
 
     @with_transaction(context=_context)
     def test_one_access_with_groups(self):
@@ -550,8 +715,9 @@ class _ModelFieldAccessTestCase(TestCase):
                     self._perm: True,
                     }])
 
-        self._assert1(record)
-        self._assert2(record)
+        with Transaction().set_user(self.user_id):
+            self._assert1(record)
+            self._assert2(record)
 
     @with_transaction(context=_context)
     def test_one_access_without_group(self):
@@ -573,8 +739,9 @@ class _ModelFieldAccessTestCase(TestCase):
                     self._perm: False,
                     }])
 
-        self._assert1(record)
-        self._assert2(record)
+        with Transaction().set_user(self.user_id):
+            self._assert1(record)
+            self._assert2(record)
 
     @with_transaction(context=_context)
     def test_all_access_with_groups(self):
@@ -596,8 +763,9 @@ class _ModelFieldAccessTestCase(TestCase):
                     self._perm: True,
                     }])
 
-        self._assert1(record)
-        self._assert2(record)
+        with Transaction().set_user(self.user_id):
+            self._assert1(record)
+            self._assert2(record)
 
     @with_transaction(context=_context)
     def test_no_access_with_groups(self):
@@ -619,8 +787,9 @@ class _ModelFieldAccessTestCase(TestCase):
                     self._perm: False,
                     }])
 
-        self._assert_raises1(record)
-        self._assert2(record)
+        with Transaction().set_user(self.user_id):
+            self._assert_raises1(record)
+            self._assert2(record)
 
     @with_transaction(context=_context)
     def test_one_access_with_group(self):
@@ -636,8 +805,9 @@ class _ModelFieldAccessTestCase(TestCase):
                     self._perm: True,
                     }])
 
-        self._assert1(record)
-        self._assert2(record)
+        with Transaction().set_user(self.user_id):
+            self._assert1(record)
+            self._assert2(record)
 
     @with_transaction(context=_context)
     def test_no_access_with_group(self):
@@ -653,8 +823,9 @@ class _ModelFieldAccessTestCase(TestCase):
                     self._perm: False,
                     }])
 
-        self._assert_raises1(record)
-        self._assert2(record)
+        with Transaction().set_user(self.user_id):
+            self._assert_raises1(record)
+            self._assert2(record)
 
     @with_transaction(context=_context)
     def test_one_access_with_other_group(self):
@@ -678,8 +849,9 @@ class _ModelFieldAccessTestCase(TestCase):
                     self._perm: True,
                     }])
 
-        self._assert1(record)
-        self._assert2(record)
+        with Transaction().set_user(self.user_id):
+            self._assert1(record)
+            self._assert2(record)
 
     @with_transaction(context=_context)
     def test_no_access_with_other_group(self):
@@ -703,8 +875,9 @@ class _ModelFieldAccessTestCase(TestCase):
                     self._perm: True,
                     }])
 
-        self._assert_raises1(record)
-        self._assert2(record)
+        with Transaction().set_user(self.user_id):
+            self._assert_raises1(record)
+            self._assert2(record)
 
     @with_transaction(context=_context)
     def test_no_access_with_inactive_group(self):
@@ -714,7 +887,9 @@ class _ModelFieldAccessTestCase(TestCase):
         FieldAccess = pool.get('ir.model.field.access')
         TestAccess = pool.get('test.access')
 
-        inactive_group, = Group.create([{'name': 'Test', 'active': False}])
+        inactive_group, = Group.create([{'name': 'Test'}])
+        inactive_group.active = False
+        inactive_group.save()
         record, = TestAccess.create([{}])
         FieldAccess.create([{
                     'model': 'test.access',
@@ -729,8 +904,9 @@ class _ModelFieldAccessTestCase(TestCase):
                     self._perm: True,
                     }])
 
-        self._assert_raises1(record)
-        self._assert2(record)
+        with Transaction().set_user(self.user_id):
+            self._assert_raises1(record)
+            self._assert2(record)
 
     @with_transaction(context=_context)
     def test_no_access_with_member_inactive_group(self):
@@ -742,9 +918,10 @@ class _ModelFieldAccessTestCase(TestCase):
 
         inactive_group, = Group.create([{
                     'name': 'Test',
-                    'active': False,
                     'users': [('add', [Transaction().user])],
                     }])
+        inactive_group.active = False
+        inactive_group.save()
         record, = TestAccess.create([{}])
         FieldAccess.create([{
                     'model': 'test.access',
@@ -759,8 +936,9 @@ class _ModelFieldAccessTestCase(TestCase):
                     self._perm: True,
                     }])
 
-        self._assert_raises1(record)
-        self._assert2(record)
+        with Transaction().set_user(self.user_id):
+            self._assert_raises1(record)
+            self._assert2(record)
 
     @with_transaction(context=_context)
     def test_one_access_with_other_group_no_perm(self):
@@ -784,8 +962,9 @@ class _ModelFieldAccessTestCase(TestCase):
                     self._perm: False,
                     }])
 
-        self._assert1(record)
-        self._assert2(record)
+        with Transaction().set_user(self.user_id):
+            self._assert1(record)
+            self._assert2(record)
 
     @with_transaction(context=_context)
     def test_access_inherited_from_parent(self):
@@ -812,8 +991,9 @@ class _ModelFieldAccessTestCase(TestCase):
                     self._perm: True,
                     }])
 
-        self._assert1(record)
-        self._assert2(record)
+        with Transaction().set_user(self.user_id):
+            self._assert1(record)
+            self._assert2(record)
 
     @with_transaction(context=_context)
     def test_two_access(self):
@@ -837,8 +1017,9 @@ class _ModelFieldAccessTestCase(TestCase):
                     self._perm: True,
                     }])
 
-        self._assert1(record)
-        self._assert2(record)
+        with Transaction().set_user(self.user_id):
+            self._assert1(record)
+            self._assert2(record)
 
     @with_transaction(context=_context)
     def test_two_no_access(self):
@@ -862,8 +1043,9 @@ class _ModelFieldAccessTestCase(TestCase):
                     self._perm: False,
                     }])
 
-        self._assert_raises1(record)
-        self._assert_raises2(record)
+        with Transaction().set_user(self.user_id):
+            self._assert_raises1(record)
+            self._assert_raises2(record)
 
     @with_transaction(context=_context)
     def test_two_both_access(self):
@@ -887,8 +1069,9 @@ class _ModelFieldAccessTestCase(TestCase):
                     self._perm: False,
                     }])
 
-        self._assert1(record)
-        self._assert_raises2(record)
+        with Transaction().set_user(self.user_id):
+            self._assert1(record)
+            self._assert_raises2(record)
 
     @with_transaction(context=_context)
     def test_two_access_with_group(self):
@@ -912,8 +1095,9 @@ class _ModelFieldAccessTestCase(TestCase):
                     self._perm: True,
                     }])
 
-        self._assert1(record)
-        self._assert2(record)
+        with Transaction().set_user(self.user_id):
+            self._assert1(record)
+            self._assert2(record)
 
     @with_transaction(context=_context)
     def test_two_access_with_groups(self):
@@ -937,8 +1121,9 @@ class _ModelFieldAccessTestCase(TestCase):
                     self._perm: True,
                     }])
 
-        self._assert1(record)
-        self._assert2(record)
+        with Transaction().set_user(self.user_id):
+            self._assert1(record)
+            self._assert2(record)
 
     @with_transaction(context=_context)
     def test_two_no_access_with_group(self):
@@ -962,8 +1147,9 @@ class _ModelFieldAccessTestCase(TestCase):
                     self._perm: False,
                     }])
 
-        self._assert_raises1(record)
-        self._assert_raises2(record)
+        with Transaction().set_user(self.user_id):
+            self._assert_raises1(record)
+            self._assert_raises2(record)
 
     @with_transaction(context=_context)
     def test_two_both_access_with_group(self):
@@ -987,8 +1173,9 @@ class _ModelFieldAccessTestCase(TestCase):
                     self._perm: False,
                     }])
 
-        self._assert1(record)
-        self._assert_raises2(record)
+        with Transaction().set_user(self.user_id):
+            self._assert1(record)
+            self._assert_raises2(record)
 
 
 class ModelFieldAccessReadTestCase(_ModelFieldAccessTestCase):
@@ -1028,8 +1215,11 @@ class ModelFieldAccessReadTestCase(_ModelFieldAccessTestCase):
         pool = Pool()
         TestAccess = pool.get('test.access')
 
-        TestAccess.search([('relate.value', '=', 42)])
-        TestAccess.search([('reference.value', '=', 42, 'test.access.relate')])
+        with Transaction().set_user(self.user_id):
+            TestAccess.search([('relate.value', '=', 42)])
+            TestAccess.search([
+                    ('reference.value', '=', 42, 'test.access.relate'),
+                    ])
 
     @with_transaction(context=_context)
     def test_access_search_relate(self):
@@ -1043,11 +1233,14 @@ class ModelFieldAccessReadTestCase(_ModelFieldAccessTestCase):
                     'perm_read': True,
                     }])
 
-        TestAccess.search([('relate.value', '=', 42)])
-        TestAccess.search([('reference.value', '=', 42, 'test.access.relate')])
-        TestAccess.search([
-                ('reference.parent.value', '=', 42, 'test.access.relate')])
-        TestAccess.search([], order=[('relate.value', 'ASC')])
+        with Transaction().set_user(self.user_id):
+            TestAccess.search([('relate.value', '=', 42)])
+            TestAccess.search([
+                    ('reference.value', '=', 42, 'test.access.relate'),
+                    ])
+            TestAccess.search([
+                    ('reference.parent.value', '=', 42, 'test.access.relate')])
+            TestAccess.search([], order=[('relate.value', 'ASC')])
 
     @with_transaction(context=_context)
     def test_no_access_search_relate(self):
@@ -1061,16 +1254,19 @@ class ModelFieldAccessReadTestCase(_ModelFieldAccessTestCase):
                     'perm_read': False,
                     }])
 
-        with self.assertRaises(AccessError):
-            TestAccess.search([('relate.value', '=', 42)])
-        with self.assertRaises(AccessError):
-            TestAccess.search(
-                [('reference.value', '=', 42, 'test.access.relate')])
-        with self.assertRaises(AccessError):
-            TestAccess.search(
-                [('reference.parent.value', '=', 42, 'test.access.relate')])
-        with self.assertRaises(AccessError):
-            TestAccess.search([], order=[('relate.value', 'ASC')])
+        with Transaction().set_user(self.user_id):
+            with self.assertRaises(AccessError):
+                TestAccess.search([('relate.value', '=', 42)])
+            with self.assertRaises(AccessError):
+                TestAccess.search(
+                    [('reference.value', '=', 42, 'test.access.relate')])
+            with self.assertRaises(AccessError):
+                TestAccess.search([
+                        ('reference.parent.value', '=', 42,
+                            'test.access.relate'),
+                        ])
+            with self.assertRaises(AccessError):
+                TestAccess.search([], order=[('relate.value', 'ASC')])
 
     @with_transaction(context=_context)
     def test_access_search_relate_parent_field(self):
@@ -1084,7 +1280,8 @@ class ModelFieldAccessReadTestCase(_ModelFieldAccessTestCase):
                     'perm_read': True,
                     }])
 
-        TestAccess.search([('relate', 'child_of', 42, 'parent')])
+        with Transaction().set_user(self.user_id):
+            TestAccess.search([('relate', 'child_of', 42, 'parent')])
 
     @with_transaction(context=_context)
     def test_no_access_search_relate_parent_field(self):
@@ -1098,8 +1295,45 @@ class ModelFieldAccessReadTestCase(_ModelFieldAccessTestCase):
                     'perm_read': False,
                     }])
 
-        with self.assertRaises(AccessError):
-            TestAccess.search([('relate', 'child_of', 42, 'parent')])
+        with Transaction().set_user(self.user_id):
+            with self.assertRaises(AccessError):
+                TestAccess.search([('relate', 'child_of', 42, 'parent')])
+
+    @with_transaction()
+    def test_model_access_proxy(self):
+        "Test model access proxy"
+        pool = Pool()
+        FieldAccess = pool.get('ir.model.field.access')
+        TestAccess = pool.get('test.access')
+        record, = TestAccess.create([{'field1': "foo"}])
+        FieldAccess.create([{
+                    'model': 'test.access',
+                    'field': 'field1',
+                    'perm_read': True,
+                    }])
+
+        proxy = ModelAccessProxy(record, {})
+
+        self.assertEqual(proxy.field1, 'foo')
+
+    @with_transaction()
+    def test_model_access_proxy_no_access(self):
+        "Test model access proxy without access"
+        pool = Pool()
+        FieldAccess = pool.get('ir.model.field.access')
+        TestAccess = pool.get('test.access')
+        record, = TestAccess.create([{'field1': "foo"}])
+        FieldAccess.create([{
+                    'model': 'test.access',
+                    'field': 'field1',
+                    'perm_read': False,
+                    }])
+
+        proxy = ModelAccessProxy(record, {})
+
+        with Transaction().set_user(self.user_id):
+            with self.assertRaises(AccessError):
+                ModelAccessProxy(proxy.field1)
 
 
 class ModelFieldAccessWriteTestCase(_ModelFieldAccessTestCase):
@@ -1128,12 +1362,27 @@ class ModelFieldAccessWriteTestCase(_ModelFieldAccessTestCase):
             TestAccess.write([record], {'field2': 'test'})
 
 
-class MenuActionAccessReadTestCase(TestCase):
+class MenuActionAccessReadTestCase(DBTestCase):
+    module = 'tests'
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        activate_module('tests')
+        with Transaction().start(DB_NAME, USER):
+            pool = Pool()
+            User = pool.get('res.user')
+            Group = pool.get('res.group')
+
+            user, = User.create([{
+                        'login': 'user',
+                        'administrator': False,
+                        }])
+            cls.user_id = user.id
+
+            Group.create([{
+                        'name': 'Group',
+                        'users': [('add', [user.id])],
+                        }])
 
     def create_menu(self, access=None):
         pool = Pool()
@@ -1161,7 +1410,8 @@ class MenuActionAccessReadTestCase(TestCase):
 
         menu = self.create_menu()
 
-        self.assertEqual(Menu.search([('id', '=', menu.id)]), [menu])
+        with Transaction().set_user(self.user_id):
+            self.assertEqual(Menu.search([('id', '=', menu.id)]), [menu])
 
     @with_transaction(context=_context)
     def test_access(self):
@@ -1171,7 +1421,8 @@ class MenuActionAccessReadTestCase(TestCase):
 
         menu = self.create_menu(True)
 
-        self.assertEqual(Menu.search([('id', '=', menu.id)]), [menu])
+        with Transaction().set_user(self.user_id):
+            self.assertEqual(Menu.search([('id', '=', menu.id)]), [menu])
 
     @with_transaction(context=_context)
     def test_no_access(self):
@@ -1181,7 +1432,8 @@ class MenuActionAccessReadTestCase(TestCase):
 
         menu = self.create_menu(False)
 
-        self.assertEqual(Menu.search([('id', '=', menu.id)]), [])
+        with Transaction().set_user(self.user_id):
+            self.assertEqual(Menu.search([('id', '=', menu.id)]), [])
 
 
 del _ModelAccessTestCase, _ModelFieldAccessTestCase

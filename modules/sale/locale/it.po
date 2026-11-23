@@ -175,6 +175,11 @@ msgctxt "field:sale.configuration,sale_shipment_method:"
 msgid "Sale Shipment Method"
 msgstr "metodo di spedizione dell'ordine"
 
+#, fuzzy
+msgctxt "field:sale.configuration,sale_wait_shipment:"
+msgid "Sale Wait Shipment"
+msgstr "Spedizioni"
+
 msgctxt "field:sale.configuration.quotation,sale_quotation_validity:"
 msgid "Sale Quotation Validity"
 msgstr ""
@@ -188,6 +193,11 @@ msgstr "metodo di fatturazione vendita"
 msgctxt "field:sale.configuration.sale_method,sale_shipment_method:"
 msgid "Sale Shipment Method"
 msgstr "metodo di spedizione dell'ordine"
+
+#, fuzzy
+msgctxt "field:sale.configuration.sale_method,sale_wait_shipment:"
+msgid "Sale Wait Shipment"
+msgstr "Spedizioni"
 
 msgctxt "field:sale.configuration.sequence,company:"
 msgid "Company"
@@ -311,6 +321,16 @@ msgstr "Categotia UdM prodotto"
 
 msgctxt "field:sale.line,quantity:"
 msgid "Quantity"
+msgstr "Quantità"
+
+#, fuzzy
+msgctxt "field:sale.line,quantity_to_invoice:"
+msgid "Quantity to Invoice"
+msgstr "ricrea fatture"
+
+#, fuzzy
+msgctxt "field:sale.line,quantity_to_ship:"
+msgid "Quantity to Ship"
 msgstr "Quantità"
 
 msgctxt "field:sale.line,sale:"
@@ -706,6 +726,15 @@ msgctxt "field:sale.sale,tax_amount_cache:"
 msgid "Tax Cache"
 msgstr "ripostiglio imposta"
 
+#, fuzzy
+msgctxt "field:sale.sale,to_invoice:"
+msgid "To Invoice"
+msgstr "Fattura"
+
+msgctxt "field:sale.sale,to_ship:"
+msgid "To Ship"
+msgstr ""
+
 msgctxt "field:sale.sale,total_amount:"
 msgid "Total"
 msgstr "Totale"
@@ -807,6 +836,14 @@ msgctxt "help:sale.configuration,sale_process_after:"
 msgid ""
 "The grace period during which confirmed sale can still be reset to draft.\n"
 "Applied if a worker queue is activated."
+msgstr ""
+
+msgctxt "help:sale.configuration,sale_wait_shipment:"
+msgid "Create customer shipments in a waiting state"
+msgstr ""
+
+msgctxt "help:sale.configuration.sale_method,sale_wait_shipment:"
+msgid "Create customer shipments in a waiting state"
 msgstr ""
 
 #, fuzzy
@@ -1682,12 +1719,12 @@ msgid "Manual"
 msgstr "Manuale"
 
 msgctxt "selection:sale.sale,invoice_method:"
-msgid "On Order Processed"
-msgstr "Su ordine processato"
+msgid "On Fulfillment"
+msgstr ""
 
 msgctxt "selection:sale.sale,invoice_method:"
-msgid "On Shipment Sent"
-msgstr "Su spedizione"
+msgid "On Order Processed"
+msgstr "Su ordine processato"
 
 msgctxt "selection:sale.sale,invoice_state:"
 msgid "Awaiting Payment"

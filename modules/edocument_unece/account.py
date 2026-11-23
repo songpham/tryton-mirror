@@ -2,7 +2,7 @@
 # this repository contains the full copyright notices and license terms.
 from trytond.model import fields
 from trytond.pool import Pool, PoolMeta
-from trytond.pyson import Bool, Eval
+from trytond.pyson import Eval
 
 
 class Tax(metaclass=PoolMeta):
@@ -66,8 +66,9 @@ class Tax(metaclass=PoolMeta):
             ('VAT', "Value added tax"),
             ], "UNECE Code",
         states={
-            'readonly': (Bool(Eval('template', -1))
-                & ~Eval('template_override', False)),
+            'editable': (
+                ~Eval('template', None)
+                | Eval('template_override', False)),
             },
         help="Standard code of "
         "the United Nations Economic Commission for Europe.")
@@ -99,8 +100,9 @@ class Tax(metaclass=PoolMeta):
             ('Z', "Zero rated goods"),
             ], "UNECE Category Code",
         states={
-            'readonly': (Bool(Eval('template', -1))
-                & ~Eval('template_override', False)),
+            'editable': (
+                ~Eval('template', None)
+                | Eval('template_override', False)),
             },
         help="Standard code of "
         "the United Nations Economic Commission for Europe.")
@@ -132,3 +134,25 @@ class TaxTemplate(metaclass=PoolMeta):
             if not tax or getattr(tax, field) != getattr(self, field):
                 value[field] = getattr(self, field)
         return value
+
+
+class InvoicePaymentMean(metaclass=PoolMeta):
+    __name__ = 'account.invoice.payment.mean'
+
+    @property
+    def unece_code(self):
+        "UNCL4461"
+        if self.instrument.__name__ == 'bank.account':
+            if self.invoice.type == 'out':
+                return '30'
+            else:
+                return '31'
+        elif self.instrument.__name__ == 'party.party.reception_direct_debit':
+            process_method = self.instrument.journal.process_method
+            if process_method == 'sepa':
+                if self.invoice.type == 'in':
+                    return '58'
+                else:
+                    return '59'
+            else:
+                return '49'

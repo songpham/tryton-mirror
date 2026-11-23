@@ -17,6 +17,7 @@ import genshi.template
 # XXX fix: https://genshi.edgewall.org/ticket/582
 from genshi.template.astutil import ASTCodeGenerator, ASTTransformer
 from lxml import etree
+from stdnum import bic, iban
 
 from trytond.i18n import gettext, ngettext
 from trytond.model import Model
@@ -118,6 +119,26 @@ class Invoice(Model):
         else:
             return '389'
 
+    def allowed_additional_documents(self, specification=None):
+        allowed_mimetypes = self._allowed_addition_document_mimetypes(
+            specification)
+        for document in self.additional_documents:
+            if (document.get('code') != '130'
+                    and allowed_mimetypes
+                    and document.get('mimetype', '') not in allowed_mimetypes):
+                continue
+            yield document
+
+    @classmethod
+    def _allowed_addition_document_mimetypes(cls, specification=None):
+        if specification and specification.startswith('peppol'):
+            return {'application/pdf', 'image/png', 'image/jpeg', 'text/csv',
+                'application/'
+                'vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'application/vnd.oasis.opendocument.spreadsheet'}
+        else:
+            return {}
+
     @property
     def additional_documents(self):
         pool = Pool()
@@ -179,19 +200,21 @@ class Invoice(Model):
     @cached_property
     def sale_reference(self):
         if hasattr(self.invoice, 'sales'):
-            return ','.join(s.reference for s in self.invoice.sales)
+            return ','.join(
+                filter(None, (s.reference for s in self.invoice.sales)))
 
     @cached_property
     def sale_number(self):
         if hasattr(self.invoice, 'sales'):
-            return ','.join(s.number for s in self.invoice.sales)
+            return ','.join(
+                filter(None, (s.number for s in self.invoice.sales)))
 
     @property
     def taxes(self):
         class Tax(namedtuple(
                     'Tax',
                     ('type', 'rate', 'unece_category_code', 'unece_code',
-                        'legal_notice'))):
+                        'vatex_code', 'legal_notice'))):
             @classmethod
             def from_line(cls, line):
                 return Tax(
@@ -199,6 +222,7 @@ class Invoice(Model):
                     rate=line.tax.rate,
                     unece_category_code=line.tax.unece_category_code,
                     unece_code=line.tax.unece_code,
+                    vatex_code=getattr(line.tax, 'vatex_code', ''),
                     legal_notice=line.legal_notice or '')
         TaxLine = namedtuple('TaxLine', ('base', 'amount', 'tax'))
         for group, lines in groupby(sorted(
@@ -215,7 +239,7 @@ class Invoice(Model):
                     base += line.base
                     amount += line.amount
                 tax_lines.append(TaxLine(base=base, amount=amount, tax=tax))
-            yield group, tax_lines, amount
+            yield group, tax_lines, tax_amount
 
     def _taxes_key(self, line):
         return ()
@@ -247,6 +271,17 @@ class Invoice(Model):
                         return
                 return product.unece_allowance_charge_code
 
+    @cached_property
+    def prepaid_amount(self):
+        def balance(line):
+            if self.invoice.currency == line.second_currency:
+                return line.amount_second_currency
+            elif self.invoice.currency == self.invoice.company.currency:
+                return line.debit - line.credit
+            else:
+                return Decimal(0)
+        return sum(map(balance, self.invoice.lines_to_pay))
+
     @classmethod
     def parse(cls, document):
         pool = Pool()
@@ -258,7 +293,6 @@ class Invoice(Model):
         invoice, attachments = cls.parser(namespace)(root)
         invoice.save()
         invoice.update_taxes()
-        cls.checker(namespace)(root, invoice)
         attachments = list(attachments)
         for attachment in attachments:
             attachment.resource = invoice
@@ -275,15 +309,6 @@ class Invoice(Model):
             }.get(namespace)
 
     @classmethod
-    def checker(cls, namespace):
-        return {
-            'urn:oasis:names:specification:ubl:schema:xsd:Invoice-2': (
-                cls._check_invoice_2),
-            'urn:oasis:names:specification:ubl:schema:xsd:CreditNote-2': (
-                cls._check_credit_note_2),
-            }.get(namespace)
-
-    @classmethod
     def _parse_invoice_2(cls, root):
         pool = Pool()
         Invoice = pool.get('account.invoice')
@@ -296,11 +321,25 @@ class Invoice(Model):
                     type_code=type_code))
 
         invoice = Invoice(type='in')
+
+        if (customer_party := root.find('./{*}AccountingCustomerParty')
+                ) is not None:
+            invoice.company = cls._parse_2_company(customer_party)
+        else:
+            invoice.company = Invoice.default_company()
+        if not invoice.company:
+            raise InvoiceError(gettext(
+                    'edocument_ubl.msg_company_not_found',
+                    company=etree.tostring(
+                        customer_party, pretty_print=True).decode()
+                    if customer_party else ''))
+
         invoice.reference = root.findtext('./{*}ID')
         invoice.invoice_date = dt.date.fromisoformat(
             root.findtext('./{*}IssueDate'))
         invoice.party = cls._parse_2_supplier(
-            root.find('./{*}AccountingSupplierParty'), create=True)
+            root.find('./{*}AccountingSupplierParty'), create=True).id
+        payees = [invoice.party]
         invoice.set_journal()
         invoice.on_change_party()
         invoice.invoice_address = cls._parse_2_address(
@@ -315,17 +354,6 @@ class Invoice(Model):
             supplier = cls._parse_2_supplier(seller)
         else:
             supplier = invoice.party
-        if (customer_party := root.find('./{*}AccountingCustomerParty')
-                ) is not None:
-            invoice.company = cls._parse_2_company(customer_party)
-        else:
-            invoice.company = Invoice.default_company()
-        if not invoice.company:
-            raise InvoiceError(gettext(
-                    'edocument_ubl.msg_company_not_found',
-                    company=etree.tostring(
-                        customer_party, pretty_print=True).decode()
-                    if customer_party else ''))
 
         if (payee_party := root.find('./{*}PayeeParty')) is not None:
             party = cls._parse_2_party(payee_party)
@@ -333,6 +361,7 @@ class Invoice(Model):
                 party = cls._create_2_party(payee_party)
                 party.save()
             invoice.alternative_payees = [party]
+            payees.append(party)
 
         currency_code = root.findtext('./{*}DocumentCurrencyCode')
         if not currency_code:
@@ -349,8 +378,15 @@ class Invoice(Model):
                         'edocument_ubl.msg_currency_not_found',
                         code=currency_code))
 
+        invoice.supplier_payment_reference = root.findtext(
+            './{*}PaymentMeans/{*}PaymentID')
+        invoice.payment_means = cls._parse_2_payment_means(
+            root.findall('./{*}PaymentMeans'), payees=payees)
         invoice.payment_term_date = cls._parse_2_payment_term_date(
             root.findall('./{*}PaymentTerms'))
+        if not invoice.payment_term_date:
+            if due_date := root.findtext('./{*}DueDate'):
+                invoice.payment_term_date = dt.date.fromisoformat(due_date)
         lines = [
             cls._parse_invoice_2_line(
                 line,
@@ -376,6 +412,29 @@ class Invoice(Model):
                     './{*}LegalMonetaryTotal/{*}PayableRoundingAmount')
                     is not None)):
             invoice.cash_rounding = True
+
+        if tax_exclusive_amount := root.findtext(
+                './{*}LegalMonetaryTotal/{*}TaxExclusiveAmount'):
+            invoice.source_untaxed_amount = Decimal(tax_exclusive_amount)
+
+        tax_amount = sum(Decimal(amount.text) for amount in root.iterfind(
+                './{*}TaxTotal/{*}TaxAmount'))
+        invoice.source_tax_amount = tax_amount
+
+        payable_amount = Decimal(
+            root.findtext('./{*}LegalMonetaryTotal/{*}PayableAmount'))
+        prepaid_amount = Decimal(
+            root.findtext('./{*}LegalMonetaryTotal/{*}PrepaidAmount')
+            or 0)
+        total_amount = payable_amount + prepaid_amount
+        if not getattr(invoice, 'cash_rounding', False):
+            payable_rounding_amount = Decimal(
+                root.findtext(
+                    './{*}LegalMonetaryTotal/{*}PayableRoundingAmount')
+                or 0)
+            total_amount -= payable_rounding_amount
+        invoice.source_total_amount = total_amount
+
         return invoice, cls._parse_2_attachments(root)
 
     @classmethod
@@ -394,7 +453,9 @@ class Invoice(Model):
         if (invoiced_quantity := invoice_line.find('./{*}InvoicedQuantity')
                 ) is not None:
             line.quantity = float(invoiced_quantity.text)
-            digits = -Decimal(invoiced_quantity.text).as_tuple().exponent
+            digits = (
+                -Decimal(invoiced_quantity.text)
+                .normalize().as_tuple().exponent)
             if (unit_code := invoiced_quantity.get('unitCode')) not in {
                     None, 'ZZ', 'XZZ'}:
                 try:
@@ -482,13 +543,9 @@ class Invoice(Model):
             if line.origin:
                 break
 
-        if (price_amount := invoice_line.findtext('./{*}Price/{*}PriceAmount')
-                ) is not None:
-            line.unit_price = round_price(Decimal(price_amount))
-        else:
-            line.unit_price = round_price(
-                Decimal(invoice_line.findtext('./{*}LineExtensionAmount'))
-                / Decimal(str(line.quantity)))
+        line.unit_price = round_price(
+            Decimal(invoice_line.findtext('./{*}LineExtensionAmount'))
+            / Decimal(str(line.quantity or 1)))
 
         if invoice_line.find('./{*}Item/{*}ClassifiedTaxCategory') is not None:
             tax_categories = invoice_line.iterfind(
@@ -565,8 +622,11 @@ class Invoice(Model):
                         ],
                     ('company', '=', company.id),
                     ])
+            order = []
+            if hasattr(Tax, 'vatex_code'):
+                order.append(('vatex_code', 'ASC NULLS LAST'))
             try:
-                tax, = Tax.search(domain, limit=1)
+                tax, = Tax.search(domain, limit=1, order=order)
             except ValueError:
                 raise InvoiceError(gettext(
                         'edocument_ubl.msg_tax_not_found',
@@ -589,28 +649,39 @@ class Invoice(Model):
                     type_code=type_code))
 
         invoice = Invoice(type='in')
+
+        if (customer_party := root.find('./{*}AccountingCustomerParty')
+                ) is not None:
+            invoice.company = cls._parse_2_company(customer_party)
+        else:
+            invoice.company = Invoice.default_company()
+        if not invoice.company:
+            raise InvoiceError(gettext(
+                    'edocument_ubl.msg_company_not_found',
+                    company=etree.tostring(
+                        customer_party, pretty_print=True).decode()
+                    if customer_party else ''))
+
         invoice.reference = root.findtext('./{*}ID')
         invoice.invoice_date = dt.date.fromisoformat(
             root.findtext('./{*}IssueDate'))
         invoice.party = cls._parse_2_supplier(
-            root.find('./{*}AccountingSupplierParty'), create=True)
+            root.find('./{*}AccountingSupplierParty'), create=True).id
+        payees = [invoice.party]
         invoice.set_journal()
         invoice.on_change_party()
         if (seller := root.find('./{*}SellerSupplierParty')) is not None:
             supplier = cls._parse_2_supplier(seller)
         else:
             supplier = invoice.party
-        if (customer_party := root.find('./{*}AccountingCustomerParty')
-                ) is not None:
-            invoice.company = cls._parse_2_company(customer_party)
-        else:
-            invoice.company = Invoice.default_company()
+
         if (payee_party := root.find('./{*}PayeeParty')) is not None:
             party = cls._parse_2_party(payee_party)
             if not party:
                 party = cls._create_2_party(payee_party)
                 party.save()
             invoice.alternative_payees = [party]
+            payees.append(party)
         if (currency_code := root.findtext('./{*}DocumentCurrencyCode')
                 ) is not None:
             try:
@@ -621,8 +692,16 @@ class Invoice(Model):
                 raise InvoiceError(gettext(
                         'edocument_ubl.msg_currency_not_found',
                         code=currency_code))
+
+        invoice.supplier_payment_reference = root.findtext(
+            './{*}PaymentMeans/{*}PaymentID')
+        invoice.payment_means = cls._parse_2_payment_means(
+            root.findall('./{*}PaymentMeans'), payees=payees)
         invoice.payment_term_date = cls._parse_2_payment_term_date(
             root.findall('./{*}PaymentTerms'))
+        if not invoice.payment_term_date:
+            if due_date := root.findtext('./{*}DueDate'):
+                invoice.payment_term_date = dt.date.fromisoformat(due_date)
         lines = [
             cls._parse_credit_note_2_line(
                 line, company=invoice.company, currency=invoice.currency,
@@ -646,6 +725,29 @@ class Invoice(Model):
                     './{*}LegalMonetaryTotal/{*}PayableRoundingAmount')
                 is not None):
             invoice.cash_rounding = True
+
+        if tax_exclusive_amount := root.findtext(
+                './{*}LegalMonetaryTotal/{*}TaxExclusiveAmount'):
+            invoice.source_untaxed_amount = -Decimal(tax_exclusive_amount)
+
+        tax_amount = sum(Decimal(amount.text) for amount in root.iterfind(
+                './{*}TaxTotal/{*}TaxAmount'))
+        invoice.source_tax_amount = -tax_amount
+
+        payable_amount = Decimal(
+            root.findtext('./{*}LegalMonetaryTotal/{*}PayableAmount'))
+        prepaid_amount = Decimal(
+            root.findtext('./{*}LegalMonetaryTotal/{*}PrepaidAmount')
+            or 0)
+        total_amount = payable_amount + prepaid_amount
+        if not getattr(invoice, 'cash_rounding', False):
+            payable_rounding_amount = Decimal(
+                root.findtext(
+                    './{*}LegalMonetaryTotal/{*}PayableRoundingAmount')
+                or 0)
+            total_amount -= payable_rounding_amount
+        invoice.source_total_amount = -total_amount
+
         return invoice, cls._parse_2_attachments(root)
 
     @classmethod
@@ -664,7 +766,9 @@ class Invoice(Model):
         if (credited_quantity := credit_note_line.find('./{*}CreditedQuantity')
                 ) is not None:
             line.quantity = -float(credited_quantity.text)
-            digits = -Decimal(credited_quantity.text).as_tuple().exponent
+            digits = (
+                -Decimal(credited_quantity.text)
+                .normalize().as_tuple().exponent)
             if (unit_code := credited_quantity.get('unitCode')) not in {
                     None, 'ZZ', 'XZZ'}:
                 try:
@@ -751,13 +855,9 @@ class Invoice(Model):
             if line.origin:
                 break
 
-        if (price_amount := credit_note_line.findtext(
-                './{*}Price/{*}PriceAmount')) is not None:
-            line.unit_price = round_price(Decimal(price_amount))
-        else:
-            line.unit_price = round_price(
-                Decimal(credit_note_line.findtext('./{*}LineExtensionAmount'))
-                / line.quantity)
+        line.unit_price = round_price(
+            -Decimal(credit_note_line.findtext('./{*}LineExtensionAmount'))
+            / Decimal(str(line.quantity or -1)))
 
         if (credit_note_line.find('./{*}Item/{*}ClassifiedTaxCategory')
                 is not None):
@@ -967,9 +1067,8 @@ class Invoice(Model):
         address.building_number = address_el.findtext('./{*}BuildingNumber')
         address.city = address_el.findtext('./{*}CityName')
         address.postal_code = address_el.findtext('./{*}PostalZone')
-        if (country_code := address_el.findtext(
-                    './{*}Country/{*}IdentificationCode[@listId="ISO3166-1"]')
-                ) is not None:
+        if country_code := address_el.findtext(
+                './{*}Country/{*}IdentificationCode[@listId="ISO3166-1"]'):
             try:
                 country, = Country.search([
                         ('code', '=', country_code),
@@ -1068,11 +1167,24 @@ class Invoice(Model):
                 return company
 
     @classmethod
+    def _parse_2_payment_means(cls, payment_means, payees):
+        pool = Pool()
+        PaymentMean = pool.get('account.invoice.payment.mean')
+        means = []
+        for payment_mean in payment_means:
+            if instrument := cls._parse_2_payment_mean(payment_mean, payees):
+                means.append(PaymentMean(instrument=instrument))
+        return means
+
+    @classmethod
+    def _parse_2_payment_mean(cls, payment_mean, payees):
+        pass
+
+    @classmethod
     def _parse_2_payment_term_date(cls, payment_terms):
         dates = []
         for payment_term in payment_terms:
-            if (date := payment_term.findtext('./{*}PaymentDueDate')
-                    ) is not None:
+            if date := payment_term.findtext('./{*}PaymentDueDate'):
                 dates.append(dt.date.fromisoformat(date))
         return min(dates, default=None)
 
@@ -1095,8 +1207,7 @@ class Invoice(Model):
                     pass
                 else:
                     return product
-        if (code := item.findtext('./{*}BuyersItemIdentification/{*}ID')
-                ) is not None:
+        if code := item.findtext('./{*}BuyersItemIdentification/{*}ID'):
             try:
                 product, = Product.search([
                         ('code', '=', code),
@@ -1113,6 +1224,8 @@ class Invoice(Model):
 
     @classmethod
     def _parse_2_tax_category(cls, tax_category):
+        pool = Pool()
+        Tax = pool.get('account.tax')
         domain = [
             ('parent', '=', None),
             ]
@@ -1126,6 +1239,13 @@ class Invoice(Model):
         if percent:
             domain.append(('type', '=', 'percentage'))
             domain.append(('rate', '=', Decimal(percent) / 100))
+        if (hasattr(Tax, 'vatex_code')
+                and (tax_exemption_reason_code := tax_category.findtext(
+                        './{*}TaxExemptionReasonCode'))):
+            domain.append(['OR',
+                    ('vatex_code', '=', tax_exemption_reason_code),
+                    ('vatex_code', '=', None),
+                    ])
         return domain
 
     @classmethod
@@ -1188,13 +1308,16 @@ class Invoice(Model):
                         ) is not None:
                     mime_code = (
                         data.get('mimeCode') or 'application/octet-stream')
-                    name += mimetypes.guess_extension(mime_code) or ''
+                    if extension := mimetypes.guess_extension(mime_code):
+                        if not name.lower().endswith(extension):
+                            name += extension
                     attachment.type = 'data'
                     data = b64decode(data.text)
                     attachment.data = data
                 elif data := document.findtext(
                         './{*}Attachment/{*}EmbeddedDocument'):
-                    name += '.txt'
+                    if not name.lower().endswith('.txt'):
+                        name += '.txt'
                     attachment.type = 'data'
                     attachment.data = data
                 elif url := document.findtext(
@@ -1204,73 +1327,86 @@ class Invoice(Model):
                 attachment.name = name
                 yield attachment
 
-    @classmethod
-    def _check_invoice_2(cls, root, invoice):
-        pool = Pool()
-        Lang = pool.get('ir.lang')
-        lang = Lang.get()
 
-        payable_amount = Decimal(
-            root.findtext('./{*}LegalMonetaryTotal/{*}PayableAmount'))
-        prepaid_amount = Decimal(
-            root.findtext('./{*}LegalMonetaryTotal/{*}PrepaidAmount')
-            or 0)
-        amount = payable_amount + prepaid_amount
-        if not getattr(invoice, 'cash_rounding', False):
-            payable_rounding_amount = Decimal(
-                root.findtext(
-                    './{*}LegalMonetaryTotal/{*}PayableRoundingAmount')
-                or 0)
-            amount -= payable_rounding_amount
-        if invoice.total_amount != amount:
-            raise InvoiceError(gettext(
-                    'edocument_ubl.msg_invoice_total_amount_different',
-                    invoice=invoice.rec_name,
-                    total_amount=lang.format_number(invoice.total_amount),
-                    amount=lang.format_number(amount)))
-
-        tax_total = sum(Decimal(amount.text) for amount in root.iterfind(
-                './{*}TaxTotal/{*}TaxAmount'))
-        if invoice.tax_amount != tax_total:
-            raise InvoiceError(gettext(
-                    'edocument_ubl.msg_invoice_tax_amount_different',
-                    invoice=invoice.rec_name,
-                    tax_amount=lang.format_number(invoice.tax_amount),
-                    tax_total=lang.format_number(tax_total)))
+class Invoice_Bank(metaclass=PoolMeta):
+    __name__ = 'edocument.ubl.invoice'
 
     @classmethod
-    def _check_credit_note_2(cls, root, invoice):
+    def _parse_2_payment_mean(cls, payment_mean, payees):
         pool = Pool()
-        Lang = pool.get('ir.lang')
-        lang = Lang.get()
+        Account = pool.get('bank.account')
+        instrument = super()._parse_2_payment_mean(payment_mean, payees)
+        if (financial_account := payment_mean.find(
+                    './{*}PayeeFinancialAccount')) is not None:
+            identifier = financial_account.findtext('./{*}ID')
+            try:
+                account, = Account.search([
+                        ('numbers', 'where', ['OR',
+                                ('number', '=', identifier),
+                                ('number_compact', '=', identifier),
+                                ]),
+                        ('owners.id', 'in', payees),
+                        ], limit=1)
+            except ValueError:
+                party = payees[-1]
+                if party.id in Transaction().create_records['party.party']:
+                    account = cls._create_bank_account(
+                        financial_account, party)
+                    account.save()
+                else:
+                    raise InvoiceError(ngettext(
+                            'edocument_ubl.msg_bank_account_not_found',
+                            len(payees),
+                            parties=', '.join([p.rec_name for p in payees]),
+                            account=etree.tostring(
+                                financial_account,
+                                pretty_print=True).decode()))
+            instrument = account
+        return instrument
 
-        payable_amount = Decimal(
-            root.findtext('./{*}LegalMonetaryTotal/{*}PayableAmount'))
-        prepaid_amount = Decimal(
-            root.findtext('./{*}LegalMonetaryTotal/{*}PrepaidAmount')
-            or 0)
-        amount = payable_amount + prepaid_amount
-        if not getattr(invoice, 'cash_rounding', False):
-            payable_rounding_amount = Decimal(
-                root.findtext(
-                    './{*}LegalMonetaryTotal/{*}PayableRoundingAmount')
-                or 0)
-            amount -= payable_rounding_amount
-        if -invoice.total_amount != amount:
-            raise InvoiceError(gettext(
-                    'edocument_ubl.msg_invoice_total_amount_different',
-                    invoice=invoice.rec_name,
-                    total_amount=lang.format_number(-invoice.total_amount),
-                    amount=lang.format_number(amount)))
+    @classmethod
+    def _create_bank_account(cls, financial_account, party):
+        pool = Pool()
+        Bank = pool.get('bank')
+        Account = pool.get('bank.account')
+        Number = pool.get('bank.account.number')
+        account = Account(owners=[party])
+        if identifier := financial_account.findtext('./{*}ID'):
+            number = Number(number=identifier)
+            if iban.is_valid(identifier):
+                number.type = 'iban'
+            else:
+                number.type = 'other'
+            account.numbers = [number]
+        if identifier := financial_account.findtext(
+                './{*}FinancialInstitutionBranch/{*}ID'):
+            if bic.is_valid(identifier):
+                account.bank = Bank.from_bic(identifier)
+        return account
 
-        tax_total = sum(Decimal(amount.text) for amount in root.iterfind(
-                './{*}TaxTotal/{*}TaxAmount'))
-        if -invoice.tax_amount != tax_total:
-            raise InvoiceError(gettext(
-                    'edocument_ubl.msg_invoice_tax_amount_different',
-                    invoice=invoice.rec_name,
-                    tax_amount=lang.format_number(-invoice.tax_amount),
-                    tax_total=lang.format_number(tax_total)))
+
+class Invoice_Payment(metaclass=PoolMeta):
+    __name__ = 'edocument.ubl.invoice'
+
+    @classmethod
+    def _parse_invoice_2(cls, root):
+        invoice, attachments = super()._parse_invoice_2(root)
+        if root.find('./{*}PaymentMeans/{*}PaymentMandate') is not None:
+            invoice.payment_direct_debit = True
+        else:
+            invoice.payment_direct_debit = invoice.party.get_multivalue(
+                'payment_direct_debit', company=invoice.company.id)
+        return invoice, attachments
+
+    @classmethod
+    def _parse_credit_note_2(cls, root):
+        invoice, attachments = super()._parse_invoice_2(root)
+        if root.find('./{*}PaymentMeans/{*}PaymentMandate') is not None:
+            invoice.payment_direct_debit = True
+        else:
+            invoice.payment_direct_debit = invoice.party.get_multivalue(
+                'payment_direct_debit', company=invoice.company.id)
+        return invoice, attachments
 
 
 class Invoice_Purchase(metaclass=PoolMeta):

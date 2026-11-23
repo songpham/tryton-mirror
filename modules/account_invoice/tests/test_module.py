@@ -40,6 +40,7 @@ class AccountInvoiceTestCase(
         ModuleTestCase):
     'Test AccountInvoice module'
     module = 'account_invoice'
+    extras = ['bank']
 
     @with_transaction()
     def test_payment_term(self):
@@ -115,7 +116,7 @@ class AccountInvoiceTestCase(
                         ('create', [{
                                     'type': 'percent',
                                     'divisor': Decimal(3),
-                                    'ratio': Decimal('0.3333333333'),
+                                    'ratio': Decimal('0.33333333'),
                                     }, {
                                     'type': 'remainder',
                                     }]),

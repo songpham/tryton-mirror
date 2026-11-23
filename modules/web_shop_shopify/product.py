@@ -4,7 +4,6 @@ import re
 from decimal import Decimal
 from urllib.parse import urljoin
 
-import shopify
 from sql.conditionals import NullIf
 from sql.operators import Equal
 
@@ -13,7 +12,7 @@ from trytond.model import Exclude, ModelSQL, ModelView, fields
 from trytond.modules.product.exceptions import TemplateValidationError
 from trytond.pool import Pool, PoolMeta
 from trytond.pyson import Bool, Eval, If
-from trytond.tools import grouped_slice, slugify
+from trytond.tools import slugify
 from trytond.transaction import Transaction
 
 from . import graphql
@@ -47,12 +46,12 @@ class Category(IdentifiersMixin, metaclass=PoolMeta):
         shopify_id = self.get_shopify_identifier(shop)
         if shopify_id:
             shopify_id = id2gid('Collection', shopify_id)
-            collection = shopify.GraphQL().execute(
+            collection = shop.shopify_request(
                 QUERY_COLLECTION % {
                     'fields': graphql.selection({
                             'id': None,
                             }),
-                    }, {'id': shopify_id})['data']['collection'] or {}
+                    }, {'id': shopify_id}).data['collection'] or {}
         else:
             collection = {}
         collection['title'] = self.name[:255]
@@ -144,13 +143,13 @@ class Template(IdentifiersMixin, metaclass=PoolMeta):
         product = {}
         if shopify_id:
             shopify_id = id2gid('Product', shopify_id)
-            product = shopify.GraphQL().execute(
+            product = shop.shopify_request(
                 QUERY_PRODUCT % {
                     'fields': graphql.selection({
                             'id': None,
                             'status': None,
                             }),
-                    }, {'id': shopify_id})['data']['product'] or {}
+                    }, {'id': shopify_id}).data['product'] or {}
             if product.get('status') == 'ARCHIVED':
                 product['status'] = 'ACTIVE'
         product['title'] = self.name
@@ -240,6 +239,24 @@ class Template_SaleSecondaryUnit(metaclass=PoolMeta):
         return uom
 
 
+class Template_GiftCard(metaclass=PoolMeta):
+    __name__ = 'product.template'
+
+    @classmethod
+    def __setup__(cls):
+        super().__setup__()
+        readonly = cls.gift_card.states.get('readonly', False)
+        cls.gift_card.states['readonly'] = (
+            readonly | Eval('shopify_identifiers', []))
+
+    def get_shopify(self, shop, categories):
+        product = super().get_shopify(shop, categories)
+        if not product.get('id'):
+            # The product gift_card attribute cannot be changed after creation
+            product['giftCard'] = self.gift_card
+        return product
+
+
 class Product(IdentifiersMixin, metaclass=PoolMeta):
     __name__ = 'product.product'
 
@@ -280,12 +297,12 @@ class Product(IdentifiersMixin, metaclass=PoolMeta):
         shopify_id = self.get_shopify_identifier(shop)
         if shopify_id:
             shopify_id = id2gid('ProductVariant', shopify_id)
-            variant = shopify.GraphQL().execute(
+            variant = shop.shopify_request(
                 QUERY_VARIANT % {
                     'fields': graphql.selection({
                             'id': None,
                             }),
-                    }, {'id': shopify_id})['data']['productVariant'] or {}
+                    }, {'id': shopify_id}).data['productVariant'] or {}
         else:
             variant = {}
         sale_price = self.shopify_price(
@@ -365,6 +382,21 @@ class Product(IdentifiersMixin, metaclass=PoolMeta):
             factor=self.shopify_uom_factor, rate=self.shopify_uom_rate)
 
 
+class Product_GiftCard(metaclass=PoolMeta):
+    __name__ = 'product.product'
+
+    def get_shopify(
+            self, shop, sale_price, sale_tax, price, tax,
+            shop_taxes_included=True):
+        variant = super().get_shopify(
+            shop, sale_price, sale_tax, price, tax,
+            shop_taxes_included=shop_taxes_included)
+        if self.gift_card:
+            # taxable is readonly for gift card on Shopify
+            variant.pop('taxable', None)
+        return variant
+
+
 class ProductURL(metaclass=PoolMeta):
     __name__ = 'product.web_shop_url'
 
@@ -372,7 +404,7 @@ class ProductURL(metaclass=PoolMeta):
         url = super().get_url(name)
         if (self.shop.type == 'shopify'
                 and (handle := self.product.template.shopify_handle)):
-            url = urljoin(self.shop.shopify_url + '/', f'products/{handle}')
+            url = urljoin(self.shop.shopify_url, f'products/{handle}')
         return url
 
 
@@ -481,11 +513,9 @@ class Product_TariffCode(IdentifiersUpdateMixin, metaclass=PoolMeta):
             elif isinstance(record.product, Category):
                 categories.add(record.product)
         if categories:
-            for sub_categories in grouped_slice(list(categories)):
-                templates.update(Template.search([
-                            ('customs_category', 'in',
-                                [c.id for c in sub_categories]),
-                            ]))
+            templates.update(Template.search([
+                        ('customs_category', 'in', map(int, categories)),
+                        ]))
         templates = Template.browse(list(templates))
         return Template.get_shopify_identifier_to_update(templates)
 
@@ -579,11 +609,9 @@ class AttributeSet(IdentifiersUpdateMixin, metaclass=PoolMeta):
     def get_shopify_identifier_to_update(cls, sets):
         pool = Pool()
         Template = pool.get('product.template')
-        templates = []
-        for sub_sets in grouped_slice(sets):
-            templates.extend(Template.search([
-                        ('attribute_set', 'in', [s.id for s in sub_sets]),
-                        ]))
+        templates = Template.search([
+                ('attribute_set', 'in', sets),
+                ])
         return Template.get_shopify_identifier_to_update(templates)
 
 
@@ -684,11 +712,11 @@ class Image(IdentifiersMixin, metaclass=PoolMeta):
         Identifier = pool.get('web.shop.shopify_identifier')
         callback = super().on_write(images, values)
         if values.keys() & {'image', 'template', 'web_shop'}:
-            to_delete = []
+            delete = Identifier.bulk_delete(auto=False)
             for image in images:
-                to_delete.extend(image.shopify_identifiers)
-            if to_delete:
-                callback.append(lambda: Identifier.delete(to_delete))
+                delete.extend(image.shopify_identifiers)
+            if delete:
+                callback.append(delete.flush)
         return callback
 
     @classmethod

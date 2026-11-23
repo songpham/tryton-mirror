@@ -63,7 +63,8 @@ class InvoiceDeferred(Workflow, ModelSQL, ModelView):
     company = fields.Many2One(
         'company.company', "Company", required=True,
         states={
-            'readonly': (Eval('state') != 'draft') & Eval('invoice_line'),
+            'readonly': Eval('state') != 'draft',
+            'editable': ~Eval('invoice_line'),
             })
     type = fields.Selection([
             ('out', "Customer"),
@@ -224,13 +225,12 @@ class InvoiceDeferred(Workflow, ModelSQL, ModelView):
     @classmethod
     def close_try(cls, deferrals):
         "Try to close the deferrals if last move has been created"
-        to_close = []
-        for deferral in deferrals:
-            if deferral.moves:
-                last_move = deferral.moves[-1]
-                if last_move.period.end_date >= deferral.end_date:
-                    to_close.append(deferral)
-        cls.close(to_close)
+        with cls.bulk_func('close', auto=False) as close:
+            for deferral in deferrals:
+                if deferral.moves:
+                    last_move = deferral.moves[-1]
+                    if last_move.period.end_date >= deferral.end_date:
+                        close.push(deferral)
 
     @classmethod
     @Workflow.transition('closed')
@@ -284,21 +284,20 @@ class InvoiceDeferred(Workflow, ModelSQL, ModelView):
                     key=lambda p: p.start_date):
                 moves.append(deferral.get_move(period))
         Move.save(moves)
-        to_save = []
-        for deferral in deferrals:
-            if deferral.moves:
-                last_move = deferral.moves[-1]
-                if last_move.period.end_date >= deferral.end_date:
-                    remainder = deferral.amount_remainder
-                    if remainder:
-                        for line in last_move.lines:
-                            if line.debit:
-                                line.debit -= remainder
-                            else:
-                                line.credit -= remainder
-                        last_move.lines = last_move.lines
-                        to_save.append(last_move)
-        Move.save(to_save)
+        with Move.bulk_save() as save:
+            for deferral in deferrals:
+                if deferral.moves:
+                    last_move = deferral.moves[-1]
+                    if last_move.period.end_date >= deferral.end_date:
+                        remainder = deferral.amount_remainder
+                        if remainder:
+                            for line in last_move.lines:
+                                if line.debit:
+                                    line.debit -= remainder
+                                else:
+                                    line.credit -= remainder
+                            last_move.lines = last_move.lines
+                            save.push(last_move)
         Move.post(moves)
 
     @property
@@ -426,7 +425,9 @@ class Period(metaclass=PoolMeta):
     @classmethod
     def close(cls, periods):
         for period in periods:
-            period.check_invoice_deferred_running()
+            if period.type == 'standard':
+                # Invoice deferred creates moves only on standard period
+                period.check_invoice_deferred_running()
         super().close(periods)
 
     def check_invoice_deferred_running(self):

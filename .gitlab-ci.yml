@@ -22,6 +22,12 @@ packages:
   image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/tryton/ci
   variables:
     DOC_BASE_URL: ${CI_PROJECT_DIR}/docs
+    PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  cache:
+    paths:
+      - .cache/pip/http-v2
+  before_script:
+    - pip install build "hatchling >= 1" hatch-tryton babel rnc2rng
   script:
     - .gitlab-scripts/generate-packages.sh packages
   artifacts:
@@ -32,6 +38,14 @@ packages:
 documentation:
   stage: preparation
   image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/sphinxdoc/sphinx
+  variables:
+    DOC_NO_ISOLATION: true
+    PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  cache:
+    paths:
+      - .cache/pip/http-v2
+  before_script:
+    - pip install build "hatchling >= 1" hatch-tryton babel rnc2rng
   script:
     - .gitlab-scripts/generate-doc.sh docs
     - find docs -type f -not -name 'objects.inv' -delete
@@ -60,13 +74,14 @@ documentation:
   variables:
     DOC_BASE_URL: ${CI_PROJECT_DIR}/docs
     DOC_DIR: doc
+    DOC_NO_ISOLATION: true
     PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
   cache:
     paths:
       - .cache/pip/http-v2
   before_script:
-    - pip install setuptools
     - pip install -r "${PACKAGE}/${DOC_DIR}/requirements-doc.txt"
+    - pip install build "hatchling >= 1" hatch-tryton babel rnc2rng
     - pip install sphinx-lint rstcheck[sphinx]
   script:
     - cd "${PACKAGE}"
@@ -133,10 +148,9 @@ check-isort:
     - isort --multi-line VERTICAL_GRID --check --diff --skip-glob 'cookiecutter*' .
 
 check-dist:
-  stage: check
+  extends: .check
   needs:
     - packages
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/tryton/ci
   script:
     - twine check packages/*
 
@@ -148,11 +162,9 @@ check-eslint:
   cache:
     paths:
       - .cache/npm
-  before_script:
-    - sh .gitlab-scripts/bower_allow_root.sh
   script:
     - cd sao
-    - npm install --cache ${NODE_CACHE_DIR} --unsafe-perm --legacy-peer-deps
+    - npm install --cache ${NODE_CACHE_DIR} --unsafe-perm
     - npm run check
   rules:
     - if: $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == $CI_DEFAULT_BRANCH
@@ -213,8 +225,6 @@ check-account-chart:
         - modules/account/account_chart*.xml
         - modules/account_be/account_be*.xml
         - modules/account_be/tax_be*.xml
-        - modules/account_es/account*.xml
-        - modules/account_es/tax*.xml
         - modules/account_syscohada/account_syscohada*.xml
       when: on_success
     - when: never
@@ -242,7 +252,9 @@ check-account-chart:
   before_script:
     - pip install tox
   script:
-    - tox -e "py${PYTHON_VERSION/./}" -c "${PACKAGE}" -- -v --output-file junit.xml
+    - tox -e "py${PYTHON_VERSION/./}" -c "${PACKAGE}" -- -v --output-file "${CI_PROJECT_DIR}/${PACKAGE}/junit.xml"
+  after_script:
+    - .gitlab-scripts/rewrite-coverage-paths.py "trytond/" "" ${PACKAGE}/junit.xml ${PACKAGE}/coverage.xml
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   artifacts:
     reports:
@@ -252,19 +264,20 @@ check-account-chart:
         path: ${PACKAGE}/coverage.xml
   parallel:
     matrix:
-      - PYTHON_VERSION: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+      - PYTHON_VERSION: ["3.10", "3.11", "3.12", "3.13", "3.14"]
 
 .test-db:
   extends: .test-tox
   variables:
     DB_CACHE: "${TMPDIR}/cache"
   script:
-    - tox -e "py${PYTHON_VERSION/./}-${DATABASE}" -c "${PACKAGE}" -- -v --output-file junit.xml
+    - tox -e "py${PYTHON_VERSION/./}-${DATABASE}" -c "${PACKAGE}" -- -v --output-file "${CI_PROJECT_DIR}/${PACKAGE}/junit.xml"
 
 .test-sqlite:
   extends: .test-db
   variables:
     DATABASE: sqlite
+    TEST_NETWORK: 0
 
 .test-postgresql:
   extends: .test-db
@@ -273,13 +286,14 @@ check-account-chart:
     DB_CACHE: postgresql://
     POSTGRESQL_URI: postgresql://postgres@postgresql:5432/
     POSTGRES_HOST_AUTH_METHOD: trust
+    TEST_NETWORK: 1
   services:
     - name: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/postgres
       alias: postgresql
       command: ["-c", "fsync=off", "-c", "synchronous_commit=off", "-c", "full_page_writes=off"]
   parallel:
     matrix:
-      - PYTHON_VERSION: ["3.13"]
+      - PYTHON_VERSION: ["3.14"]
 
 .test-postgis:
   extends: .test-db
@@ -288,7 +302,7 @@ check-account-chart:
     POSTGIS_URI: postgis://postgres@postgis:5432/
     POSTGRES_HOST_AUTH_METHOD: trust
   script:
-    - tox -e "py${PYTHON_VERSION/./}" -c "${PACKAGE}" -- -v --output-file junit.xml
+    - tox -e "py${PYTHON_VERSION/./}" -c "${PACKAGE}" -- -v --output-file "${CI_PROJECT_DIR}/${PACKAGE}/junit.xml"
   services:
     - name: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/postgis/postgis
       alias: postgis
@@ -302,11 +316,9 @@ check-account-chart:
   cache:
     paths:
       - .cache/npm
-  before_script:
-    - sh .gitlab-scripts/bower_allow_root.sh
   script:
     - cd "${PACKAGE}"
-    - npm -s install --cache ${NODE_CACHE_DIR} --unsafe-perm --legacy-peer-deps
+    - npm -s install --cache ${NODE_CACHE_DIR} --unsafe-perm
     - npm test
   artifacts:
     reports:
@@ -317,40 +329,24 @@ check-doc-trytond:
   variables:
     PACKAGE: trytond
 
-check-trytond-rng:
-  extends: .check
-  variables:
-    PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
-  cache:
-    paths:
-      - .cache/pip/http-v2
-  before_script:
-    - pip install rnc2rng
-  script:
-    - python trytond/setup.py update_rng
-    - |
-      if [ `hg status trytond| wc -l` -ne 0 ]; then
-        false
-      fi
-  rules:
-    - changes:
-        - trytond/**/*.rnc
-        - trytond/**/*.rng
-
 test-trytond-sqlite:
   extends: .test-sqlite
+  after_script:
+    - .gitlab-scripts/rewrite-coverage-paths.py "" "${PACKAGE}/" ${PACKAGE}/junit.xml ${PACKAGE}/coverage.xml
   variables:
     PACKAGE: trytond
     TAG_PATTERN: '/^trytond-.*/'
 
 test-trytond-postgresql:
   extends: .test-postgresql
+  after_script:
+    - .gitlab-scripts/rewrite-coverage-paths.py "" "${PACKAGE}/" ${PACKAGE}/junit.xml ${PACKAGE}/coverage.xml
   variables:
     PACKAGE: trytond
     TAG_PATTERN: '/^trytond-.*/'
   parallel:
     matrix:
-      - PYTHON_VERSION: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+      - PYTHON_VERSION: ["3.10", "3.11", "3.12", "3.13", "3.14"]
 
 check-doc-trytond-gis:
   extends: .check-doc
@@ -359,6 +355,8 @@ check-doc-trytond-gis:
 
 test-trytond-gis-postgis:
   extends: .test-postgis
+  after_script:
+    - .gitlab-scripts/rewrite-coverage-paths.py "" "${PACKAGE}/" ${PACKAGE}/junit.xml ${PACKAGE}/coverage.xml
   variables:
     PACKAGE: trytond-gis
     TAG_PATTERN: '/^trytond-gis-.*/'
@@ -370,9 +368,24 @@ check-doc-proteus:
 
 test-proteus:
   extends: .test-tox
+  after_script:
+    - .gitlab-scripts/rewrite-coverage-paths.py "" "${PACKAGE}/" ${PACKAGE}/junit.xml ${PACKAGE}/coverage.xml
   variables:
     PACKAGE: proteus
     TAG_PATTERN: '/^proteus-.*/'
+
+check-doc-naiad:
+  extends: .check-doc
+  variables:
+    PACKAGE: naiad
+
+test-naiad:
+  extends: .test-tox
+  after_script:
+    - .gitlab-scripts/rewrite-coverage-paths.py "" "${PACKAGE}/" ${PACKAGE}/junit.xml ${PACKAGE}/coverage.xml
+  variables:
+    PACKAGE: naiad
+    TAG_PATTERN: '/^naiad-.*/'
 
 check-doc-tryton:
   extends: .check-doc
@@ -382,6 +395,8 @@ check-doc-tryton:
 test-tryton:
   extends: .test-tox
   image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/tryton/tryton-test:${PYTHON_VERSION}
+  after_script:
+    - .gitlab-scripts/rewrite-coverage-paths.py "" "${PACKAGE}/" ${PACKAGE}/junit.xml ${PACKAGE}/coverage.xml
   variables:
     PACKAGE: tryton
     TAG_PATTERN: '/^tryton-.*/'
@@ -395,7 +410,7 @@ test-sao:
 
 test-demo:
   stage: test
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/python:3.9
+  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/python:3.10
   variables:
     TRYTOND_DATABASE__PATH: "$TMPDIR"
     PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"

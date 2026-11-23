@@ -7,7 +7,7 @@ Imports::
     >>> from decimal import Decimal
 
     >>> from proteus import Model
-    >>> from trytond.modules.company.tests.tools import create_company, get_company
+    >>> from trytond.modules.company.tests.tools import create_company
     >>> from trytond.modules.currency.tests.tools import get_currency
     >>> from trytond.tests.tools import activate_modules
 
@@ -68,8 +68,6 @@ Make a production with 2 unused component::
     >>> output.quantity = 2
     >>> output.unit_price = Decimal(0)
     >>> output.currency = get_currency()
-    >>> output.from_location = production.location
-    >>> output.to_location = production.warehouse.storage_location
     >>> production.click('do')
 
 Check output price::
@@ -84,7 +82,9 @@ Change cost of input::
 
     >>> Move = Model.get('stock.move')
     >>> input, = production.inputs
-    >>> Move.write([input], {'cost_price': Decimal(6)}, config.context)
+    >>> Move.write(
+    ...     [input], {'cost_price': Decimal(6)},
+    ...     {**config.context, '_check_access': False})
     >>> input.reload()
     >>> bool(input.production_cost_price_updated)
     True
@@ -95,7 +95,6 @@ Launch cron task::
     >>> cron_set_cost, = Cron.find([
     ...     ('method', '=', 'production|set_cost_from_moves'),
     ...     ])
-    >>> cron_set_cost.companies.append(get_company())
     >>> cron_set_cost.click('run_once')
 
     >>> production.reload()

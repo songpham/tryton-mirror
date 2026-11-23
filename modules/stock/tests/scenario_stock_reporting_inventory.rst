@@ -12,6 +12,7 @@ Imports::
     >>> from trytond.ir.date import Date
     >>> from trytond.modules.company.tests.tools import create_company
     >>> from trytond.modules.currency.tests.tools import get_currency
+    >>> from trytond.modules.stock.move import Move
     >>> from trytond.tests.tools import activate_modules, assertEqual
 
     >>> period_close = globals().get('period_close', False)
@@ -21,6 +22,12 @@ Patch today::
 
     >>> mock = patch.object(Date, 'today', return_value=dt.date(2025, 1, 15))
     >>> _ = mock.start()
+
+Patch on_change_with_assignation_required::
+
+    >>> _ = patch.object(
+    ...     Move, 'on_change_with_assignation_required',
+    ...     return_value=False).start()
 
 Activate modules::
 
@@ -43,6 +50,8 @@ Get currency::
 Create product::
 
     >>> unit, = ProductUom.find([('name', '=', 'Unit')])
+    >>> box2, = unit.duplicate(default={'factor': 2, 'rate': .5})
+    >>> box10, = unit.duplicate(default={'factor': 10, 'rate': .1})
 
     >>> template = ProductTemplate()
     >>> template.name = 'Product'
@@ -89,8 +98,8 @@ Fill warehouse::
     >>> move.product = product
     >>> move.from_location = storage_loc
     >>> move.to_location = customer_loc
-    >>> move.unit = unit
-    >>> move.quantity = 2
+    >>> move.unit = box2
+    >>> move.quantity = 1
     >>> move.effective_date = dt.date(2025, 1, 10)
     >>> move.unit_price = Decimal('20.0000')
     >>> move.currency = currency
@@ -104,7 +113,8 @@ Forecast some moves::
     >>> move.product = product
     >>> move.from_location = supplier_loc
     >>> move.to_location = storage_loc
-    >>> move.quantity = 10
+    >>> move.unit = box10
+    >>> move.quantity = 1
     >>> move.effective_date = dt.date(2025, 1, 5)
     >>> move.unit_price = Decimal('10.0000')
     >>> move.currency = currency
@@ -237,3 +247,31 @@ Check Inventory turnover::
     >>> turnover.turnover
     0.045
     >>> assertEqual(turnover.product_reference.__class__.__name__, product_type)
+
+    >>> with config.set_context(
+    ...         location=warehouse_loc.id,
+    ...         from_date=dt.date(2025, 1, 1),
+    ...         to_date=dt.date(2025, 1, 1),
+    ...         product_type=product_type):
+    ...     turnover, = InventoryTurnover.find([])
+
+    >>> turnover.output_quantity
+    1.0
+    >>> turnover.average_quantity
+    10.0
+    >>> turnover.turnover
+    0.1
+
+    >>> with config.set_context(
+    ...         location=warehouse_loc.id,
+    ...         from_date=dt.date(2025, 1, 1),
+    ...         to_date=dt.date(2025, 1, 5),
+    ...         product_type=product_type):
+    ...     turnover, = InventoryTurnover.find([])
+
+    >>> turnover.output_quantity
+    0.2
+    >>> turnover.average_quantity
+    9.2
+    >>> turnover.turnover
+    0.022

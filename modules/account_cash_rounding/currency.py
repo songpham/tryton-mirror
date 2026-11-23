@@ -3,6 +3,7 @@
 from decimal import ROUND_HALF_EVEN
 
 from trytond.model import fields
+from trytond.modules.currency import ROUNDING_OPPOSITES
 from trytond.pool import PoolMeta
 from trytond.pyson import Eval
 
@@ -12,7 +13,17 @@ class Currency(metaclass=PoolMeta):
 
     cash_rounding = fields.Numeric(
         "Cash Rounding Factor",
-        digits=(None, Eval('digits', None)))
+        digits=(None, Eval('digits', None)),
+        domain=['OR',
+            ('cash_rounding', '=', None),
+            ('cash_rounding', '>', 0),
+            ])
 
-    def cash_round(self, amount, rounding=ROUND_HALF_EVEN):
-        return self._round(amount, self.cash_rounding, rounding)
+    def cash_round(self, amount, rounding=ROUND_HALF_EVEN, opposite=False):
+        if opposite:
+            rounding = ROUNDING_OPPOSITES[rounding]
+        if self.cash_rounding is not None:
+            factor = self.cash_rounding
+        else:
+            factor = self.rounding
+        return self._round(amount, factor, rounding)

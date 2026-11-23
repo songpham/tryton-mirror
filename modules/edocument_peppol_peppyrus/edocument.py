@@ -5,11 +5,12 @@ import uuid
 from base64 import b64decode, b64encode
 from functools import wraps
 from io import BytesIO
-from urllib.parse import quote, urljoin
+from urllib.parse import urljoin
 
 import requests
 from lxml import etree
 
+import trytond.config as config
 from trytond.i18n import gettext
 from trytond.model import fields
 from trytond.modules.edocument_peppol.exceptions import PeppolServiceError
@@ -17,7 +18,6 @@ from trytond.pool import Pool, PoolMeta
 from trytond.protocols.wrappers import HTTPStatus
 from trytond.pyson import Eval
 from trytond.transaction import Transaction
-from trytond.url import http_host
 
 from .exceptions import PeppyrusCredentialWarning, PeppyrusError
 
@@ -102,29 +102,21 @@ class PeppolService(metaclass=PoolMeta):
 
     @fields.depends('peppyrus_identifier')
     def on_change_with_peppyrus_incoming_webhook(self, name=None):
+        pool = Pool()
+        PeppyrusRouter = pool.get('edocument_peppol_peppyrus', type='router')
         if self.peppyrus_identifier:
-            url_part = {
-                'identifier': self.peppyrus_identifier,
-                'database_name': Transaction().database.name,
-                }
-            return http_host() + (
-                quote(
-                    '/%(database_name)s/edocument_peppol_peppyrus/'
-                    '%(identifier)s/in'
-                    % url_part))
+            return PeppyrusRouter.url_for(
+                'incoming', identifier=self.peppyrus_identifier,
+                _method='POST')
 
     @fields.depends('peppyrus_identifier')
     def on_change_with_peppyrus_outgoing_webhook(self, name=None):
+        pool = Pool()
+        PeppyrusRouter = pool.get('edocument_peppol_peppyrus', type='router')
         if self.peppyrus_identifier:
-            url_part = {
-                'identifier': self.peppyrus_identifier,
-                'database_name': Transaction().database.name,
-                }
-            return http_host() + (
-                quote(
-                    '/%(database_name)s/edocument_peppol_peppyrus/'
-                    '%(identifier)s/out'
-                    % url_part))
+            return PeppyrusRouter.url_for(
+                'outgoing', identifier=self.peppyrus_identifier,
+                _method='POST')
 
     @classmethod
     def peppyrus_new_identifier(cls, services):
@@ -138,17 +130,24 @@ class PeppolService(metaclass=PoolMeta):
     @peppyrus_api
     def _post_peppyrus(self, document):
         tree = etree.parse(BytesIO(document.data))
+        if not (sender := self._peppyrus_sender(document.type, tree)):
+            raise PeppolServiceError("Missing sender")
+        if not (recipient := self._peppyrus_recipient(document.type, tree)):
+            raise PeppolServiceError("Missing recipient")
         response = requests.post(
             urljoin(URLS[self.peppyrus_server], 'message'),
             json={
-                'sender': self._peppyrus_sender(document.type, tree),
-                'recipient': self._peppyrus_recipient(document.type, tree),
+                'sender': sender,
+                'recipient': recipient,
                 'processType': (
                     self._peppyrus_process_type(document.type, tree)),
                 'documentType': (
                     self._peppyrus_document_type(document.type, tree)),
                 'fileContent': b64encode(document.data).decode(),
                 },
+            timeout=config.getfloat(
+                'edocument_peppol_peppyrus', 'requests_timeout',
+                default=300),
             headers={
                 'Accept': 'application/json',
                 'X-Api-Key': self.peppyrus_api_key,
@@ -190,10 +189,15 @@ class PeppolService(metaclass=PoolMeta):
     @peppyrus_api
     def _update_status_peppyrus(self, document):
         assert document.direction == 'out'
+        if not document.transmission_id:
+            return
         response = requests.get(
             urljoin(
                 URLS[self.peppyrus_server],
                 f'message/{document.transmission_id}'),
+            timeout=config.getfloat(
+                'edocument_peppol_peppyrus', 'requests_timeout',
+                default=300),
             headers={
                 'Accept': 'application/json',
                 'X-Api-Key': self.peppyrus_api_key,
@@ -215,6 +219,9 @@ class PeppolService(metaclass=PoolMeta):
             urljoin(
                 URLS[self.peppyrus_server],
                 f'message/{document.transmission_id}/report'),
+            timeout=config.getfloat(
+                'edocument_peppol_peppyrus', 'requests_timeout',
+                default=300),
             headers={
                 'Accept': 'application/json',
                 'X-Api-Key': self.peppyrus_api_key,
@@ -240,6 +247,9 @@ class PeppolService(metaclass=PoolMeta):
                 'confirmed': 'false',
                 'perPage': 100,
                 },
+            timeout=config.getfloat(
+                'edocument_peppol_peppyrus', 'requests_timeout',
+                default=300),
             headers={
                 'Accept': 'application/json',
                 'X-Api-Key': self.peppyrus_api_key,
@@ -260,6 +270,9 @@ class PeppolService(metaclass=PoolMeta):
                     urljoin(
                         URLS[server],
                         f"message/{message['id']}/confirm"),
+                    timeout=config.getfloat(
+                        'edocument_peppol_peppyrus', 'requests_timeout',
+                        default=300),
                     headers={
                         'Accept': 'application/json',
                         'X-Api-Key': api_key,

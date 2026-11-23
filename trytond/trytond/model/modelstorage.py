@@ -5,15 +5,17 @@ import base64
 import csv
 import datetime
 import decimal
+import json
 import math
 import random
+import sys
 import time
 import warnings
 from collections import defaultdict
 from decimal import Decimal
 from functools import lru_cache
 from io import StringIO
-from itertools import chain, groupby, islice
+from itertools import chain, groupby, islice, tee
 from operator import itemgetter
 
 import trytond.config as config
@@ -29,13 +31,14 @@ from trytond.tools import (
 from trytond.tools.domain_inversion import domain_inversion, eval_domain
 from trytond.tools.domain_inversion import parse as domain_parse
 from trytond.transaction import (
-    Transaction, inactive_records, record_cache_size, without_check_access)
+    Transaction, check_access, inactive_records, record_cache_size,
+    without_check_access)
 
 from . import fields
 from .descriptors import dualmethod
 from .model import Model
 
-__all__ = ['ModelStorage', 'EvalEnvironment']
+__all__ = ['ModelStorage', 'BrowseList', 'EvalEnvironment']
 
 
 def local_cache(Model, transaction=None):
@@ -97,6 +100,21 @@ def is_leaf(expression):
         and expression[1] in OPERATORS)  # TODO remove OPERATORS test
 
 
+class _search_RPC(RPC):
+    def convert(self, obj, *args, **kwargs):
+        args, kwargs, context, timestamp = super().convert(
+            obj, *args, **kwargs)
+        context['_search_prefetch'] = False
+        return args, kwargs, context, timestamp
+
+
+def _rpc_record_ids(lst):
+    if isinstance(lst, BrowseList):
+        return lst.ids
+    else:
+        return list(map(int, lst))
+
+
 class ModelStorage(Model):
     """
     Define a model with storage capability in Tryton.
@@ -137,7 +155,7 @@ class ModelStorage(Model):
                         size_limits={
                             0: request_records_limit,
                             },
-                        result=lambda r: list(map(int, r))),
+                        result=_rpc_record_ids),
                     'read': RPC(
                         timeout=request_timeout,
                         size_limits={
@@ -162,9 +180,9 @@ class ModelStorage(Model):
                         size_limits={
                             0: request_records_limit,
                             },
-                        result=lambda r: list(map(int, r))),
-                    'search': RPC(
-                        result=lambda r: list(map(int, r)),
+                        result=_rpc_record_ids),
+                    'search': _search_RPC(
+                        result=_rpc_record_ids,
                         size_limits={
                             2: request_records_limit,
                             },
@@ -245,6 +263,30 @@ class ModelStorage(Model):
                             resource=record, event=event, target=target,
                             user=user, **extra))
 
+    @dualmethod
+    def notify_user(
+            cls, records, icon, label, description=None, user=None, **extra):
+        pool = Pool()
+        Notification = pool.get('res.notification')
+        if isinstance(records, BrowseList):
+            record_ids = records.ids
+        else:
+            record_ids = [r.id for r in records]
+        records_json = json.dumps(record_ids)
+        for transaction, sub_records in groupby(
+                records, lambda r: r._transaction):
+            with Transaction().set_current_transaction(transaction):
+                if user is None:
+                    user = transaction.user
+                transaction.user_notifications.append(Notification(
+                        user=user,
+                        icon=icon,
+                        label=label,
+                        description=description,
+                        model=cls.__name__,
+                        records=records_json,
+                        **extra))
+
     @classmethod
     def preprocess_values(cls, mode, values):
         assert mode in {'create', 'write'}
@@ -282,7 +324,7 @@ class ModelStorage(Model):
         raise NotImplementedError
 
     @classmethod
-    def _after_create(cls, ids):
+    def _after_create(cls, ids, vlist):
         Trigger = Pool().get('ir.trigger')
         transaction = Transaction()
         check_access = transaction.user and transaction.check_access
@@ -294,7 +336,7 @@ class ModelStorage(Model):
                 records = cls.browse(sub_ids)
                 cls._validate(records)
                 cls.check_modification(
-                    'create', records, external=check_access)
+                    'create', records, values=vlist, external=check_access)
                 cls._compute_fields(records)
                 cls.on_modification('create', records)
                 if triggers:
@@ -303,6 +345,10 @@ class ModelStorage(Model):
 
             transaction.create_records[cls.__name__].extend(ids)
             return ids
+
+    @classmethod
+    def bulk_create(cls, batch_size=None, auto=True):
+        return BulkBuffer(cls.create, batch_size=batch_size, auto=auto)
 
     @classmethod
     def _before_read(cls, ids, fields_names):
@@ -339,6 +385,7 @@ class ModelStorage(Model):
         Trigger = pool.get('ir.trigger')
         transaction = Transaction()
         check_access = transaction.user and transaction.check_access
+        log = transaction.context.get('_log', False)
 
         assert not len(args) % 2
 
@@ -358,7 +405,7 @@ class ModelStorage(Model):
                 on_write.extend(cls.on_write(records, values))
                 args.append(records)
                 args.append(cls.preprocess_values('write', values))
-                if check_access and values:
+                if (check_access or log) and values:
                     cls.log(records, 'write', ','.join(sorted(values.keys())))
                 field_names.update(values.keys())
                 all_records.extend(records)
@@ -377,10 +424,6 @@ class ModelStorage(Model):
 
         # Increase transaction counter
         transaction.counter += 1
-
-        # Clean local cache
-        for record in all_records:
-            record._local_cache.pop(record.id, None)
 
         # Clean transaction cache
         for cache in transaction.cache.values():
@@ -431,6 +474,7 @@ class ModelStorage(Model):
         Trigger = pool.get('ir.trigger')
         transaction = Transaction()
         check_access = transaction.user and transaction.check_access
+        log = transaction.context.get('_log', False)
 
         ModelAccess.check(cls.__name__, 'delete')
         cls.__check_xml_record(records, None)
@@ -438,7 +482,7 @@ class ModelStorage(Model):
             cls.check_modification('delete', records, external=check_access)
             if ModelData.has_model(cls.__name__):
                 ModelData.clean(records)
-            if check_access:
+            if check_access or log:
                 cls.log(records, 'delete')
             on_delete = cls.on_delete(records)
             cls.on_modification('delete', records)
@@ -449,12 +493,16 @@ class ModelStorage(Model):
                     # Do not queue because records will be deleted
                     trigger.trigger_action(records)
 
+        if isinstance(records, BrowseList):
+            record_ids = records.ids
+        else:
+            record_ids = [r.id for r in records]
+        for fname, field in cls._fields.items():
+            if isinstance(field, fields.Binary):
+                field.queue_for_removal(cls, fname, record_ids)
+
         # Increase transaction counter
         transaction.counter += 1
-
-        # Clean local cache
-        for record in records:
-            record._local_cache.pop(record.id, None)
 
         # Clean transaction cache
         for cache in transaction.cache.values():
@@ -469,7 +517,8 @@ class ModelStorage(Model):
                     'cache', 'count_clear', default=1000):
                 cls._count_cache.set(cls.__name__, None)
             else:
-                cls._count_cache.set(cls.__name__, count - len(records))
+                cls._count_cache.set(
+                    cls.__name__, max(count - len(records), 0))
 
         ids = [r.id for r in records]
         if cls.__name__ in transaction.delete_records:
@@ -491,17 +540,76 @@ class ModelStorage(Model):
     @classmethod
     @without_check_access
     def _after_delete(cls, ids, on_delete):
+        from trytond.ir.resource import ResourceMixin
         pool = Pool()
         Translation = pool.get('ir.translation')
         if any(getattr(f, 'translate', False) and not hasattr(f, 'set')
                 for f in cls._fields.values()):
             Translation.delete_ids(cls.__name__, 'model', ids)
+        resource_models = (
+            m for _, m in pool.iterobject() if issubclass(m, ResourceMixin))
+        resources = [f'{cls.__name__},{id}' for id in ids]
+        for model in resource_models:
+            model.delete(model.search([('resource', 'in', resources)]))
         for meth in on_delete:
             meth()
 
     @classmethod
+    def bulk_delete(cls, batch_size=None, auto=True):
+        return BulkBuffer(cls.delete, batch_size=batch_size, auto=auto)
+
+    @classmethod
     def check_modification(cls, mode, records, values=None, external=False):
         assert mode in {'create', 'write', 'delete'}
+
+        def test_readonly(records, field_name, override):
+            field = cls._fields[field_name]
+            if (isinstance(field, (fields.One2Many, fields.Many2Many))
+                or (isinstance(field, fields.Function)
+                    and isinstance(
+                        field._field, (fields.One2Many, fields.Many2Many)))):
+                # Must be enforced on the target
+                return
+            if field.readonly:
+                raise AccessError(
+                    gettext('ir.msg_modification_readonly_field_error',
+                        **cls.__names__(field=field_name)))
+            if 'readonly' not in field.states:
+                return
+            if is_pyson(field.states['readonly']):
+                pyson_readonly = PYSONEncoder().encode(
+                    field.states['readonly'])
+                for record in sub_records:
+                    readonly = _record_eval_pyson(
+                        record, pyson_readonly, encoded=True,
+                        override=override)
+                    if readonly:
+                        raise AccessError(
+                            gettext(
+                                'ir.'
+                                'msg_modification_readonly_field_record_error',
+                                **cls.__names__(
+                                    field=field_name,
+                                    record=record)))
+            elif field.states['readonly']:
+                for record in sub_records:
+                    raise AccessError(
+                        gettext(
+                            'ir.msg_modification_readonly_field_record_error',
+                            **cls.__names__(
+                                field=field_name,
+                                record=record)))
+
+        if external and values and mode in {'create', 'write'}:
+            if mode == 'create':
+                iterator = (([r], v) for r, v in zip(records, values))
+                override = {'id': -1}
+            else:
+                iterator = ((records, values),)
+                override = {}
+            for sub_records, sub_values in iterator:
+                for field_name in sub_values:
+                    test_readonly(sub_records, field_name, override)
 
     @classmethod
     def on_modification(cls, mode, records, field_names=None):
@@ -612,16 +720,31 @@ class ModelStorage(Model):
         assert _default_fields() <= fields_.keys(), (
             f"Invalid default fields {_default_fields() - fields_.keys()} "
             f"for {cls.__name__}")
-        ids = list(map(int, records))
+        if isinstance(records, BrowseList):
+            ids = records.ids
+        else:
+            ids = list(map(int, records))
         with without_check_access():
             values = {
                 d['id']: d for d in cls.read(ids, fields_names=fields_names)}
         default_values = cls.default_get(fields_names, with_rec_name=False)
+
+        if Transaction().check_access:
+            # force default value to skip access rights
+            for field_name, field in fields_.items():
+                if field.readonly:
+                    default.setdefault(
+                        field_name, default_values.get(field_name))
+
         to_create = []
         for id_ in ids:
             data = convert_data(fields_, values[id_], default_values)
             to_create.append(data)
         new_records = cls.create(to_create)
+        if isinstance(new_records, BrowseList):
+            new_ids = new_records.ids
+        else:
+            new_ids = list(map(int, new_records))
 
         fields_translate = {}
         for field_name, field in fields_.items():
@@ -633,9 +756,9 @@ class ModelStorage(Model):
                 ('translatable', '=', True),
                 ])
             if langs:
-                id2new_records = defaultdict(list)
-                for id_, new_record in zip(ids, new_records):
-                    id2new_records[id_].append(new_record)
+                id2new_ids = defaultdict(list)
+                for id_, new_id in zip(ids, new_ids):
+                    id2new_ids[id_].append(new_id)
                 fields_names = list(fields_translate.keys()) + ['id']
                 for lang in langs:
                     # Prevent fuzzing translations when copying as the terms
@@ -647,7 +770,7 @@ class ModelStorage(Model):
                         values = cls.read(ids, fields_names=fields_names)
                         to_write = []
                         for data in values:
-                            to_write.append(id2new_records[data['id']])
+                            to_write.append(cls.browse(id2new_ids[data['id']]))
                             to_write.append(
                                 convert_data(
                                     fields_translate, data, default_values))
@@ -741,8 +864,12 @@ class ModelStorage(Model):
             fields_names = ['id']
         if 'id' not in fields_names:
             fields_names.append('id')
-        rows = cls.read(list(map(int, records)), fields_names)
-        index = {r.id: i for i, r in enumerate(records)}
+        if isinstance(records, BrowseList):
+            ids = records.ids
+        else:
+            ids = list(map(int, records))
+        rows = cls.read(ids, fields_names)
+        index = {id: i for i, id in enumerate(ids)}
         rows.sort(key=lambda r: index[r['id']])
         return rows
 
@@ -830,14 +957,13 @@ class ModelStorage(Model):
         pool = Pool()
         ModelData = pool.get('ir.model.data')
 
-        ids = dict.fromkeys(map(int, records))
+        ids = defaultdict(type(None))
         with without_check_access():
-            for sub_records in grouped_slice(records):
-                for record in ModelData.search([
-                            ('model', '=', cls.__name__),
-                            ('db_id', 'in', [r.id for r in sub_records]),
-                            ]):
-                    ids[record.db_id] = f'{record.module}.{record.fs_id}'
+            for record in ModelData.search([
+                        ('model', '=', cls.__name__),
+                        ('db_id', 'in', records),
+                        ]):
+                ids[record.db_id] = f'{record.module}.{record.fs_id}'
         return ids
 
     @classmethod
@@ -855,14 +981,7 @@ class ModelStorage(Model):
         '''
         Return a list of instance for the ids
         '''
-        transaction = Transaction()
-        ids = list(map(int, ids))
-        _local_cache = local_cache(cls, transaction)
-        transaction_cache = transaction.get_cache()
-        return [cls(x, _ids=ids,
-                _local_cache=_local_cache,
-                _transaction_cache=transaction_cache,
-                _transaction=transaction) for x in ids]
+        return BrowseList(cls, map(int, ids))
 
     def __export_row(self, fields_names):
         pool = Pool()
@@ -1387,25 +1506,6 @@ class ModelStorage(Model):
     def _validate(cls, records, field_names=None):
         pool = Pool()
 
-        def is_pyson(test):
-            if isinstance(test, PYSON):
-                return True
-            if isinstance(test, (list, tuple)):
-                for i in test:
-                    if isinstance(i, PYSON):
-                        return True
-                    if isinstance(i, (list, tuple)):
-                        if is_pyson(i):
-                            return True
-            if isinstance(test, dict):
-                for key, value in list(test.items()):
-                    if isinstance(value, PYSON):
-                        return True
-                    if isinstance(value, (list, tuple, dict)):
-                        if is_pyson(value):
-                            return True
-            return False
-
         def validate_domain(field):
             if not field.domain:
                 return
@@ -1453,33 +1553,20 @@ class ModelStorage(Model):
                     domains[context][domain].append(record)
                 # Select strategy depending if it is closer to one domain per
                 # record or one domain for all records
-                # Do not use IN_MAX to let spaces for the pyson domain
-                in_max = Transaction().database.IN_MAX
-                count = in_max // 10
                 for context, ctx_domains in domains.items():
                     if (not dict_domain
                             and len(ctx_domains) > len(records) * 0.5):
-                        new_domains = {}
-                        for sub_domains in grouped_slice(
-                                list(ctx_domains.keys()), count):
-                            grouped_domain = ['OR']
-                            grouped_records = []
-                            for d in sub_domains:
-                                sub_records = ctx_domains[d]
-                                grouped_records.extend(sub_records)
-                                relations = relation_domain(field, sub_records)
-                                if len(relations) > in_max:
-                                    break
-                                grouped_domain.append(
-                                    [('id', 'in',
-                                            [r.id for r in relations]), d])
-                            else:
-                                new_domains[freeze(grouped_domain)] = \
-                                    grouped_records
-                                continue
-                            break
-                        else:
-                            domains[context] = new_domains
+                        grouped_domain = ['OR']
+                        grouped_records = []
+                        for d, sub_records in ctx_domains.items():
+                            grouped_records.extend(sub_records)
+                            relations = relation_domain(field, sub_records)
+                            grouped_domain.append(
+                                [('id', 'in',
+                                        [r.id for r in relations]), d])
+                        domains[context] = {
+                            freeze(grouped_domain): grouped_records,
+                            }
             else:
                 domains[freeze(field.context)][freeze(field.domain)].extend(
                     records)
@@ -1517,68 +1604,67 @@ class ModelStorage(Model):
 
         def validate_relation_domain(field, records, Relation, domain):
             relations = relation_domain(field, records)
-            if relations:
-                for sub_relations in grouped_slice(relations):
-                    sub_relations = set(sub_relations)
-                    finds = Relation.search(['AND',
-                            [('id', 'in', [r.id for r in sub_relations])],
-                            domain,
-                            ])
-                    invalid_relations = sub_relations - set(finds)
-                    if Relation == cls and field._type not in {
-                            'many2one', 'one2many', 'many2many', 'one2one',
-                            'reference'}:
-                        invalid_records = invalid_relations
-                    elif field._type.endswith('2many'):
-                        invalid_records = [
-                            r for r in records
-                            if invalid_relations.intersection(
-                                getattr(r, field.name))]
-                    else:
-                        invalid_records = [
-                            r for r in records
-                            if getattr(r, field.name) in invalid_relations]
-                    if invalid_records:
-                        invalid_record = invalid_records.pop()
-                        if invalid_relations == invalid_records:
-                            invalid_relation = invalid_record
-                        else:
-                            invalid_relation = getattr(
-                                invalid_record, field.name)
-                        domain = field.domain
-                        if is_pyson(domain):
-                            domain = _record_eval_pyson(records[0], domain)
-                        if isinstance(domain, dict):
-                            domain = domain.get(Relation.__class__, [])
-                        msg = gettext(
-                            'ir.msg_domain_validation_record',
-                            **cls.__names__(field.name, invalid_record))
-                        fields = set()
-                        level = 0
-                        if field not in Relation._fields.values():
-                            expression = domain_parse(domain)
-                            for variable in expression.variables:
-                                parts = variable.split('.')
-                                fields.add(parts[0])
-                                level = max(level, len(parts))
-                        else:
-                            fields.add(field.name)
-                        for field_name in sorted(fields):
-                            env = EvalEnvironment(invalid_relation, Relation)
-                            invalid_domain = domain_inversion(
-                                domain, field_name, env)
-                            if isinstance(invalid_domain, bool):
-                                continue
-                            if (len(fields) > 1  # no need to evaluate
-                                    and eval_domain(invalid_domain, env)):
-                                continue
-                            field_def = Relation.fields_get(
-                                [field_name], level=level)
-                            raise DomainValidationError(
-                                msg, domain=(invalid_domain, field_def))
-                        field_def = Relation.fields_get(fields, level=level)
-                        raise DomainValidationError(
-                            msg, domain=(domain, field_def))
+            if not relations:
+                return
+            finds = Relation.search(['AND',
+                    [('id', 'in', relations)],
+                    domain,
+                    ])
+            invalid_relations = set(relations) - set(finds)
+            if Relation == cls and field._type not in {
+                    'many2one', 'one2many', 'many2many', 'one2one',
+                    'reference'}:
+                invalid_records = invalid_relations
+            elif field._type.endswith('2many'):
+                invalid_records = [
+                    r for r in records
+                    if invalid_relations.intersection(
+                        getattr(r, field.name))]
+            else:
+                invalid_records = [
+                    r for r in records
+                    if getattr(r, field.name) in invalid_relations]
+            if invalid_records:
+                invalid_record = invalid_records.pop()
+                if invalid_relations == invalid_records:
+                    invalid_relation = invalid_record
+                else:
+                    invalid_relation = getattr(
+                        invalid_record, field.name)
+                domain = field.domain
+                if is_pyson(domain):
+                    domain = _record_eval_pyson(records[0], domain)
+                if isinstance(domain, dict):
+                    domain = domain.get(Relation.__name__, [])
+                msg = gettext(
+                    'ir.msg_domain_validation_record',
+                    **cls.__names__(field.name, invalid_record))
+                fields = set()
+                level = 0
+                if field not in Relation._fields.values():
+                    expression = domain_parse(domain)
+                    for variable in expression.variables:
+                        parts = variable.split('.')
+                        fields.add(parts[0])
+                        level = max(level, len(parts))
+                else:
+                    fields.add(field.name)
+                for field_name in sorted(fields):
+                    env = EvalEnvironment(invalid_relation, Relation)
+                    invalid_domain = domain_inversion(
+                        domain, field_name, env)
+                    if isinstance(invalid_domain, bool):
+                        continue
+                    if (len(fields) > 1  # no need to evaluate
+                            and eval_domain(invalid_domain, env)):
+                        continue
+                    field_def = Relation.fields_get(
+                        [field_name], level=level)
+                    raise DomainValidationError(
+                        msg, domain=(invalid_domain, field_def))
+                field_def = Relation.fields_get(fields, level=level)
+                raise DomainValidationError(
+                    msg, domain=(domain, field_def))
 
         if field_names is None:
             field_names = cls._fields.keys()
@@ -1809,7 +1895,7 @@ class ModelStorage(Model):
             transaction = Transaction()
         self._transaction = transaction
         self._user = transaction.user
-        self._context = transaction.context
+        self._context = kwargs.pop('_context', transaction.context)
         if id is not None:
             id = int(id)
         if _ids is not None:
@@ -1831,6 +1917,10 @@ class ModelStorage(Model):
             self._local_cache = local_cache(self.__class__, transaction)
 
         super().__init__(id, **kwargs)
+
+    @classmethod
+    def __json__(cls, usages=None):
+        return ['__name__', 'id', 'rec_name']
 
     @property
     def _cache(self):
@@ -1885,17 +1975,18 @@ class ModelStorage(Model):
         multiple_getter = None
         if (field.loading == 'lazy'
                 and isinstance(field, fields.Function)
+                and field.getter
                 and field.getter_multiple(
                     getattr(self.__class__, field.getter))):
             multiple_getter = field.getter
 
         if load_eager or multiple_getter:
             FieldAccess = pool.get('ir.model.field.access')
-            fread_accesses = {}
-            fread_accesses.update(FieldAccess.check(self.__name__,
-                list(self._fields.keys()), 'read', access=True))
-            to_remove = set(x for x, y in fread_accesses.items()
-                    if not y and x != name)
+            fields_access = FieldAccess.get_access(
+                [self.__name__])[self.__name__]
+            to_remove = {
+                f for f, a in fields_access.items() if not a['read']}
+            to_remove.discard(name)
 
             def not_cached(item):
                 fname, field = item
@@ -1959,11 +2050,14 @@ class ModelStorage(Model):
                     s.add(id_)
                     yield id_
         read_size = max(1, min(
-                self._cache.size_limit, self._local_cache.size_limit,
-                self._transaction.database.IN_MAX))
-        index = self._ids.index(self.id)
-        ids = islice(self._ids, index, index + read_size)
-        ids = unique(filter(filter_, ids))
+                self._cache.size_limit, self._local_cache.size_limit))
+        try:
+            index = self._ids.index(self.id)
+        except ValueError:
+            ids = [self.id]
+        else:
+            ids = islice(self._ids, index, index + read_size)
+            ids = unique(filter(filter_, ids))
 
         kwargs_cache = {}
         pysoned_ctx = {}
@@ -2223,7 +2317,9 @@ class ModelStorage(Model):
                             record._ids.append(record.id)
                     if to_write:
                         cls.write(*sum(
-                                (([r], save_values[r]) for r in to_write), ()))
+                                ((list(gr), v) for v, gr in groupby(
+                                        to_write, lambda r: save_values[r])),
+                                ()))
             except Exception:
                 for record in chain(to_create, to_write):
                     record._values = values.get(record)
@@ -2234,16 +2330,261 @@ class ModelStorage(Model):
                 record._removed = None
             records = latter
 
+    @classmethod
+    def bulk_save(cls, batch_size=None, auto=True):
+        return BulkBuffer(cls.save, batch_size=batch_size, auto=auto)
+
+    @classmethod
+    def bulk_func(cls, name, batch_size=None, auto=True):
+        return BulkBuffer(getattr(cls, name), batch_size=batch_size, auto=auto)
+
+
+class BulkBuffer:
+    __slots__ = ('_func', '_batch_size', '_auto', '_pending')
+
+    def __init__(self, function, batch_size=None, auto=True):
+        if batch_size is None:
+            batch_size = record_cache_size(Transaction())
+        if batch_size <= 0:
+            raise ValueError("batch_size must be greater than 0")
+        self._func = function
+        self._batch_size = batch_size
+        self._auto = auto
+        self._pending = []
+
+    def push(self, values):
+        self._pending.append(values)
+        if self._auto and len(self._pending) >= self._batch_size:
+            self.flush()
+
+    def extend(self, vlist):
+        if self._auto:
+            for value in vlist:
+                self.push(value)
+        else:
+            self._pending.extend(vlist)
+
+    def flush(self):
+        while self._pending:
+            batch = self._pending[:self._batch_size]
+            del self._pending[:self._batch_size]
+            self._func(batch)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, type, value, traceback):
+        if type is None:
+            self.flush()
+
+    def __len__(self):
+        return len(self._pending)
+
+    def __bool__(self):
+        return bool(self._pending)
+
+
+class BrowseList(list):
+    __slots__ = (
+        '_Model', '_ids',
+        '_transaction', '_context', '_local_cache', '_transaction_cache',
+        )
+
+    def __init__(self, Model, ids):
+        super().__init__()
+        assert issubclass(Model, ModelStorage)
+        self._Model = Model
+        self._ids = list(ids)
+        self._transaction = Transaction()
+        self._context = self._transaction.context
+        self._local_cache = local_cache(Model, self._transaction)
+        self._transaction_cache = self._transaction.get_cache()
+
+    @property
+    def ids(self):
+        return self._ids.copy()
+
+    def __instantiates_idx(self, start, end):
+        return (self.__instantiate_idx(i) for i in range(start, end))
+
+    def __instantiate_idx(self, index):
+        id = self._ids[index]
+        return self.__instantiate(id)
+
+    def __instantiates(self, ids):
+        return (self.__instantiate(id) for id in ids)
+
+    def __instantiate(self, id):
+        return self._Model(
+            id,
+            _ids=self._ids,
+            _local_cache=self._local_cache,
+            _transaction_cache=self._transaction_cache,
+            _transaction=self._transaction,
+            _context=self._context)
+
+    def __check_size(self, index):
+        if index >= len(self._ids):
+            raise IndexError("list index out of range")
+
+    def __fill(self, end=None):
+        if end is None:
+            end = len(self._ids) - 1
+        else:
+            end = min(end, len(self._ids) - 1)
+        length = list.__len__(self)
+        assert end < len(self._ids)
+        if end == length:
+            list.append(self, self.__instantiate_idx(end))
+        elif end > length:
+            list.extend(self, self.__instantiates_idx(length, end + 1))
+
+    def __contains__(self, item):
+        self.__fill()
+        return super().__contains__(item)
+
+    def __delitem__(self, index):
+        self.__check_size(index)
+        self.__fill(index + 1)
+        super().__delitem__(index)
+        del self._ids[index]
+
+    def __eq__(self, value):
+        return list(self) == value
+
+    def __getitem__(self, index):
+        if isinstance(index, slice):
+            size = len(self._ids)
+            end = min(index.stop or size, size) - 1
+        else:
+            end = index
+        self.__check_size(end)
+        self.__fill(end)
+        return super().__getitem__(index)
+
+    def __iter__(self):
+        for i in range(len(self._ids)):
+            if not i % 100 and i + 100 < len(self._ids):
+                self[i:i + 100]
+            yield self[i]
+
+    def __len__(self):
+        return len(self._ids)
+
+    def __repr__(self):
+        return f'{self.__class__.__name__}({self._Model!r}, {self._ids!r})'
+
+    def __setitem__(self, index, value):
+        if isinstance(index, slice):
+            size = len(self._ids)
+            end = min(index.stop or size, size) - 1
+            id = map(int, value)
+        else:
+            end = index
+            id = int(value)
+        self.__check_size(end)
+        self.__fill(end + 1)
+        self._ids[index] = id
+        if isinstance(index, slice):
+            instance = self.__instantiates(value)
+        else:
+            instance = self.__instantiate(value)
+        super().__setitem__(index, instance)
+
+    def append(self, value):
+        self.__fill()
+        self._ids.append(int(value))
+        instance = self.__instantiate(value)
+        super().append(instance)
+
+    def clear(self):
+        super().clear()
+        self._ids = []
+
+    def copy(self):
+        self.__fill()
+        return super().copy()
+
+    def count(self, value):
+        self.__fill()
+        return super().count(value)
+
+    def extend(self, iterable):
+        iterable, iterable_ids = tee(iterable)
+        self.__fill()
+        self._ids.extend(map(int, iterable_ids))
+        super().extend(self.__instantiates(iterable))
+
+    def index(self, value, start=0, stop=sys.maxsize):
+        self.__fill(min(stop, len(self._ids)) - 1)
+        return super().index(value, start, stop)
+
+    def insert(self, index, value):
+        self.__fill(min(index, len(self._ids)))
+        self._ids.insert(index, int(value))
+        instance = self.__instantiate(value)
+        super().insert(index, instance)
+
+    def pop(self, index=-1):
+        if index < 0:
+            end = len(self.ids)
+        else:
+            end = index + 1
+        self.__fill(end)
+        super().pop(index)
+        self._ids.pop(index)
+
+    def remove(self, value):
+        if not isinstance(value, self._Model):
+            raise ValueError(f"unsupported value {value!r}")
+        self.__fill(self._ids.index(value.id) + 1)
+        super().remove(value)
+        self._ids.remove(value.id)
+
+    def reverse(self):
+        self.__fill()
+        super().reverse()
+        self._ids.reverse()
+
+    def sort(self, /, *, key=None, reverse=False):
+        self.__fill()
+        super().sort(key=key, reverse=reverse)
+        self._ids.clear()
+        self._ids.extend(map(int, list.__iter__(self)))
+
+
+def is_pyson(test):
+    if isinstance(test, PYSON):
+        return True
+    if isinstance(test, (list, tuple)):
+        for i in test:
+            if isinstance(i, PYSON):
+                return True
+            if isinstance(i, (list, tuple)):
+                if is_pyson(i):
+                    return True
+    if isinstance(test, dict):
+        for key, value in list(test.items()):
+            if isinstance(value, PYSON):
+                return True
+            if isinstance(value, (list, tuple, dict)):
+                if is_pyson(value):
+                    return True
+    return False
+
 
 class EvalEnvironment(dict):
-    __slots__ = ('_record', '_model')
+    __slots__ = ('_record', '_model', '_override')
 
-    def __init__(self, record, Model):
+    def __init__(self, record, Model, override=None):
         super().__init__()
         self._record = record
         self._model = Model
+        self._override = dict(override) if override is not None else {}
 
     def __getitem__(self, item):
+        if item in self._override:
+            return self._override[item]
         if item.startswith('_parent_'):
             field = item[8:]
             model_name = self._model._fields[field].model_name
@@ -2279,13 +2620,13 @@ class EvalEnvironment(dict):
         return bool(self._record)
 
 
-def _record_eval_pyson(record, source, encoded=False):
+def _record_eval_pyson(record, source, encoded=False, override=None):
     transaction = Transaction()
     if not encoded:
         pyson = _pyson_encoder.encode(source)
     else:
         pyson = source
-    env = EvalEnvironment(record, record.__class__)
+    env = EvalEnvironment(record, record.__class__, override=override)
     env['context'] = transaction.context
     env['active_model'] = record.__class__.__name__
     env['active_id'] = record.id
@@ -2293,3 +2634,42 @@ def _record_eval_pyson(record, source, encoded=False):
 
 
 _pyson_encoder = PYSONEncoder()
+
+
+def ModelAccessProxy(record, context=None):
+    pool = Pool()
+    ModelAccess = pool.get('ir.model.access')
+    FieldAccess = pool.get('ir.model.field.access')
+    Rule = pool.get('ir.rule')
+
+    model = record.__class__
+    with Transaction().set_context(context), check_access():
+        ModelAccess.check(model.__name__)
+        Rule.check(model.__name__, [record.id])
+
+    class _ModelAccessProxy:
+        __class__ = model
+
+        def __init__(self, id):
+            self.id = id
+
+        def __getattr__(self, name):
+            if name in model._fields:
+                with Transaction().set_context(context), check_access():
+                    FieldAccess.check(model.__name__, [name])
+            value = getattr(record, name)
+            if isinstance(value, Model):
+                value = ModelAccessProxy(value, context)
+            elif isinstance(value, (list, tuple)):
+                value = [
+                    ModelAccessProxy(r, context)
+                    if isinstance(r, Model) else r for r in value]
+            return value
+
+        def __int__(self):
+            return int(self.id)
+
+        def __str__(self):
+            return f'{model.__name__},{self.id}'
+
+    return _ModelAccessProxy(record.id)

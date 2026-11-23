@@ -3,7 +3,7 @@
 from collections import defaultdict
 from decimal import Decimal
 
-from sql import Column, Literal
+from sql import Column
 from sql.aggregate import Sum
 from sql.conditionals import Coalesce
 
@@ -16,8 +16,7 @@ from trytond.model.exceptions import AccessError
 from trytond.modules.currency.fields import Monetary
 from trytond.pool import Pool
 from trytond.pyson import Eval, If, PYSONDecoder, PYSONEncoder
-from trytond.tools import (
-    grouped_slice, is_full_text, lstrip_wildcard, sqlite_apply_types)
+from trytond.tools import is_full_text, lstrip_wildcard, sqlite_apply_types
 from trytond.transaction import Transaction
 
 from .exceptions import AccountValidationError
@@ -99,7 +98,7 @@ class Account(
         super().__setup__()
         t = cls.__table__()
         cls._sql_indexes.add(
-            Index(t, (t.code, Index.Similarity())))
+            Index(t, (Coalesce(t.code, ''), Index.Similarity())))
         cls._order.insert(0, ('code', 'ASC'))
         cls._order.insert(1, ('name', 'ASC'))
 
@@ -140,16 +139,14 @@ class Account(
             return
         accounts = [
             a for a in accounts if a.type in {'root', 'view', 'distribution'}]
-        for sub_accounts in grouped_slice(accounts):
-            sub_accounts = list(sub_accounts)
-            lines = Line.search([
-                    ('account', 'in', [a.id for a in sub_accounts]),
-                    ], order=[], limit=1)
-            if lines:
-                line, = lines
-                raise AccountValidationError(gettext(
-                        'analytic_account.msg_account_wrong_type_line',
-                        account=line.account.rec_name))
+        lines = Line.search([
+                ('account', 'in', accounts),
+                ], order=[], limit=1)
+        if lines:
+            line, = lines
+            raise AccountValidationError(gettext(
+                    'analytic_account.msg_account_wrong_type_line',
+                    account=line.account.rec_name))
 
     @fields.depends('company')
     def on_change_with_currency(self, name=None):
@@ -171,11 +168,8 @@ class Account(
     def get_balance(cls, accounts, name):
         pool = Pool()
         Line = pool.get('analytic_account.line')
-        MoveLine = pool.get('account.move.line')
         cursor = Transaction().connection.cursor()
-        table = cls.__table__()
         line = Line.__table__()
-        move_line = MoveLine.__table__()
 
         ids = [a.id for a in accounts]
         childs = cls.search([('parent', 'child_of', ids)])
@@ -187,17 +181,13 @@ class Account(
             id2account[account.id] = account
 
         line_query = Line.query_get(line)
-        query = (table.join(line, 'LEFT',
-                condition=table.id == line.account
-                ).join(move_line, 'LEFT',
-                condition=move_line.id == line.move_line
-                ).select(table.id,
-                Sum(Coalesce(line.credit, 0) - Coalesce(line.debit, 0)
-                    ).as_('balance'),
-                where=(table.type != 'view')
-                & table.id.in_(all_ids)
-                & (table.active == Literal(True)) & line_query,
-                group_by=table.id))
+        where = fields.SQL_OPERATORS['in'](line.account, all_ids)
+        query = line.select(
+            line.account,
+            Sum(Coalesce(line.credit, 0) - Coalesce(line.debit, 0)
+                ).as_('balance'),
+            where=where & line_query,
+            group_by=line.account)
         if backend.name == 'sqlite':
             sqlite_apply_types(query, [None, 'NUMERIC'])
         cursor.execute(*query)
@@ -206,18 +196,19 @@ class Account(
 
         balances = sum_tree(childs, values)
         for account in accounts:
-            balances[account.id] = account.currency.round(balances[account.id])
+            if not account.active:
+                balances[account.id] = None
+            else:
+                balances[account.id] = account.currency.round(
+                    balances[account.id])
         return balances
 
     @classmethod
     def get_credit_debit(cls, accounts, names):
         pool = Pool()
         Line = pool.get('analytic_account.line')
-        MoveLine = pool.get('account.move.line')
         cursor = Transaction().connection.cursor()
-        table = cls.__table__()
         line = Line.__table__()
-        move_line = MoveLine.__table__()
 
         result = {}
         ids = [a.id for a in accounts]
@@ -231,20 +222,16 @@ class Account(
             id2account[account.id] = account
 
         line_query = Line.query_get(line)
-        columns = [table.id]
+        columns = [line.account]
         types = [None]
         for name in names:
             columns.append(Sum(Coalesce(Column(line, name), 0)).as_(name))
             types.append('NUMERIC')
-        query = (table.join(line, 'LEFT',
-                condition=table.id == line.account
-                ).join(move_line, 'LEFT',
-                condition=move_line.id == line.move_line
-                ).select(*columns,
-                where=(table.type != 'view')
-                & table.id.in_(ids)
-                & (table.active == Literal(True)) & line_query,
-                group_by=table.id))
+        where = fields.SQL_OPERATORS['in'](line.account, ids)
+        query = line.select(
+            *columns,
+            where=where & line_query,
+            group_by=line.account)
         if backend.name == 'sqlite':
             sqlite_apply_types(query, types)
         cursor.execute(*query)
@@ -313,17 +300,16 @@ class Account(
             mode, accounts, values=values, external=external)
 
         if mode == 'write' and 'root' in values:
-            for sub_records in grouped_slice(accounts):
-                entries = Entry.search([
-                        ('account', 'in', list(map(int, sub_records))),
-                        ],
-                    limit=1, order=[])
-                if entries:
-                    entry, = entries
-                    raise AccessError(gettext(
-                            'analytic_account'
-                            '.msg_analytic_account_root_change',
-                            account=entry.account.rec_name))
+            entries = Entry.search([
+                    ('account', 'in', accounts),
+                    ],
+                limit=1, order=[])
+            if entries:
+                entry, = entries
+                raise AccessError(gettext(
+                        'analytic_account'
+                        '.msg_analytic_account_root_change',
+                        account=entry.account.rec_name))
 
 
 class AccountContext(ModelView):
@@ -439,6 +425,15 @@ class AnalyticAccountEntry(ModelView, ModelSQL):
             analytic_line.account = account
             analytic_line.date = date
             yield analytic_line
+
+    @classmethod
+    def copy_to(cls, entries, origin):
+        for entry in entries:
+            new = cls()
+            new.origin = origin
+            new.root = entry.root
+            new.account = entry.account
+            yield new
 
 
 class AnalyticMixin(object):

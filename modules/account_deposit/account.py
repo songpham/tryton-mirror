@@ -2,7 +2,7 @@
 # this repository contains the full copyright notices and license terms.
 from trytond.model import fields
 from trytond.pool import PoolMeta
-from trytond.pyson import Bool, Eval, If
+from trytond.pyson import Eval, If
 
 
 def AccountTypeMixin(template=False):
@@ -24,8 +24,8 @@ def AccountTypeMixin(template=False):
             field = getattr(Mixin, fname)
             if not isinstance(field, fields.Field):
                 continue
-            field.states['readonly'] = (
-                Bool(Eval('template', -1)) & ~Eval('template_override', False))
+            field.states['editable'] = (
+                ~Eval('template', None) | Eval('template_override', False))
     return Mixin
 
 
@@ -46,11 +46,12 @@ class AccountType(AccountTypeMixin(), metaclass=PoolMeta):
 class Reconcile(metaclass=PoolMeta):
     __name__ = 'account.reconcile'
 
-    def get_currencies(self, account, party, currency=None, _balanced=False):
+    @classmethod
+    def currencies_to_reconcile(cls, account, party, _balanced=False):
         if account.type.deposit:
             _balanced = True
-        return super().get_currencies(
-            account, party, currency=None, _balanced=_balanced)
+        return super().currencies_to_reconcile(
+            account, party, _balanced=_balanced)
 
 
 class Payment(metaclass=PoolMeta):

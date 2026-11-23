@@ -47,12 +47,6 @@ Accounting
 :doc:`Export WinBooks <account_export_winbooks:index>`
    Export to WinBooks.
 
-:doc:`Spanish <account_es:index>`
-   Spanish accounting.
-
-:doc:`Spanish SII <account_es_sii:index>`
-   Send invoices to "Subministro Inmediato de Información" (SII).
-
 :doc:`Europe <account_eu:index>`
    Common European requirements.
 
@@ -62,9 +56,6 @@ Accounting
 :doc:`French Chorus <account_fr_chorus:index>`
    Send invoices via Chorus Pro.
 
-:doc:`German <account_de_skr03:index>`
-   German accounting.
-
 :doc:`Invoice <account_invoice:index>`
    Manage customer and supplier invoices.
 
@@ -73,6 +64,9 @@ Accounting
 
 :doc:`Invoice Defer <account_invoice_defer:index>`
    Defer expense and revenue.
+
+:doc:`Invoice Factur-X <account_invoice_factur_x:index>`
+   Generate Factur-X.
 
 :doc:`Invoice History <account_invoice_history:index>`
    Historize invoice.
@@ -97,6 +91,9 @@ Accounting
 
 :doc:`Payment Braintree <account_payment_braintree:index>`
    Receive payment from Braintree.
+
+:doc:`Payment Check <account_payment_check:index>`
+   Manage and print checks.
 
 :doc:`Payment Clearing <account_payment_clearing:index>`
    Use clearing account for payments.
@@ -148,6 +145,9 @@ Accounting
 
 :doc:`Stock European <account_stock_eu:index>`
    Common stock European requirements.
+
+:doc:`Stock European Excise <account_stock_eu_excise:index>`
+   Common European requirements for excise products.
 
 :doc:`Stock Landed Cost <account_stock_landed_cost:index>`
    Allocate landed cost.

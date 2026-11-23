@@ -68,8 +68,9 @@ class IdentifierMixin:
                 and getattr(self, 'web_shop', None)
                 and self.shopify_identifier_char):
             return urljoin(
-                self.web_shop.shopify_url + '/admin/',
-                f'{self.shopify_resource}/{self.shopify_identifier_char}')
+                self.web_shop.shopify_url,
+                f'admin/{self.shopify_resource}/{self.shopify_identifier_char}'
+                )
 
     @classmethod
     def copy(cls, records, default=None):
@@ -187,6 +188,6 @@ class IdentifiersMixin(IdentifiersUpdateMixin):
 
 
 def setattr_changed(record, name, value):
-    if getattr(record, name, None) != value:
+    if getattr(record, name, object()) != value:
         setattr(record, name, value)
         return True

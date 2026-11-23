@@ -3,12 +3,21 @@
 
 import datetime
 import json
+import time
+from base64 import b64encode
 from decimal import Decimal
+from unittest.mock import patch
 
+from trytond import config
+from trytond.model import ModelStorage
+from trytond.pool import Pool
 from trytond.protocols.jsonrpc import JSONDecoder, JSONEncoder, JSONRequest
+from trytond.protocols.wrappers import (
+    HTTPStatus, Response, user_application, with_pool, with_transaction)
 from trytond.protocols.xmlrpc import XMLRequest, client
-from trytond.tests.test_tryton import TestCase
+from trytond.tests.test_tryton import Client, RouteTestCase, TestCase
 from trytond.tools.immutabledict import ImmutableDict
+from trytond.wsgi import TrytondWSGI
 
 
 def _identity(x):
@@ -130,3 +139,129 @@ class XMLTestCase(DumpsLoadsMixin, TestCase):
         result, _ = client.loads(s)
         result, = result
         self.assertEqual(result, Decimal('3.141592653589793'))
+
+
+class RPCTimeout(RouteTestCase):
+    module = 'res'
+
+    @classmethod
+    def setUpClass(cls):
+        timeout = config.get('request', 'timeout')
+        config.set('request', 'timeout', '1')
+        cls.addClassCleanup(config.set, 'request', 'timeout', timeout)
+        super().setUpClass()
+
+    @classmethod
+    def setUpDatabase(cls):
+        pool = Pool()
+        User = pool.get('res.user')
+        User.create([{
+                    'name': 'user',
+                    'login': 'user',
+                    'password': 'password',
+                    }])
+
+    def test_timeout(self):
+        "Test RPC with timeout"
+        basic_auth = 'Basic ' + b64encode(b"user:password").decode()
+        response = self.client().post(
+            f'/{self.db_name}/rpc/',
+            json={
+                'method': 'model.ir.model.search',
+                'params': [[], {}],
+                },
+            headers=[('Authorization', basic_auth)])
+        self.assertEqual(response.status_code, HTTPStatus.OK)
+
+    def test_timeout_exceeded(self):
+        "Test RPC with timeout exceeded"
+        with patch.object(ModelStorage, 'search') as search:
+            search.side_effect = lambda *a, **k: time.sleep(2)
+            basic_auth = 'Basic ' + b64encode(b"user:password").decode()
+            response = self.client().post(
+                f'/{self.db_name}/rpc/',
+                json={
+                    'method': 'model.ir.model.search',
+                    'params': [[], {}],
+                    },
+                headers=[('Authorization', basic_auth)])
+            self.assertEqual(response.status_code, HTTPStatus.GATEWAY_TIMEOUT)
+
+
+class UserApplication(RouteTestCase):
+    module = 'res'
+
+    @classmethod
+    def setUpDatabase(cls):
+        pool = Pool()
+        User = pool.get('res.user')
+        UserApplication = pool.get('res.user.application')
+
+        UserApplication.application.selection.append(('test', "Test"))
+
+        User.create([{
+                    'login': 'user',
+                    'applications': [('create', [{
+                                    'key': 'secret_key',
+                                    'application': 'test',
+                                    'state': 'validated',
+                                    }])],
+                    }])
+
+    def test_authorization_bearer(self):
+        app = TrytondWSGI()
+        test_application = user_application('test')
+
+        @app.route('/<database_name>/test/user_application')
+        @with_pool
+        @with_transaction()
+        @test_application
+        def _route(request, pool):
+            return ''
+
+        client = Client(app, Response)
+        response = client.get(
+            f'/{self.db_name}/test/user_application',
+            headers=[
+                ('Authorization', 'bearer secret_key'),
+                ])
+        self.assertEqual(response.status_code, HTTPStatus.OK)
+
+    def test_authorization_basic(self):
+        app = TrytondWSGI()
+        test_application = user_application('test')
+
+        @app.route('/<database_name>/test/user_application')
+        @with_pool
+        @with_transaction()
+        @test_application
+        def _route(request, pool):
+            return ''
+
+        client = Client(app, Response)
+        auth = b64encode(b':secret_key').decode('ascii')
+        response = client.get(
+            f'/{self.db_name}/test/user_application',
+            headers=[
+                ('Authorization', f'basic {auth}'),
+                ])
+        self.assertEqual(response.status_code, HTTPStatus.OK)
+
+    def test_authorization_bad_auth(self):
+        app = TrytondWSGI()
+        test_application = user_application('test')
+
+        @app.route('/<database_name>/test/user_application')
+        @with_pool
+        @with_transaction()
+        @test_application
+        def _route(request, pool):
+            return ''
+
+        client = Client(app, Response)
+        response = client.get(
+            f'/{self.db_name}/test/user_application',
+            headers=[
+                ('Authorization', 'bearer foo'),
+                ])
+        self.assertEqual(response.status_code, HTTPStatus.UNAUTHORIZED)

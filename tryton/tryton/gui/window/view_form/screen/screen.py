@@ -38,7 +38,8 @@ class Screen:
 
     # Width of tree columns per model
     # It is shared with all connection but it is the price for speed.
-    tree_column_width = collections.defaultdict(lambda: {})
+    tree_column_width = collections.defaultdict(
+        lambda: collections.defaultdict(list))
     tree_column_optional = {}
 
     def __init__(self, model_name, **attributes):
@@ -48,10 +49,12 @@ class Screen:
         self.offset = 0
         self.windows = []
 
-        self.readonly = attributes.get('readonly', False)
+        self.screen_readonly = attributes.get('readonly', False)
         if not (MODELACCESS[model_name]['write']
                 or MODELACCESS[model_name]['create']):
             self.readonly = True
+        else:
+            self.readonly = self.screen_readonly
         self.search_count = 0
         if not attributes.get('row_activate'):
             self.row_activate = self.default_row_activate
@@ -501,6 +504,7 @@ class Screen:
         return self.__current_record
 
     def __set_current_record(self, record):
+        changed = self.__current_record != record
         self.__current_record = record
         if record:
             try:
@@ -513,9 +517,13 @@ class Screen:
         self.record_message(
             pos, len(self.group) + self.offset,
             self.search_count, record and record.id)
-        self.update_resources(record.resources if record else None)
-        # update resources after 1 second
-        GLib.timeout_add(1000, self._update_resources, record)
+        if changed:
+            for window in self.windows:
+                if hasattr(window, 'record_changed'):
+                    window.record_changed()
+            self.update_resources(record.resources if record else None)
+            # update resources after 1 second
+            GLib.timeout_add(1000, self._update_resources, record)
 
     current_record = property(__get_current_record, __set_current_record)
 
@@ -673,7 +681,7 @@ class Screen:
 
         return view
 
-    def new(self, default=True, defaults=None):
+    def new(self, default=True, defaults=None, display=True):
         previous_view = self.current_view
         if self.current_view and self.current_view.view_type == 'calendar':
             selected_date = self.current_view.get_selected_date()
@@ -690,9 +698,10 @@ class Screen:
         if previous_view.view_type == 'calendar':
             previous_view.set_default_date(record, selected_date)
         self.current_record = record
-        self.display()
-        # Postpone set of the cursor to ensure widgets are allocated
-        GLib.idle_add(self.set_cursor, True)
+        if display:
+            self.display()
+            # Postpone set of the cursor to ensure widgets are allocated
+            GLib.idle_add(self.set_cursor, True)
         return self.current_record
 
     @property
@@ -1244,7 +1253,7 @@ class Screen:
             states = record.expr_eval(button.attrs.get('states', {}))
             return not (states.get('invisible') or states.get('readonly'))
 
-        if not self.selected_records:
+        if not self.selected_records or self.screen_readonly:
             return []
 
         buttons = self.current_view.get_buttons() if self.current_view else []
@@ -1349,7 +1358,7 @@ class Screen:
                     and self.current_view.view_type in [
                         'tree', 'graph', 'calendar']
                     and not self.parent):
-                self.search_filter()
+                self.search_filter(self.screen_container.get_text())
         elif action == 'reload menu':
             from tryton.gui import Main
             RPCContextReload(Main().sig_win_menu)
@@ -1361,6 +1370,8 @@ class Screen:
         if self.domain:
             query_string.append(('domain', json.dumps(
                         self.domain, cls=JSONEncoder, separators=(',', ':'))))
+        if self.context_domain:
+            query_string.append(('context_domain', self.context_domain))
         context = self.local_context  # Avoid rpc context
         if context:
             query_string.append(('context', json.dumps(

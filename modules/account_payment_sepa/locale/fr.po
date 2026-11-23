@@ -15,6 +15,10 @@ msgctxt ""
 msgid "SEPA Mandate Sequence"
 msgstr "Séquence de mandat SEPA"
 
+msgctxt "field:account.move.line,sepa_mandate_available:"
+msgid "SEPA Mandate Available"
+msgstr "Mandat SEPA disponible"
+
 msgctxt "field:account.payment,sepa_end_to_end_id:"
 msgid "SEPA End To End ID"
 msgstr "End To End ID SEPA"
@@ -271,6 +275,12 @@ msgctxt ""
 "model:ir.action.act_window.domain,name:act_move_line_form_domain_receivable_mandate"
 msgid "Receivable with Mandate"
 msgstr "À recevoir avec mandat"
+
+#, python-format
+msgctxt "model:ir.message,text:msg_invoice_payment_mean_direct_debit"
+msgid "SEPA direct debit using mandate %(mandate)s on %(account_number)s"
+msgstr ""
+"Prélèvement SEPA utilisant le mandat %(mandate)s sur %(account_number)s"
 
 #, python-format
 msgctxt "model:ir.message,text:msg_mandate_authorisation_statement"

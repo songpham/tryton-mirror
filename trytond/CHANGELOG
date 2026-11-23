@@ -1,3 +1,72 @@
+* Add scheduled task to synchronize local translations
+* Support creating and writing translated fields in multiple languages at once
+* Support reading translated fields in any suffixed language
+* Rename delete_many to deletemany in the FileStore
+* Restrict the wizard session to the user who created it (issue15206)
+* Only permit administrators to execute wizards without models or groups (issue15205)
+
+Version 8.2.0 - 2026-10-05
+--------------------------
+* Bug fixes (see mercurial logs for details)
+* Escape arguments of report convert command (issue15035)
+* Escape title and text when rendering HTML editor (issue15032)
+* Allow trytond-admin to manage any user
+* Add bulk_create, bulk_delete, bulk_save and bulk_func to ModelStorage
+* Add editable state on field
+* Enforce readonly on field when checking access
+* Add the icon parameter to register_authentication_service
+* Add routes for sao custom in base router
+* Replace the administration group by a flag on the user
+* Make DBTestCase public
+* Add function to import XML files
+* Add support for router in Pool
+* Add explicit request context in URLAccessor
+* Retry unfinished queued tasks
+* Add a timer to prevent requests from lasting longer than their timeout
+* Apply mixin to Database and TableHandler from configuration
+* Restrict protocols allowed for weasyprint to http(s) (issue14947)
+* Add search attribute to XML record tag
+* Enforce access right on the email template record (issue14907)
+* Add ModelAccessProxy (issue14907)
+* Restrict Genshi evaluation (issue14869, issue5160)
+* Add BrowseList for Model instances
+* Remove cursor_dict
+* Add row factory to cursor
+* Add filename extension to Binary field
+* Add filters attribute for binary and image widgets
+* Move last_user and last_modification to ResourceAccessMixin
+* Add check deliverability option to validate email tool
+* Add support for AGE to SQLite backend
+* Add button to mark notification as read
+
+Version 8.0.0 - 2026-04-20
+--------------------------
+* Bug fixes (see mercurial logs for details)
+* Add REST API
+* Add rpc suffix to URL for RPC call
+* Support mounting application under a prefix
+* Send emails on chat messages
+* Add path attribute on XML fields to specfiy a relative path value
+* Allow to include subdirectories in tryton.cfg
+* Add route for login / logout with cookie
+* Add contextual ``_log`` to force logging events
+* Add notify_user to ModelStorage
+* Check button states when testing access
+* Remove the files of Binary fields from the Filestore
+* Add delete and delete_many to Filestore
+* Deprecate ``grouped_slice`` without size
+* Replace ``Database.IN_MAX`` by ``backend.MAX_QUERY_PARAMS``
+* Deprecate ``reduce_ids`` for ``SQL_OPERATORS['in']``
+* Use array for ``in`` operators
+* Update to Psycopg 3
+* Add support for Python 3.14
+* Remove support for Python 3.9
+* Support fmany2one based on Function fields
+* Add timestamp field on ModelSQL for last modified
+* Support Function field without getter but SQL expression
+* Add support for column_<field name> method
+* Use tables and Model as arguments for sql_column of the Field
+* Add support for basic authentication for user application
 * Support the conversion of MJML reports to HTML
 * Allow filtering users to be notified by cron tasks
 

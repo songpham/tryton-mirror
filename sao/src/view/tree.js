@@ -36,8 +36,8 @@
                 column.suffixes.push(
                     new Sao.View.Tree.Symbol(attributes, 1));
             }
-            if (~['url', 'email', 'callto', 'sip'
-                    ].indexOf(attributes.widget)) {
+            if (['url', 'email', 'callto', 'sip']
+                .includes(attributes.widget)) {
                 column.prefixes.push(
                     new Sao.View.Tree.Affix(attributes, attributes.widget));
             }
@@ -72,8 +72,7 @@
             this.view.columns.push(column);
 
             if (attributes.optional && (name !== this.exclude_field)) {
-                Sao.setdefault(
-                    this.view.optionals, column.attributes.name, []).push(column);
+                this.view.optionals.push(column);
             }
 
             if (parseInt(attributes.sum || '0', 10)) {
@@ -87,6 +86,9 @@
             }
         },
         _parse_button: function(node, attributes) {
+            if (this.view.screen.screen_readonly) {
+                return;
+            }
             let button;
             if (parseInt(attributes.multiple || '0', 10)) {
                 button = new Sao.View.Tree.ButtonMultiple(attributes);
@@ -109,7 +111,7 @@
         display_size: null,
         init: function(view_id, screen, xml, children_field) {
             this.children_field = children_field;
-            this.optionals = {};
+            this.optionals = [];
             this.sum_widgets = new Map();
             this.columns = [];
             this.selection_mode = (screen.attributes.selection_mode ||
@@ -117,9 +119,6 @@
             this.el = jQuery('<div/>', {
                 'class': 'tree-container',
             })
-            // Prevent Chrome based browser to compute a min-content
-            // such that only this table has scrollbar if needed
-                .css('display', 'grid');
             this.scrollbar = jQuery('<div/>')
                 .appendTo(jQuery('<div/>', {
                     'class': 'scrollbar responsive',
@@ -212,9 +211,13 @@
                 });
                 th.uniqueId();
                 th.get(0).dataset.column = idx;
+                let header = jQuery('<div/>', {
+                    'class': 'header',
+                });
                 var label = jQuery('<label/>')
                     .text(column.attributes.string)
-                    .attr('title', column.attributes.string);
+                    .attr('title', column.attributes.string)
+                    .appendTo(header);
                 if (this.editable) {
                     if (column.attributes.required) {
                         label.addClass('required');
@@ -230,7 +233,7 @@
                     var arrow = jQuery('<img/>', {
                         'class': 'icon',
                     });
-                    label.append(arrow);
+                    header.append(arrow);
                     column.arrow = arrow;
                     th.click(column, (e) => {
                         if (is_resizing) {
@@ -239,9 +242,9 @@
                         }
                         this.sort_model(e);
                     });
-                    label.addClass('sortable');
+                    th.addClass('sortable');
                 }
-                tr.append(th.append(label));
+                tr.append(th.append(header));
                 let resizer = jQuery('<div/>', {
                     'class': 'resizer',
                     'draggable': true,
@@ -249,6 +252,8 @@
                 let is_resizing = false;
                 resizer.on('mousedown', (event) => {
                     is_resizing = true;
+                    let table = this.table;
+                    table.addClass('resizing');
                     let th = event.target.parentNode;
                     let headers = th.parentNode.childNodes;
                     let cols = this.colgroup[0].childNodes;
@@ -280,12 +285,12 @@
                         document.removeEventListener('mousemove', on_mouse_move);
                         document.removeEventListener('mouseup', on_mouse_up);
                         setTimeout(() => is_resizing = false, 0);
+                        table.removeClass('resizing');
                     }
 
                     document.addEventListener('mousemove', on_mouse_move);
                     document.addEventListener('mouseup', on_mouse_up);
 
-                    this.table.addClass('table-bordered');
                     event.preventDefault();
                 });
 
@@ -356,19 +361,18 @@
         },
         tree_menu: function(evt) {
             const toggle = evt => {
-                let columns = evt.data;
+                let column = evt.data;
                 let visible = jQuery(evt.delegateTarget).prop('checked');
-                columns.forEach(c => c.set_visible(visible));
+                column.set_visible(visible);
                 this.save_optional();
                 this.display();
                 this.update_visible();
             };
             var menu = evt.data;
             menu.empty();
-            for (let columns of Object.values(this.optionals)) {
-                let visible = columns.some(c => c.get_visible());
-                let string = [...new Set(columns.map(c => c.attributes.string))]
-                    .join(' / ');
+            for (let column of this.optionals) {
+                let visible = column.get_visible();
+                let string = column.attributes.string;
                 menu.append(jQuery('<li/>', {
                     'role': 'presentation',
                 }).append(jQuery('<a/>', {
@@ -379,7 +383,7 @@
                 }).append(jQuery('<input/>', {
                     'type': 'checkbox',
                     'checked': visible,
-                }).change(columns, toggle))
+                }).change(column, toggle))
                     .append(' ' + string)))));
             }
             if (!jQuery.isEmptyObject(this.optionals)) {
@@ -426,6 +430,8 @@
                         'reset_width',
                         [this.screen.model_name, window.screen.width],
                         {});
+                    Sao.Session.current_session.cache.clear(
+                        `model.${this.screen.model_name}.fields_view_get`);
 
                     for (let column of this.columns) {
                         if (column.col.data('default-width')) {
@@ -438,12 +444,9 @@
                 })));
         },
         save_optional: function(store=true) {
-            if (jQuery.isEmptyObject(this.optionals)) {
-                return;
-            }
-            var fields = {};
-            for (let [name, columns] of Object.entries(this.optionals)) {
-                fields[name] = columns.every(c => !c.get_visible());
+            let fields = {};
+            for (let column of this.optionals) {
+                Sao.setdefault(fields, column.attributes.name, []).push(!column.get_visible());
             }
             if (store) {
                 var tree_optional_model = new Sao.Model(
@@ -452,6 +455,23 @@
                     this.view_id, fields], {});
             }
             Sao.Screen.tree_column_optional[this.view_id] = fields;
+        },
+        _get_column_occurence: function(column) {
+            let occurrence = 0;
+            let found = false;
+            for (let col of this.columns) {
+                if (col.attributes.name == column.attributes.name) {
+                    occurrence += 1;
+                    if (col === column) {
+                        found = true;
+                        break;
+                    }
+                }
+            }
+            if (!found) {
+                occurrence += 1;
+            }
+            return occurrence;
         },
         _set_column_width: function(column) {
             let default_width = {
@@ -473,9 +493,10 @@
             default_width = default_width * 100 * factor  + '%';
             column.col.data('default-width', default_width);
 
+            let index = this._get_column_occurence(column) - 1;
             let tree_column_width = (
                 Sao.Screen.tree_column_width[this.screen.model_name] || {});
-            let width = tree_column_width[name];
+            let width = (tree_column_width[column.attributes.name] || [])[index];
             if (width || column.attributes.width) {
                 if (!width) {
                     width = column.attributes.width;
@@ -487,9 +508,9 @@
             column.col.css('width', width);
         },
         save_width: function() {
-            var widths = {};
+            let fields = {};
             for (let column of this.columns) {
-                if (!column.get_visible() || !column.attributes.name ||
+                if (!column.attributes.name ||
                     column instanceof Sao.View.Tree.ButtonColumn) {
                     continue;
                 }
@@ -497,25 +518,30 @@
                 // Use the DOM element to retrieve the exact style set
                 var width = column.col[0].style.width;
                 let custom_width = column.col.data('custom-width');
-                if (width.endsWith('px') && (width != custom_width)) {
-                    widths[column.attributes.name] = Number(width.slice(0, -2));
+                if (!width.endsWith('px') ||
+                    (width == custom_width) ||
+                    !column.get_visible()) {
+                    width = null;
+                } else {
+                    width = Number(width.slice(0, -2));
                 }
+                Sao.setdefault(fields, column.attributes.name, []).push(width);
             }
 
-            if (!jQuery.isEmptyObject(widths)) {
+            if (Object.values(fields).some(w => w.some(v => v))) {
                 let model_name = this.screen.model_name;
                 let TreeWidth = new Sao.Model('ir.ui.view_tree_width');
                 TreeWidth.execute(
                     'set_width',
-                    [model_name, widths, window.screen.width],
+                    [model_name, fields, window.screen.width],
                     {});
                 if (Object.prototype.hasOwnProperty.call(
                         Sao.Screen.tree_column_width, model_name)) {
                     Object.assign(
                         Sao.Screen.tree_column_width[model_name],
-                        widths);
+                        fields);
                 } else {
-                    Sao.Screen.tree_column_width[model_name] = widths;
+                    Sao.Screen.tree_column_width[model_name] = fields;
                 }
             }
         },
@@ -907,6 +933,12 @@
             this.screen.button(button.attributes);
         },
         display: function(selected, expanded) {
+            if (this.screen.group.parent) {
+                // Prevent Chrome based browser to compute a min-content
+                // such that only this table has scrollbar if needed
+                this.el.css('display', 'grid');
+            }
+
             if ((this.display_size === null) && this.screen.group.length) {
                 if (this.screen.group.parent) {
                     this.display_size = 0;
@@ -942,9 +974,9 @@
             expanded = expanded || this.get_expanded_paths();
 
             if (this.selection_mode == Sao.common.SELECTION_MULTIPLE) {
-                this.selection.show();
+                this.selection.sao_show();
             } else {
-                this.selection.hide();
+                this.selection.sao_hide();
             }
 
             const group_records = (group, root) => {
@@ -1008,7 +1040,7 @@
             domain = inversion.simplify(domain);
             var decoder = new Sao.PYSON.Decoder(this.screen.context);
             var min_width = [];
-            var tree_column_optional = (
+            var tree_column_optional = structuredClone(
                 Sao.Screen.tree_column_optional[this.view_id] || {});
             for (const column of this.columns) {
                 visible_columns += 1;
@@ -1019,8 +1051,9 @@
                 var optional;
                 if ((column.attributes.optional) &&
                     Object.prototype.hasOwnProperty.call(
-                        tree_column_optional, name)) {
-                    optional = tree_column_optional[name];
+                        tree_column_optional, name) &&
+                    !jQuery.isEmptyObject(tree_column_optional[name])) {
+                    optional = tree_column_optional[name].shift();
                 } else {
                     optional = Boolean(parseInt(
                         column.attributes.optional || '0', 10));
@@ -1054,7 +1087,7 @@
                         column.col.data('hidden-width', column.col.css('width'))
                     }
                     column.col.css('width', 0);
-                    column.col.hide();
+                    column.col.sao_hide();
                 } else if (!column.col.hasClass('draggable-handle') &&
                     !column.col.hasClass('optional') &&
                     !column.col.hasClass('selection-state') &&
@@ -1071,18 +1104,20 @@
                         width = column.col.data('default-width');
                     }
                     if (width && width.endsWith('%')) {
-                        width = parseInt(width.slice(0, -1), 10) / 100;
+                        // Reverse the calculation from _set_column_width
+                        let factor = 1;
                         if (column.attributes.expand) {
-                            width /= parseInt(column.attributes.expand, 10);
+                            factor += parseInt(column.attributes.expand, 10);
                         }
-                        width = `${width}em`;
+                        width = parseInt(width.slice(0, -1), 10);
+                        width = `${width / 100 / factor}em`;
                     }
                     min_width.push(width);
-                    column.col.show();
+                    column.col.sao_show();
                 }
             }
-            this.table.find('thead > tr > th .resizer').show();
-            this.table.find('thead > tr > th:visible:last .resizer').hide();
+            this.table.find('thead > tr > th .resizer').sao_show();
+            this.table.find('thead > tr > th:visible:last .resizer').sao_hide();
             if (this.children_field) {
                 this.columns.every(column => {
                     if (column.col.hasClass('draggable-handle') ||
@@ -1221,8 +1256,8 @@
                 }
             }
 
-            to_hide.addClass('invisible').hide();
-            to_show.removeClass('invisible').show();
+            to_hide.addClass('invisible').sao_hide();
+            to_show.removeClass('invisible').sao_show();
         },
         update_with_selection: function() {
             let selected_records = this.selected_records;
@@ -1261,8 +1296,8 @@
                         }else {
                             sum_ += value;
                         }
-                        if (~records_ids.indexOf(record.id) ||
-                            !selected_records){
+                        if (records_ids.includes(record.id) ||
+                            !selected_records) {
                             if (selected_sum === null){
                                 selected_sum = value;
                             }else {
@@ -1525,6 +1560,13 @@
             if (this.rows.length <= path[0]) {
                 this.display_size = this.group.length;
                 this.display();
+            }
+            if (reset_view) {
+                let current_path = this.record.get_path(this.group);
+                current_path = current_path.map(function(e) {
+                    return e[1];
+                });
+                this.display([current_path]);
             }
             if (path.length > 1) {
                 prm = this.rows[path[0]].expand_to_path(
@@ -1824,11 +1866,11 @@
                     break;
                 case Sao.common.SELECTION_SINGLE:
                     this.selection.attr('type', 'radio');
-                    this.selection.show();
+                    this.selection.sao_show();
                     break;
                 case Sao.common.SELECTION_MULTIPLE:
                     this.selection.attr('type', 'checkbox');
-                    this.selection.show();
+                    this.selection.sao_show();
                     break;
             }
 
@@ -2260,11 +2302,11 @@
             this.tree.columns.forEach((col, idx) => {
                 var td = this._get_column_td(idx);
                 var static_el = this.get_static_el(td);
-                static_el.empty().append(col.render(this.record)).show();
+                static_el.empty().append(col.render(this.record)).sao_show();
                 this.get_editable_el(td)
                     .empty()
                     .data('widget', null)
-                    .hide()
+                    .sao_hide()
                     .parents('.treeview td').addBack().removeClass('edited');
             });
         },
@@ -2289,8 +2331,8 @@
                     widget.display(this.record, col.field);
 
                     var static_el = this.get_static_el(td);
-                    static_el.hide();
-                    editable_el.show();
+                    static_el.sao_hide();
+                    editable_el.sao_show();
                     editable_el.parents('.treeview td').addBack()
                         .addClass('edited');
 
@@ -2429,7 +2471,7 @@
                     }
                 } else if (event_.which == Sao.common.ESC_KEYCODE) {
                     this.tree.edit_row(null);
-                    this.get_static_el().show().find('[tabindex=0]').focus();
+                    this.get_static_el().sao_show().find('[tabindex=0]').focus();
                 }
             } else {
                 widget.display(this.record, column.field);
@@ -2474,9 +2516,9 @@
                 field.set_state(record, ['invisible']);
                 var invisible = field.get_state_attrs(record).invisible;
                 if (invisible) {
-                    cell.hide();
+                    cell.sao_hide();
                 } else {
-                    cell.show();
+                    cell.sao_show();
                 }
                 if (this.protocol) {
                     value = field.get(record);
@@ -2526,7 +2568,7 @@
                         // clean previous color if the new one is not valid
                         img_tag.css('background-color', '');
                         img_tag.css('background-color', value);
-                        img_tag.toggle(Boolean(value));
+                        img_tag.sao_toggle(Boolean(value));
                     } else {
                         Sao.common.ICONFACTORY.get_icon_url(value)
                             .done(url => {
@@ -2593,7 +2635,7 @@
                 var invisible = field.get_state_attrs(record).invisible;
                 if (invisible) {
                     cell.text('');
-                    cell.hide();
+                    cell.sao_hide();
                     return;
                 }
                 var result = field.get_symbol(record, this.attributes.symbol);
@@ -2601,10 +2643,10 @@
                     position = result[1];
                 if (Math.round(position) === this.position) {
                     cell.text(symbol);
-                    cell.show();
+                    cell.sao_show();
                 } else {
                     cell.text('');
-                    cell.hide();
+                    cell.sao_hide();
                 }
             };
             if (!record.is_loaded(this.attributes.name)) {
@@ -2658,9 +2700,9 @@
                 this.field.set_state(record);
                 var state_attrs = this.field.get_state_attrs(record);
                 if (state_attrs.invisible) {
-                    cell.hide();
+                    cell.sao_hide();
                 } else {
-                    cell.show();
+                    cell.sao_show();
                 }
             };
             const render_error = () => {
@@ -2686,10 +2728,10 @@
             cells.push(this.header);
             for (const cell of cells) {
                 if (visible) {
-                    cell.show();
+                    cell.sao_show();
                     cell.removeClass('invisible');
                 } else {
-                    cell.hide();
+                    cell.sao_hide();
                     cell.addClass('invisible');
                 }
             }
@@ -2760,6 +2802,10 @@
                 fields, false, false)) {
                 var value = cell.prop('checked');
                 this.field.set_client(record, value);
+                if ((!this.group.parent) & (record !== current_record)) {
+                    // we can not rely on editable tree handler to save the row
+                    record.save();
+                }
             } else {
                 evt.preventDefault();
             }
@@ -2796,6 +2842,11 @@
                 params.context = this.field.get_context(record);
                 Sao.Tab.create(params);
             });
+            cell.dblclick((evt) => {
+                // prevent calling switch_row on td
+                evt.preventDefault();
+                evt.stopImmediatePropagation();
+            });
         }
     });
 
@@ -2829,37 +2880,29 @@
                 return record._values[related];
             } else {
                 var value = this.field.get(record);
-                for (const option of this.selection) {
-                    if (option[0] === value) {
-                        return option[1];
-                    }
+                if (Object.hasOwn(this.any_selection, value)) {
+                    return this.any_selection[value];
+                } else {
+                    return value;
                 }
-                return value;
             }
         },
         update_text: function(cell, record) {
             if (!this.tree.editable &&
                     (this.field.name + ':string' in record._values)) {
-                var text_value = this.get_textual_value(record);
+                let text_value = record._values[this.field.name + ':string'];
                 cell.text(text_value).attr('title', text_value);
             } else {
-                this.update_selection(record, () => {
-                    var value = this.field.get(record);
-                    var prm, text, found = false;
-                    for (const option of this.selection) {
-                        if (option[0] === value) {
-                            found = true;
-                            text = option[1];
-                            break;
-                        }
-                    }
-                    if (!found) {
+                this.update_selection(record, (selection, help) => {
+                    let value = this.field.get(record),
+                        prm;
+                    if (Object.hasOwn(this.any_selection, value)) {
+                        prm = jQuery.when(this.any_selection[value]);
+                    } else {
                         prm = Sao.common.selection_mixin.get_inactive_selection
                             .call(this, value).then(function(inactive) {
                                 return inactive[1];
                             });
-                    } else {
-                        prm = jQuery.when(text);
                     }
                     prm.done(text_value => {
                         cell.text(text_value).attr('title', text_value);
@@ -2890,10 +2933,8 @@
                 return record._values[related];
             } else {
                 var values = this.field.get_eval(record).map(value => {
-                    for (const option of this.selection) {
-                        if (option[0] === value) {
-                            return option[1];
-                        }
+                    if (Object.hasOwn(this.any_selection, value)) {
+                        return this.any_selection[value];
                     }
                     return '';
                 });
@@ -2903,7 +2944,7 @@
         update_text: function(cell, record) {
             if (!this.tree.editable &&
                     (this.field_name + ':string' in record._values)) {
-                var text_value = this.get_textual_value(record);
+                let text_value = record._values[this.field_name + ':string'];
                 cell.text(text_value).attr('title', text_value);
             } else {
                 this.update_selection(record, () => {
@@ -2949,11 +2990,8 @@
                 name = value[1];
             }
             if (model) {
-                for (const option of this.selection) {
-                    if (option[0] === model) {
-                        model = option[1];
-                        break;
-                    }
+                if (Object.hasOwn(this.any_selection, model)) {
+                    model = this.any_selection[model];
                 }
                 text = model + ',' + name;
             } else {
@@ -3045,7 +3083,8 @@
             } else {
                 size = this.field.get(record).length;
             }
-            return size? Sao.common.humanize(size, 'B') : '';
+            let file_exist = !((size === undefined) || (size === null));
+            return file_exist ? Sao.common.humanize(size, 'B') : '';
         },
         update_text: function(cell, record) {
             var text = this.get_textual_value(record);
@@ -3065,9 +3104,9 @@
                     });
             }
             if (!text) {
-                button.hide();
+                button.sao_hide();
             } else {
-                button.show();
+                button.sao_show();
             }
         },
         save_as: function(record) {
@@ -3149,9 +3188,9 @@
             this.field.set_state(record);
             var state_attrs = this.field.get_state_attrs(record);
             if (state_attrs.readonly) {
-                cell.hide();
+                cell.sao_hide();
             } else {
-                cell.show();
+                cell.sao_show();
             }
             return cell;
         }
@@ -3220,10 +3259,10 @@
             cells.push(this.header);
             for (const cell of cells) {
                 if (visible) {
-                    cell.show();
+                    cell.sao_show();
                     cell.removeClass('invisible');
                 } else {
-                    cell.hide();
+                    cell.sao_hide();
                     cell.addClass('invisible');
                 }
             }
@@ -3257,7 +3296,7 @@
     Sao.View.Tree.ButtonMultiple = Sao.class_(Sao.common.Button, {
         set_state: function(records) {
             if (!records.length) {
-                this.el.hide();
+                this.el.sao_hide();
                 this.el.prop('disabled', true);
                 this.set_icon(null);
                 return;
@@ -3275,9 +3314,9 @@
                 icons.add(r_states.icon || this.attributes.icon);
             }
             if (states.invisible) {
-                this.el.hide();
+                this.el.sao_hide();
             } else {
-                this.el.show();
+                this.el.sao_show();
             }
             this.el.prop('disabled', Boolean(states.readonly));
             if (icons.size == 1) {
@@ -3357,9 +3396,9 @@
         set_readonly: function(readonly) {
             Sao.View.EditableTree.URL._super.set_readonly.call(this, readonly);
             if (readonly) {
-                this.input.hide();
+                this.input.sao_hide();
             } else {
-                this.input.show();
+                this.input.sao_show();
             }
         },
     });

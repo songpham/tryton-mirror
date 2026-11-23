@@ -6,8 +6,10 @@ from collections import defaultdict
 from decimal import Decimal
 
 from sql import Null
+from sql.conditionals import Coalesce
 from sql.functions import CharLength
 
+from trytond import backend
 from trytond.i18n import gettext
 from trytond.model import (
     ChatMixin, DeactivableMixin, Index, ModelSQL, ModelView, Workflow, fields)
@@ -54,7 +56,8 @@ class Complaint(Workflow, ModelSQL, ModelView, ChatMixin):
     company = fields.Many2One(
         'company.company', 'Company', required=True,
         states={
-            'readonly': _states['readonly'] | Eval('origin'),
+            'readonly': _states['readonly'],
+            'editable': ~Eval('origin'),
             })
     type = fields.Many2One('sale.complaint.type', 'Type', required=True,
         states=_states)
@@ -94,8 +97,8 @@ class Complaint(Workflow, ModelSQL, ModelView, ChatMixin):
                 ],
             },
         states={
-            'readonly': ((Eval('state') != 'draft')
-                | Bool(Eval('actions', [0]))),
+            'readonly': Eval('state') != 'draft',
+            'editable': ~Eval('actions', [0]),
             'required': Bool(Eval('origin_model')),
             },
         depends={'origin_model'})
@@ -106,8 +109,9 @@ class Complaint(Workflow, ModelSQL, ModelView, ChatMixin):
     description = fields.Text('Description', states=_states)
     actions = fields.One2Many('sale.complaint.action', 'complaint', 'Actions',
         states={
-            'readonly': ((Eval('state') != 'draft')
-                | (If(~Eval('origin_id', 0), 0, Eval('origin_id', 0)) <= 0)),
+            'readonly': Eval('state') != 'draft',
+            'editable': (
+                If(~Eval('origin_id', 0), -1, Eval('origin_id', -1)) < 0),
             },
         depends={'origin_model'})
     submitted_by = employee_field(
@@ -138,7 +142,7 @@ class Complaint(Workflow, ModelSQL, ModelView, ChatMixin):
         super().__setup__()
         t = cls.__table__()
         cls._sql_indexes.update({
-                Index(t, (t.reference, Index.Similarity())),
+                Index(t, (Coalesce(t.reference, ''), Index.Similarity())),
                 Index(
                     t,
                     (t.state, Index.Equality(cardinality='low')),
@@ -392,7 +396,8 @@ class Complaint(Workflow, ModelSQL, ModelView, ChatMixin):
     def _check_similar(cls, complaints):
         pool = Pool()
         Warning = pool.get('res.user.warning')
-        for sub_complaints in grouped_slice(complaints):
+        for sub_complaints in grouped_slice(
+                complaints, backend.MAX_QUERY_PARAMS // 10):
             sub_complaints = list(sub_complaints)
             domain = list(filter(None,
                     (c._similar_domain() for c in sub_complaints)))

@@ -81,6 +81,11 @@ msgctxt "field:res.user,actions:"
 msgid "Actions"
 msgstr "Tindakan"
 
+#, fuzzy
+msgctxt "field:res.user,administrator:"
+msgid "Administrator"
+msgstr "Administrasi"
+
 msgctxt "field:res.user,applications:"
 msgid "Applications"
 msgstr "Aplikasi-Aplikasi"
@@ -236,6 +241,10 @@ msgctxt "help:res.user,actions:"
 msgid "Actions that will be run at login."
 msgstr ""
 
+msgctxt "help:res.user,administrator:"
+msgid "When checked the user has the access rights of all groups."
+msgstr ""
+
 msgctxt "help:res.user,notifications:"
 msgid "Notifications to subscribe to."
 msgstr ""
@@ -265,6 +274,12 @@ msgstr "Atur Ulang Kata Sandi"
 msgctxt "model:ir.message,text:msg_email_invalid"
 msgid "The email address \"%(email)s\" for \"%(user)s\" is not valid."
 msgstr ""
+
+#, python-format
+msgctxt "model:ir.message,text:msg_notification_silenced"
+msgid "%(number)s notification silenced."
+msgid_plural "%(number)s notifications silenced."
+msgstr[0] ""
 
 msgctxt "model:ir.message,text:msg_password_email"
 msgid "The password cannot be the same as user's email address."
@@ -302,6 +317,10 @@ msgstr ""
 msgctxt "model:ir.model.button,help:user_reset_password_button"
 msgid "Send by email a new temporary password to the user"
 msgstr "Kirim melalui email kata sandi baru sementara ke pengguna"
+
+msgctxt "model:ir.model.button,string:notification_mark_read_button"
+msgid "Mark as Read"
+msgstr ""
 
 msgctxt "model:ir.model.button,string:user_application_cancel_button"
 msgid "Cancel"
@@ -423,6 +442,10 @@ msgctxt "report:res.user.email_reset_password:"
 msgid "The password will expire in [1:%(datetime)s]."
 msgstr "Kata sandi akan kedaluwarsa dalam [1:%(datetime)s]."
 
+msgctxt "selection:res.user.application,application:"
+msgid "REST API"
+msgstr ""
+
 msgctxt "selection:res.user.application,state:"
 msgid "Cancelled"
 msgstr "Dibatalkan"
@@ -458,10 +481,6 @@ msgstr "Izin Akses"
 msgctxt "view:res.user:"
 msgid "Actions"
 msgstr "Tindakan"
-
-msgctxt "view:res.user:"
-msgid "Group Membership"
-msgstr ""
 
 msgctxt "view:res.user:"
 msgid "Preferences"

@@ -16,6 +16,23 @@ The backend manages the database connection and schema manipulation.
 
    The name of the backend configured.
 
+.. attribute:: MAX_QUERY_PARAMS
+
+   The maximum number of parameters supported by the backend.
+
+.. attribute:: dict_row
+
+   A row factory for cursor returning rows as :py:class:`dictionary <dict>`.
+
+.. attribute:: namedtuple_row
+
+   A row factory for cursor returning rows as
+   :py:func:`~collections.namedtuple`.
+
+.. attribute:: scalar_row
+
+   A row factory for cursor returning the first column as a scalar value.
+
 Database
 ========
 
@@ -29,14 +46,14 @@ Database
 
 .. method:: Database.get_connection([autocommit[, readonly]])
 
-   Retrieve a connection object as defined by :pep:`249#connection`.
+   Retrieve a connection object as defined by :pep:`249#connection`, bearing in
+   mind that the ``cursor()`` method accepts a row_factory keyword parameter.
    If autocommit is set, the connection is committed after each statement.
    If readonly is set, the connection is read only.
 
-.. method:: Database.put_connection(connection[, close])
+.. method:: Database.put_connection(connection)
 
    Release the connection.
-   If close is set, the connection is discarded.
 
 .. method:: Database.close()
 
@@ -253,6 +270,14 @@ TableHandler
    Handle table for the ``model``.
    If ``history`` is set, the table is the one storing the history.
 
+.. attribute:: TableHandler.model
+
+   The :class:`~trytond.model.ModelSQL` of the handled table.
+
+.. attribute:: TableHandler.history
+
+   A boolean to handle the history table.
+
 .. attribute:: TableHandler.namedatalen
 
    The maximing length of named data for the database.
@@ -386,3 +411,7 @@ Exceptions
 .. exception:: DatabaseOperationalError
 
    Exception raised for errors that are related to the database’s operation.
+
+.. exception:: DatabaseTimeoutError
+
+   The exception raised when a query last longer than the defined timeout.

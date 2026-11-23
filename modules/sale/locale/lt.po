@@ -178,6 +178,11 @@ msgctxt "field:sale.configuration,sale_shipment_method:"
 msgid "Sale Shipment Method"
 msgstr "Siuntimo parduodant būdas"
 
+#, fuzzy
+msgctxt "field:sale.configuration,sale_wait_shipment:"
+msgid "Sale Wait Shipment"
+msgstr "Siuntimai"
+
 msgctxt "field:sale.configuration.quotation,sale_quotation_validity:"
 msgid "Sale Quotation Validity"
 msgstr ""
@@ -189,6 +194,11 @@ msgstr "Pardavimo sąskaitų faktūrų išrašymo būdas"
 msgctxt "field:sale.configuration.sale_method,sale_shipment_method:"
 msgid "Sale Shipment Method"
 msgstr "Siuntimo parduodant būdas"
+
+#, fuzzy
+msgctxt "field:sale.configuration.sale_method,sale_wait_shipment:"
+msgid "Sale Wait Shipment"
+msgstr "Siuntimai"
 
 msgctxt "field:sale.configuration.sequence,company:"
 msgid "Company"
@@ -312,6 +322,16 @@ msgstr "Prekės mato vieneto kategorija"
 
 msgctxt "field:sale.line,quantity:"
 msgid "Quantity"
+msgstr "Kiekis"
+
+#, fuzzy
+msgctxt "field:sale.line,quantity_to_invoice:"
+msgid "Quantity to Invoice"
+msgstr "Atkurtos sąskaitos faktūros"
+
+#, fuzzy
+msgctxt "field:sale.line,quantity_to_ship:"
+msgid "Quantity to Ship"
 msgstr "Kiekis"
 
 msgctxt "field:sale.line,sale:"
@@ -710,6 +730,15 @@ msgctxt "field:sale.sale,tax_amount_cache:"
 msgid "Tax Cache"
 msgstr "Išsaugota PVM vertė"
 
+#, fuzzy
+msgctxt "field:sale.sale,to_invoice:"
+msgid "To Invoice"
+msgstr "Sąskaita faktūra"
+
+msgctxt "field:sale.sale,to_ship:"
+msgid "To Ship"
+msgstr ""
+
 msgctxt "field:sale.sale,total_amount:"
 msgid "Total"
 msgstr "Viso su PVM"
@@ -811,6 +840,14 @@ msgctxt "help:sale.configuration,sale_process_after:"
 msgid ""
 "The grace period during which confirmed sale can still be reset to draft.\n"
 "Applied if a worker queue is activated."
+msgstr ""
+
+msgctxt "help:sale.configuration,sale_wait_shipment:"
+msgid "Create customer shipments in a waiting state"
+msgstr ""
+
+msgctxt "help:sale.configuration.sale_method,sale_wait_shipment:"
+msgid "Create customer shipments in a waiting state"
 msgstr ""
 
 #, fuzzy
@@ -1683,12 +1720,12 @@ msgid "Manual"
 msgstr "Rankiniu būdu"
 
 msgctxt "selection:sale.sale,invoice_method:"
-msgid "On Order Processed"
-msgstr "Vykdant užsakymą"
+msgid "On Fulfillment"
+msgstr ""
 
 msgctxt "selection:sale.sale,invoice_method:"
-msgid "On Shipment Sent"
-msgstr "Išsiunčiant krovinį"
+msgid "On Order Processed"
+msgstr "Vykdant užsakymą"
 
 msgctxt "selection:sale.sale,invoice_state:"
 msgid "Awaiting Payment"

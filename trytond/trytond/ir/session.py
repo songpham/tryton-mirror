@@ -91,17 +91,16 @@ class Session(ModelSQL):
                 domain or [],
                 ])
         find, last_reset = None, None
-        to_delete = []
-        for session in sessions:
-            if abs(session.create_date - now) < timeout:
-                if compare_digest(session.key, key):
-                    find = True
-                    last_reset = session.write_date or session.create_date
-            else:
-                if find is None and compare_digest(session.key, key):
-                    find = False
-                to_delete.append(session)
-        cls.delete(to_delete)
+        with cls.bulk_delete() as delete:
+            for session in sessions:
+                if abs(session.create_date - now) < timeout:
+                    if compare_digest(session.key, key):
+                        find = True
+                        last_reset = session.last_modified_at
+                else:
+                    if find is None and compare_digest(session.key, key):
+                        find = False
+                    delete.push(session)
         if find:
             cls._session_reset_cache.set(key, last_reset)
         return find
@@ -120,7 +119,7 @@ class Session(ModelSQL):
                 ('key', '=', key),
                 domain or [],
                 ], limit=1)
-        timestamp = session.write_date or session.create_date
+        timestamp = session.last_modified_at
         valid = abs(timestamp - now) < timeout
         if not valid:
             cls.delete([session])

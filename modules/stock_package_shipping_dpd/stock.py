@@ -16,7 +16,6 @@ from trytond.model import fields
 from trytond.model.exceptions import AccessError
 from trytond.modules.stock_package_shipping.exceptions import (
     PackingValidationError)
-from trytond.modules.stock_package_shipping.stock import address_name
 from trytond.pool import Pool, PoolMeta
 from trytond.transaction import Transaction
 from trytond.wizard import StateAction, StateTransition, Wizard
@@ -214,8 +213,8 @@ class CreateDPDShipping(Wizard):
         else:
             street = address.street_name or ''
             house_no = address.numbers
-        name = address_name(address, party)
-        contact = party.full_name if party.full_name != name else ''
+        name = address.party_full_name
+        contact = address.attn or ''
         if with_contact and not contact:
             contact = party.full_name
         shipping_party = {
@@ -235,6 +234,9 @@ class CreateDPDShipping(Wizard):
         mobile = address.contact_mechanism_get('mobile', usage=usage)
         if mobile and len(mobile.value) <= 30:
             shipping_party['mobile'] = mobile.value
+        fax = address.contact_mechanism_get('fax', usage=usage)
+        if fax and len(fax.value) <= 30:
+            shipping_party['fax'] = fax.value
         email = address.contact_mechanism_get('email', usage=usage)
         if email and 5 <= len(email.value) <= 100:
             shipping_party['email'] = email.value
@@ -282,10 +284,18 @@ class CreateDPDShipping(Wizard):
         cm3 = UoM(ModelData.get_id('product', 'uom_cubic_centimeter'))
         kg = UoM(ModelData.get_id('product', 'uom_kilogram'))
 
+        volume = sum(
+            UoM.compute_qty(
+                p.volume_uom, p.total_volume, shipment.volume_uom, round=False)
+            for p in shipment.root_packages)
         volume = round(UoM.compute_qty(
-                shipment.volume_uom, shipment.volume, cm3, round=False))
+                shipment.volume_uom, volume, cm3, round=False))
+        weight = sum(
+            UoM.compute_qty(
+                p.weight_uom, p.total_weight, shipment.weight_uom, round=False)
+            for p in shipment.root_packages)
         weight = round(UoM.compute_qty(
-                shipment.weight_uom, shipment.weight, kg, round=False), 2)
+                shipment.weight_uom, weight, kg, round=False), 2)
         return {
             'generalShipmentData': {
                 'identificationNumber': shipment.number,
@@ -377,25 +387,30 @@ class CreateDPDShipping_Customs(metaclass=PoolMeta):
                 'customsAmount': int(
                     amount.quantize(Decimal('.01')) * Decimal(100)),
                 'customsCurrency': currency.code,
-                'customsTerms': self.get_customs_terms(shipment),
                 'customsPaper': 'A',
                 'customsInvoice': shipment.number[:20],
                 'customsInvoiceDate': invoice_date.strftime('%Y%m%d'),
+                'reasonForExport': self.get_international_form_invoice_reason(
+                    shipment),
                 }
             if customs_agent := shipment.customs_agent:
-                international.update({
-                        'commercialInvoiceConsigneeVatNumber': (
-                            customs_agent.tax_identifier.code_compact)[:20],
-                        'commercialInvoiceConsignee': self.shipping_party(
-                            customs_agent.party,
-                            customs_agent.address,
-                            with_contact=True),
-                        })
-            if shipment.tax_identifier:
-                international['commercialInvoiceConsignorVatNumber'] = (
-                    shipment.tax_identifier.code_compact[:17])
-            international['commercialInvoiceConsignor'] = self.shipping_party(
-                shipment.company.party, shipment.customs_from_address)
+                consignee = self.shipping_party(
+                    customs_agent.party,
+                    customs_agent.address,
+                    with_contact=True)
+                consignee['vatNumber'] = (
+                    customs_agent.tax_identifier.code_compact[:20])
+                international['commercialInvoiceConsignee'] = consignee
+            if company_party := shipment.company_party:
+                consignor = self.shipping_party(
+                    company_party,
+                    shipment.customs_from_address,
+                    with_contact=True)
+                if (shipment.tax_identifier
+                        and shipment.tax_identifier.type == 'eu_vat'):
+                    consignor['eori'] = (
+                        shipment.tax_identifier.code_compact[:20])
+                international['commercialInvoiceConsignor'] = consignor
             international['additionalInvoiceLines'] = [
                 {'customsInvoicePosition': i,
                     **self.get_international_invoice_line(shipment, *k, **v)}
@@ -403,25 +418,46 @@ class CreateDPDShipping_Customs(metaclass=PoolMeta):
                     shipment.customs_products.items(), 1)]
             international['numberOfArticle'] = len(
                 international['additionalInvoiceLines'])
+            international['clearanceCleared'] = 'F'
+            if shipment.incoterm:
+                international['incoterm'] = shipment.incoterm.code
+            if shipment.incoterm_location:
+                if shipment.incoterm_location.city:
+                    international['incotermLocationTown'] = (
+                        shipment.incoterm_location.city)
+                if shipment.incoterm_location.country:
+                    international['incotermLocationCountryCode'] = (
+                        shipment.incoterm_location.country.code)
+            international['paymentTerm'] = self.get_payment_terms(shipment)
             product_and_service['international'] = international
         return product_and_service
 
-    def get_customs_terms(self, shipment):
+    def get_payment_terms(self, shipment):
         if shipment and shipment.incoterm:
-            if shipment.incoterm.code == 'DAP':
-                return '01'
-            elif shipment.incoterm.code == 'DDP':
-                return '03'
-            elif shipment.incoterm.code == 'EXW':
-                return '05'
+            if shipment.incoterm.import_duties == 'buyer':
+                return 'A'
+            elif shipment.incoterm.import_duties == 'seller':
+                return 'B'
+
+    def get_international_form_invoice_reason(self, shipment):
+        return {
+            'stock.shipment.out': '01',
+            'stock.shipment.in.return': '02',
+            }.get(shipment.__class__.__name__)
 
     def get_international_invoice_line(
             self, shipment, product, price, currency, unit, quantity, weight):
-        tariff_code = product.get_tariff_code({
+        recipient_tarrif_code = product.get_tariff_code({
                 'date': shipment.effective_date or shipment.planned_date,
                 'country': (
                     shipment.customs_to_country.id
                     if shipment.customs_to_country else None),
+                })
+        sender_tarrif_code = product.get_tariff_code({
+                'date': shipment.effective_date or shipment.planned_date,
+                'country': (
+                    shipment.customs_from_country.id
+                    if shipment.customs_from_country else None),
                 })
 
         weight = round(weight, 2)
@@ -430,14 +466,25 @@ class CreateDPDShipping_Customs(metaclass=PoolMeta):
         if not quantity.is_integer():
             quantity = 1
 
+        quantity = int(quantity)
+        amount = int(
+            value.quantize(Decimal('.01')) * Decimal(100))
+        unit_price = amount // quantity
+
         return {
-            'quantityItems': int(quantity),
+            'quantityItems': quantity,
             'customsContent': product.name[:200],
-            'customsTarif': tariff_code.code if tariff_code else None,
-            'customsAmountLine': int(
-                value.quantize(Decimal('.01')) * Decimal(100)),
+            'customsAmountLine': amount,
             'customsOrigin': (
                 product.country_of_origin.code_numeric
                 if product.country_of_origin else None),
+            'customsOriginAlphanumeric': (
+                product.country_of_origin.code
+                if product.country_of_origin else None),
             'customsGrossWeight': int(weight * 100),
+            'recipientCountryTarif': (
+                recipient_tarrif_code.code if recipient_tarrif_code else None),
+            'senderCountryTarif': (
+                sender_tarrif_code.code if sender_tarrif_code else None),
+            'unitPrice': unit_price,
             }

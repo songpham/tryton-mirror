@@ -10,14 +10,15 @@ Configure Typless service
 First you must `register to Typless <https://app.typless.com/>`_ and retrieve
 the API key from your profile.
 
-Then create a document type and configured it for the `Incoming Documents
-<document_incoming:model-document.incoming>` you want to process
+Then create a document type and configure it for the `Incoming Documents
+<document_incoming:model-document.incoming>` you want to process.
 
 When setting the `OCR Service
 <document_incoming_ocr:model-document.incoming.ocr.service>`'s type to
 :guilabel:`Typless`, you must fill in the :guilabel:`API Key` with the key and
-:guilabel:`Document Type` with the name of the document type created. You can
-fill if needed the selection criteria.
+:guilabel:`Document Type` with the name of the document type created.
+You must select the fields setup for the document type on Typless model.
+You can fill if needed the selection criteria.
 
 
 .. _Setup fields for Unknown type:

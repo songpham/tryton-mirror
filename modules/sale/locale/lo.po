@@ -172,6 +172,11 @@ msgctxt "field:sale.configuration,sale_shipment_method:"
 msgid "Sale Shipment Method"
 msgstr ""
 
+#, fuzzy
+msgctxt "field:sale.configuration,sale_wait_shipment:"
+msgid "Sale Wait Shipment"
+msgstr "Shipments"
+
 msgctxt "field:sale.configuration.quotation,sale_quotation_validity:"
 msgid "Sale Quotation Validity"
 msgstr ""
@@ -183,6 +188,11 @@ msgstr ""
 msgctxt "field:sale.configuration.sale_method,sale_shipment_method:"
 msgid "Sale Shipment Method"
 msgstr ""
+
+#, fuzzy
+msgctxt "field:sale.configuration.sale_method,sale_wait_shipment:"
+msgid "Sale Wait Shipment"
+msgstr "Shipments"
 
 #, fuzzy
 msgctxt "field:sale.configuration.sequence,company:"
@@ -310,6 +320,16 @@ msgstr "Sales per Category"
 #, fuzzy
 msgctxt "field:sale.line,quantity:"
 msgid "Quantity"
+msgstr "ຈຳນວນ"
+
+#, fuzzy
+msgctxt "field:sale.line,quantity_to_invoice:"
+msgid "Quantity to Invoice"
+msgstr "ໃບເກັບເງິນພາສີທີ່ດິນ"
+
+#, fuzzy
+msgctxt "field:sale.line,quantity_to_ship:"
+msgid "Quantity to Ship"
 msgstr "ຈຳນວນ"
 
 #, fuzzy
@@ -722,6 +742,15 @@ msgid "Tax Cache"
 msgstr ""
 
 #, fuzzy
+msgctxt "field:sale.sale,to_invoice:"
+msgid "To Invoice"
+msgstr "ໃບເກັບເງິນພາສີທີ່ດິນ"
+
+msgctxt "field:sale.sale,to_ship:"
+msgid "To Ship"
+msgstr ""
+
+#, fuzzy
 msgctxt "field:sale.sale,total_amount:"
 msgid "Total"
 msgstr "ລວມທັງໝົດ"
@@ -830,6 +859,14 @@ msgctxt "help:sale.configuration,sale_process_after:"
 msgid ""
 "The grace period during which confirmed sale can still be reset to draft.\n"
 "Applied if a worker queue is activated."
+msgstr ""
+
+msgctxt "help:sale.configuration,sale_wait_shipment:"
+msgid "Create customer shipments in a waiting state"
+msgstr ""
+
+msgctxt "help:sale.configuration.sale_method,sale_wait_shipment:"
+msgid "Create customer shipments in a waiting state"
 msgstr ""
 
 msgctxt "help:sale.handle.invoice.exception.ask,ignore_invoices:"
@@ -1703,11 +1740,11 @@ msgid "Manual"
 msgstr "ໃສ່ເອົາເອງ"
 
 msgctxt "selection:sale.sale,invoice_method:"
-msgid "On Order Processed"
+msgid "On Fulfillment"
 msgstr ""
 
 msgctxt "selection:sale.sale,invoice_method:"
-msgid "On Shipment Sent"
+msgid "On Order Processed"
 msgstr ""
 
 msgctxt "selection:sale.sale,invoice_state:"

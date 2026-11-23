@@ -89,13 +89,16 @@
         function getScrollableAncestors(el) {
             let ancestors = [];
             let parent = el.parentElement;
-            while (parent && parent !== document.body) {
+            while (parent && (parent !== document.body ||
+                !parent.classList.contains('modal'))) {
                 if (isScrollable(parent)) {
                     ancestors.push(parent);
                 }
                 parent = parent.parentElement;
             }
-            ancestors.push(window);
+            if (parent && !parent.classList.contains('modal')) {
+                ancestors.push(window);
+            }
             return ancestors;
         }
 
@@ -112,16 +115,25 @@
                 let container_rect = container.getBoundingClientRect();
                 let top_ = rect.top - container_rect.top;
                 let bottom = top_ + rect.height;
+                let left = rect.left - container_rect.left;
+                let right = left + rect.width;
 
                 let target_top = container.scrollTop;
+                let target_left = container.scrollLeft;
 
                 if (top_ < 0) {
                     target_top += top_ - container.clientHeight / 2;
                 } else if (bottom > container.clientHeight) {
                     target_top += bottom - container.clientHeight / 2
                 }
+                if (left < 0) {
+                    target_left += left - container.clientWidth / 2;
+                } else if (right > container.clientWidth) {
+                    target_left += right - container.clientWidth / 2;
+                }
                 container.scrollTo({
                     top: Math.max(0, target_top),
+                    left: Math.max(0, target_left),
                 });
             }
         }
@@ -189,7 +201,15 @@
         dialog.modal.uniqueId();
 
         keys.forEach(function(k, i) {
+            let checked;
+            if (!default_) {
+                checked = !i;
+            } else {
+                checked = values[keys[i]] == default_;
+            }
             jQuery('<div/>', {
+                'class': 'form-group',
+            }).append(jQuery('<div/>', {
                 'class': 'radio'
             }).append(jQuery('<label/>')
                 .text(' ' + k)
@@ -197,13 +217,11 @@
                     'type': 'radio',
                     'name': 'selection-' + dialog.modal.attr('id'),
                     'value': i,
-                    'checked': values[keys[i]] == default_,
-                })))
+                    'checked': checked,
+                    'required': true,
+                }))).dblclick(() => dialog.content.submit()))
             .appendTo(dialog.body);
         });
-        if (!default_) {
-            dialog.body.find('input').first().prop('checked', true);
-        }
 
         jQuery('<button/>', {
             'class': 'btn btn-link',
@@ -215,13 +233,16 @@
         }).appendTo(dialog.footer);
         jQuery('<button/>', {
             'class': 'btn btn-primary',
-            'type': 'button',
+            'type': 'submit',
             'title': Sao.i18n.gettext("OK"),
-        }).text(Sao.i18n.gettext('OK')).click(function() {
+        }).text(Sao.i18n.gettext('OK')
+        ).appendTo(dialog.footer);
+        dialog.content.submit(evt => {
+            evt.preventDefault();
             var i = dialog.body.find('input:checked').attr('value');
             dialog.modal.modal('hide');
             prm.resolve(values[keys[i]]);
-        }).appendTo(dialog.footer);
+        });
         dialog.modal.on('hidden.bs.modal', function(e) {
             jQuery(this).remove();
         });
@@ -445,7 +466,7 @@
         var parts = text.split(' ');
         for (var i = 0; i < parts.length; i++) {
             var part = parts[i];
-            if (part.contains(':')) {
+            if (part.includes(':')) {
                 var subparts = part.split(':');
                 var subconverter = [
                     converter.h, converter.m, converter.s];
@@ -481,7 +502,7 @@
                 }
             }
         }
-        if (text.contains('-')) {
+        if (text.includes('-')) {
             seconds *= -1;
         }
         return Sao.TimeDelta(null, seconds);
@@ -581,8 +602,8 @@
                 this._models = models;
             });
         },
-        contains: function(model) {
-            return ~this._models.indexOf(model);
+        includes: function(model) {
+            return this._models.includes(model);
         }
     });
     Sao.common.MODELHISTORY = new Sao.common.ModelHistory();
@@ -757,10 +778,8 @@
 
     Sao.common.selection_mixin = {};
     Sao.common.selection_mixin.init = function() {
-        this.selection = null;
-        this.help = null;
         this.inactive_selection = [];
-        this._last_domain = null;
+        this.any_selection = {}
         this._values2selection = {};
         this._domain_cache = {};
         if (this.nullable_widget === undefined) {
@@ -784,9 +803,9 @@
                     return a[1].localeCompare(b[1]);
                 });
             }
-            this.selection = jQuery.extend([], selection);
-            this.help = this.attributes.help_selection || {};
-            if (callback) callback(this.selection, this.help);
+            let help = this.attributes.help_selection || {};
+            Object.assign(this.any_selection, Object.fromEntries(selection));
+            if (callback) callback(selection, help);
         };
         if (!(selection instanceof Array) &&
                 !(key in this._values2selection)) {
@@ -817,7 +836,7 @@
         const _update_selection = () => {
             if (!field) {
                 if (callback) {
-                    callback(this.selection, this.help);
+                    callback([], {});
                 }
                 return;
             }
@@ -827,26 +846,28 @@
                 var value = record._get_on_change_args(change_with);
                 delete value.id;
                 Sao.common.selection_mixin.init_selection.call(
-                    this, value, () => {
-                        Sao.common.selection_mixin.filter_selection.call(
-                            this, domain, record, field);
-                        if (callback) {
-                            callback(this.selection, this.help);
+                    this, value, (selection, help) => {
+                        let cur_value = record._get_on_change_args(change_with);
+                        delete cur_value.id;
+                        if (JSON.stringify(value) == JSON.stringify(cur_value)) {
+                            selection = Sao.common.selection_mixin
+                                .filter_selection.call(
+                                    this, domain, record, field, selection);
+                            Object.assign(
+                                this.any_selection,
+                                Object.fromEntries(selection));
+                            if (callback) {
+                                callback(selection, help);
+                            }
                         }
                     });
             } else {
                 var context = field.get_context(record);
                 var jdomain = JSON.stringify([domain, context]);
                 if (jdomain in this._domain_cache) {
-                    this.selection = this._domain_cache[jdomain];
-                    this._last_domain = [domain, context];
-                }
-                if ((this._last_domain !== null) &&
-                        Sao.common.compare(domain, this._last_domain[0]) &&
-                        (JSON.stringify(context) ==
-                         JSON.stringify(this._last_domain[1]))) {
+                    let [selection, help] = this._domain_cache[jdomain];
                     if (callback) {
-                        callback(this.selection, this.help);
+                        callback(selection, help);
                     }
                     return;
                 }
@@ -874,23 +895,33 @@
                             help[x.id] = x[help_field];
                         }
                     }
-                    this._last_domain = [domain, context];
-                    this._domain_cache[jdomain] = selection;
-                    this.selection = jQuery.extend([], selection);
-                    this.help = help;
-                    if (callback) {
-                        callback(this.selection, this.help);
+                    this._domain_cache[jdomain] = [selection, help];
+                    Object.assign(
+                        this.any_selection, Object.fromEntries(selection));
+
+                    let cur_domain = field.get_domain(record);
+                    let cur_context = field.get_context(record);
+                    if (Sao.common.compare(domain, cur_domain)
+                        && (JSON.stringify(context) ==
+                            JSON.stringify(cur_context))) {
+                        if (callback) {
+                            callback(selection, help);
+                        }
                     }
                 });
                 prm.fail(() => {
-                    var selection = [];
+                    var selection = [], help = {};
                     if (this.nullable_widget) {
                         selection.push([null, '']);
                     }
-                    this._last_domain = null;
-                    this.selection = selection;
-                    if (callback) {
-                        callback(this.selection, this.help);
+                    let cur_domain = field.get_domain(record);
+                    let cur_context = field.get_context(record);
+                    if (Sao.common.compare(domain, cur_domain)
+                        && (JSON.stringify(context) ==
+                            JSON.stringify(cur_context))) {
+                        if (callback) {
+                            callback(selection, help);
+                        }
                     }
                 });
             }
@@ -898,9 +929,9 @@
         this._selection_prm.always(_update_selection);
     };
     Sao.common.selection_mixin.filter_selection = function(
-            domain, record, field) {
+            domain, record, field, selection) {
         if (jQuery.isEmptyObject(domain)) {
-            return;
+            return selection;
         }
 
         var inversion = new Sao.common.DomainInversion();
@@ -912,7 +943,7 @@
 
         var _model_evaluator = function(allowed_models) {
             return function(value) {
-                return ~allowed_models.indexOf(value[0]) ||
+                return allowed_models.includes(value[0]) ||
                     jQuery.isEmptyObject(allowed_models);
             };
         };
@@ -923,12 +954,12 @@
             var allowed_models = field.get_models(record);
             evaluator = _model_evaluator(allowed_models);
         } else if (type_ == 'multiselection') {
-            return;
+            return selection;
         } else {
             evaluator = _value_evaluator;
         }
 
-        this.selection = this.selection.filter(evaluator);
+        return selection.filter(evaluator);
     };
     Sao.common.selection_mixin.get_inactive_selection = function(value) {
         if (!this.attributes.relation) {
@@ -947,8 +978,9 @@
             'params': [[value], ['rec_name'], {}]
         }, Sao.Session.current_session);
         return prm.then(result => {
-            this.inactive_selection.push([result[0].id, result[0].rec_name]);
-            return [result[0].id, result[0].rec_name];
+            let selection = [result[0].id, result[0].rec_name];
+            this.inactive_selection.push(selection);
+            return selection;
         });
     };
 
@@ -1005,9 +1037,9 @@
                 states = {'invisible': true};
             }
             if (states.invisible) {
-                this.el.hide();
+                this.el.sao_hide();
             } else {
-                this.el.show();
+                this.el.sao_show();
             }
             this.el.prop('disabled', Boolean(states.readonly));
             this.set_icon(states.icon || this.attributes.icon);
@@ -1100,21 +1132,21 @@
                     if (!nextchar) {
                         this.state = null;  // end of file
                         break;
-                    } else if (this.whitespace.contains(nextchar)) {
+                    } else if (this.whitespace.includes(nextchar)) {
                         if (this.token || quoted) {
                             break;  // emit current token
                         } else {
                             continue;
                         }
-                    } else if (this.commenters.contains(nextchar)) {
+                    } else if (this.commenters.includes(nextchar)) {
                         // TODO readline
-                    } else if (this.escape.contains(nextchar)) {
+                    } else if (this.escape.includes(nextchar)) {
                         escapedstate = 'a';
                         this.state = nextchar;
-                    } else if (!~this.nowordchars.indexOf(nextchar)) {
+                    } else if (!this.nowordchars.includes(nextchar)) {
                         this.token = nextchar;
                         this.state = 'a';
-                    } else if (this.quotes.contains(nextchar)) {
+                    } else if (this.quotes.includes(nextchar)) {
                         this.state = nextchar;
                     } else if (this.whitespace_split) {
                         this.token = nextchar;
@@ -1127,25 +1159,25 @@
                             continue;
                         }
                     }
-                } else if (this.quotes.contains(this.state)) {
+                } else if (this.quotes.includes(this.state)) {
                     quoted = true;
                     if (!nextchar) {  // end of file
                         throw 'no closing quotation';
                     }
                     if (nextchar == this.state) {
                         this.state = 'a';
-                    } else if (this.escape.contains(nextchar) &&
-                        this.escapedquotes.contains(this.state)) {
+                    } else if (this.escape.includes(nextchar) &&
+                        this.escapedquotes.includes(this.state)) {
                         escapedstate = this.state;
                         this.state = nextchar;
                     } else {
                         this.token = this.token + nextchar;
                     }
-                } else if (this.escape.contains(this.state)) {
+                } else if (this.escape.includes(this.state)) {
                     if (!nextchar) {  // end of file
                         throw 'no escaped character';
                     }
-                    if (this.quotes.contains(escapedstate) &&
+                    if (this.quotes.includes(escapedstate) &&
                         (nextchar != this.state) &&
                         (nextchar != escapedstate)) {
                         this.token = this.token + this.state;
@@ -1156,22 +1188,22 @@
                     if (!nextchar) {
                         this.state = null;  // end of file
                         break;
-                    } else if (this.whitespace.contains(nextchar)) {
+                    } else if (this.whitespace.includes(nextchar)) {
                         this.state = ' ';
                         if (this.token || quoted) {
                             break;  // emit current token
                         } else {
                             continue;
                         }
-                    } else if (this.commenters.contains(nextchar)) {
+                    } else if (this.commenters.includes(nextchar)) {
                         // TODO
-                    } else if (this.quotes.contains(nextchar)) {
+                    } else if (this.quotes.includes(nextchar)) {
                         this.state = nextchar;
-                    } else if (this.escape.contains(nextchar)) {
+                    } else if (this.escape.includes(nextchar)) {
                         escapedstate = 'a';
                         this.state = nextchar;
-                    } else if ((!~this.nowordchars.indexOf(nextchar)) ||
-                            this.quotes.contains(nextchar) ||
+                    } else if ((!this.nowordchars.includes(nextchar)) ||
+                            this.quotes.includes(nextchar) ||
                             this.whitespace_split) {
                         this.token = this.token + nextchar;
                     } else {
@@ -1262,7 +1294,7 @@
                 var is_array = function(e) {
                     return e instanceof Array;
                 };
-                if ((~['AND', 'OR'].indexOf(clause[0]) ||
+                if ((['AND', 'OR'].includes(clause[0]) ||
                             (is_array(clause[0]))) &&
                         clause.slice(1).every(is_array)) {
                     return this.stringable(clause);
@@ -1274,8 +1306,8 @@
                 }
                 if (name in this.fields) {
                     var field = this.fields[name];
-                    if (~['many2one', 'one2one', 'one2many', 'many2many']
-                        .indexOf(field.type)) {
+                    if (['many2one', 'one2one', 'one2many', 'many2many']
+                        .includes(field.type)) {
                         var test = function(value) {
                             return ((typeof value == 'string') ||
                                 (value === null));
@@ -1300,7 +1332,7 @@
             if (!domain) {
                 return true;
             }
-            if (~['AND', 'OR'].indexOf(domain[0])) {
+            if (['AND', 'OR'].includes(domain[0])) {
                 domain = domain.slice(1);
             }
             return domain.every(stringable_);
@@ -1312,7 +1344,7 @@
                     return '';
                 }
                 if ((typeof clause[0] != 'string') ||
-                        ~['AND', 'OR'].indexOf(clause[0])) {
+                        ['AND', 'OR'].includes(clause[0])) {
                     return '(' + this.string(clause) + ')';
                 }
                 var name = clause[0];
@@ -1333,7 +1365,7 @@
                 if (clause.length > 3) {
                     target = clause[3];
                 }
-                if (operator.contains('ilike')) {
+                if (operator.includes('ilike')) {
                     if (this.is_full_text(value)) {
                         value = value.slice(1, -1);
                     } else if (!this.is_like(value)) {
@@ -1348,14 +1380,14 @@
                 var def_operator = this.default_operator(field);
                 if (def_operator == operator.trim()) {
                     operator = '';
-                    if (~this.OPERATORS.indexOf(value)) {
+                    if (this.OPERATORS.includes(value)) {
                         // As the value could be interpreted as an operator
                         // the default operator must be forced
                         operator = '"" ';
                     }
-                } else if ((operator.contains(def_operator) &&
-                            (operator.contains('not') ||
-                             operator.contains('!')))) {
+                } else if ((operator.includes(def_operator) &&
+                            (operator.includes('not') ||
+                             operator.includes('!')))) {
                     operator = operator.replace(def_operator, '')
                         .replace('not', '!').trim();
                 }
@@ -1375,9 +1407,9 @@
                     }
                 }
                 var formatted_value = this.format_value(field, value, target);
-                if (~this.OPERATORS.indexOf(operator) &&
-                        ~['char', 'text', 'selection']
-                        .indexOf(field.type) &&
+                if (this.OPERATORS.includes(operator) &&
+                        ['char', 'text', 'selection']
+                        .includes(field.type) &&
                         (value === '')) {
                     formatted_value = '""';
                 }
@@ -1487,7 +1519,7 @@
                     escaped = value.replace(/%%/g, '__');
                     if (escaped.startsWith('%') || escaped.endsWith('%')) {
                         value = escaped.substring(1, escaped.length - 1);
-                    } else if (~escaped.indexOf('%')) {
+                    } else if (escaped.includes('%')) {
                         value = value.replace(/%%/g, '%');
                     }
                     operator = null;
@@ -1579,6 +1611,15 @@
             }
             return results;
         },
+        contains_without_diacritics: function(main, sub) {
+            main = main.normalize('NFD').toLowerCase();
+            sub = sub.normalize('NFD').toLowerCase();
+
+            main = main.replace(/[\u0300-\u036f]/g, '');
+            sub = sub.replace(/[\u0300-\u036f]/g, '');
+
+            return main.includes(sub);
+        },
         complete_value: function(field, value) {
             var complete_boolean = function() {
                 if ((value === null) || (value === undefined)) {
@@ -1590,18 +1631,15 @@
                 }
             };
 
-            var complete_selection = function() {
+            var complete_selection = () => {
                 var results = [];
                 var test_value = value !== null ? value : '';
                 if (value instanceof Array) {
                     test_value = value[value.length - 1] || '';
                 }
                 test_value = test_value.replace(/^%*|%*$/g, '');
-                var i, len, svalue, test;
-                for (i=0, len=field.selection.length; i<len; i++) {
-                    svalue = field.selection[i][0];
-                    test = field.selection[i][1].toLowerCase();
-                    if (test.startsWith(test_value.toLowerCase())) {
+                for(let [svalue, test] of field.selection) {
+                    if (this.contains_without_diacritics(test, test_value)) {
                         if (value instanceof Array) {
                             results.push(value.slice(0, -1).concat([svalue]));
                         } else {
@@ -1619,11 +1657,8 @@
                     test_value = value[value.length - 1];
                 }
                 test_value = test_value.replace(/^%*|%*$/g, '');
-                var i, len, svalue, test;
-                for (i=0, len=field.selection.length; i<len; i++) {
-                    svalue = field.selection[i][0];
-                    test = field.selection[i][1].toLowerCase();
-                    if (test.startsWith(test_value.toLowerCase())) {
+                for (let [svalue, test] of field.selection) {
+                    if (this.contains_without_diacritics(test, test_value)) {
                         if (value instanceof Array) {
                             results.push(value.slice(0, -1).concat([svalue]));
                         } else {
@@ -1635,7 +1670,9 @@
             };
 
             var complete_datetime = function() {
-                return [Sao.Date(), Sao.DateTime().utc()];
+                return [Sao.Date(), Sao.DateTime(
+                    undefined, undefined, undefined,
+                    0, 0, 0, 0, true)];
             };
 
             var complete_date = function() {
@@ -1667,7 +1704,7 @@
             var result = [];
             for (const nex of tokens.slice(1)) {
                 if ((nex == '=') && cur &&
-                    ~this.OPERATORS.indexOf(cur + nex)) {
+                    this.OPERATORS.includes(cur + nex)) {
                     result.push(cur + nex);
                     cur = null;
                 } else {
@@ -1703,16 +1740,16 @@
         },
         group: function(tokens) {
             var result = [];
+            let clausify = this._clausify;
 
             const _group = parts => {
                 var result = [];
                 var push_result = function(part) {
-                    var clause = [part];
-                    clause.clause = true;
+                    var clause = clausify([part]);
                     result.push(clause);
                 };
                 var i = parts.indexOf(':');
-                if (!~i) {
+                if (i < 0) {
                     parts.forEach(push_result);
                     return result;
                 }
@@ -1724,12 +1761,10 @@
                                 if (part[0] !== null) {
                                     lvalue.push(part[0]);
                                 }
-                                clause = name.concat([lvalue]);
-                                clause.clause = true;
+                                clause = clausify(name.concat([lvalue]));
                                 result.push(clause);
                             } else {
-                                clause = name.concat(part);
-                                clause.clause = true;
+                                clause = clausify(name.concat(part));
                                 result.push(clause);
                             }
                             name.splice(0, name.length);
@@ -1750,7 +1785,7 @@
                         // empty string is also the default operator
                         var operators = [''].concat(this.OPERATORS);
                         if (((i + 1) < parts.length) &&
-                                (~operators.indexOf(parts[i + 1]))) {
+                                (operators.includes(parts[i + 1]))) {
                             name = name.concat([parts[i + 1]]);
                             i += 1;
                         } else {
@@ -1770,12 +1805,10 @@
                         if (!jQuery.isEmptyObject(name)) {
                             var clause;
                             if (!jQuery.isEmptyObject(lvalue)) {
-                                clause = name.concat([lvalue]);
-                                clause.clause = true;
+                                clause = clausify(name.concat([lvalue]));
                                 result.push(clause);
                             } else {
-                                clause = name.concat([null]);
-                                clause.clause = true;
+                                clause = clausify(name.concat([null]));
                                 result.push(clause);
                             }
                         }
@@ -1928,11 +1961,11 @@
                             operator = '=';
                         }
                     }
-                    if (~[
+                    if ([
                         'integer', 'float', 'numeric',
                         'datetime', 'timestamp', 'date',
-                        'time'].indexOf(field.type)) {
-                        if ((typeof value == 'string') && value.contains('..')) {
+                        'time'].includes(field.type)) {
+                        if ((typeof value == 'string') && value.includes('..')) {
                             var values = value.split('..', 2);
                             var lvalue = this.convert_value(field, values[0], this.context);
                             var rvalue = this.convert_value(field, values[1], this.context);
@@ -1941,6 +1974,32 @@
                                     this._clausify([field_name, '<=', rvalue])
                                     ]);
                             return;
+                        }
+                        if ((typeof value == 'string') &&
+                            ['datetime', 'timestamp'].includes(field.type) &&
+                            (operator == '=')) {
+                            let ctx, format_, parsed_date;
+                            if (this.context && Object.keys(this.context).length) {
+                                ctx = this.context;
+                            } else {
+                                ctx = {};
+                            }
+                            format_ = Sao.common.date_format(ctx.date_format);
+                            parsed_date = Sao.common.parse_date(format_, value);
+                            if (parsed_date &&
+                                (Sao.common.format_date(format_, parsed_date) == value)) {
+                                let date = Sao.DateTime.combine(parsed_date, Sao.Time());
+                                let next_day = Sao.DateTime(
+                                    date.year(), date.month(), date.date(),
+                                    date.hour(), date.minute(), date.second(),
+                                    date.millisecond())
+                                next_day.add(1, 'day');
+                                result.push([
+                                    this._clausify([field_name, '>=', date]),
+                                    this._clausify([field_name, '<', next_day]),
+                                ]);
+                                return;
+                            }
                         }
                     }
                     if (['many2one', 'one2many', 'many2many', 'one2one',
@@ -1953,7 +2012,7 @@
                     } else {
                         value = this.convert_value(field, value, this.context);
                     }
-                    if (operator.contains('like')) {
+                    if (operator.includes('like')) {
                         value = this.likify(value);
                     }
                     if (target) {
@@ -1975,7 +2034,7 @@
             var escaped = value
                 .replace(escape + '%', '')
                 .replace(escape + '_', '');
-            if (escaped.contains('%') || escaped.contains('_')) {
+            if (escaped.includes('%') || escaped.includes('_')) {
                 return value;
             } else {
                 return '%' + value + '%';
@@ -1991,7 +2050,7 @@
             escaped = escaped
                 .replace(escape + '%', '')
                 .replace(escape + '_', '');
-            if (escaped.contains('%') || escaped.contains('_')) {
+            if (escaped.includes('%') || escaped.includes('_')) {
                 return false;
             }
             return value.startsWith('%') && value.endsWith('%');
@@ -2001,7 +2060,7 @@
             var escaped = value
                 .replace(escape + '%', '')
                 .replace(escape + '_', '');
-            return escaped.contains('%') || escaped.contains('_');
+            return escaped.includes('%') || escaped.includes('_');
         },
         unescape: function(value, escape) {
             escape = escape || '\\';
@@ -2016,24 +2075,24 @@
             if (empty && value === '') {
                 return '""';
             }
-            if (value.contains('\\')) {
+            if (value.includes('\\')) {
                 value = value.replace(new RegExp('\\\\', 'g'), '\\\\');
             }
-            if (value.contains('"')) {
+            if (value.includes('"')) {
                 value = value.replace(new RegExp('"', 'g'), '\\"');
             }
             var tests = [':', ' ', '(', ')'].concat(this.OPERATORS);
             for (var i = 0; i < tests.length; i++) {
                 var test = tests[i];
-                if (value.contains(test)) {
+                if (value.includes(test)) {
                     return '"' + value + '"';
                 }
             }
             return value;
         },
         default_operator: function(field) {
-            if (~['char', 'text', 'many2one', 'many2many', 'one2many',
-                    'reference', 'one2one'].indexOf(field.type)) {
+            if (['char', 'text', 'many2one', 'many2many', 'one2many',
+                'reference', 'one2one'].includes(field.type)) {
                 return 'ilike';
             } else if (field.type == 'multiselection') {
                 return 'in';
@@ -2086,6 +2145,7 @@
                 let [, thousandSeparator] = /^10(.)?000/.exec(format(10000));
                 let [, decimalSign] = /^0(.)1$/.exec(format(0.1));
                 return Number(string
+                    .replaceAll(' ', '')
                     .replaceAll(thousandSeparator, '')
                     .replace(decimalSign, '.'));
             }
@@ -2213,16 +2273,17 @@
                 }
                 var digit = 0;
                 var string = String(value);
-                if (string.contains('e')) {
+                if (string.includes('e')) {
                     var exp = string.split('e')[1];
                     string = string.split('e')[0];
                     digit -= parseInt(exp);
                 }
-                if (string.contains('.')) {
+                if (string.includes('.')) {
                     digit += string.replace(/0+$/, '').split('.')[1].length;
                 }
                 var factor = Number(field.factor || 1);
                 digit -= Math.round(Math.log10(factor));
+                digit = Math.max(digit, 0);
                 return (value * factor).toLocaleString(
                     Sao.i18n.BC47(Sao.i18n.getlang()), {
                         useGrouping: true,
@@ -2397,7 +2458,7 @@
             if (expression === field_name) {
                 return locale_name;
             }
-            if (expression.contains('.')) {
+            if (expression.includes('.')) {
                 return expression.split('.').slice(1).join('.');
             }
             return expression;
@@ -2407,12 +2468,10 @@
                 (expression.length > 2) &&
                 (typeof expression[1] == 'string'));
         },
-        constrained_leaf: function(part, boolop) {
-            if (boolop === undefined) {
-                boolop = this.and;
-            }
+        constrained_leaf: function(part) {
             var operand = part[1];
-            if ((operand === '=') & (boolop === this.and)) {
+            let value = part[2];
+            if ((operand === '=') || ((operand == 'in') && (value.length == 1))) {
                 // We should consider that other domain inversion will set a
                 // correct value to this field
                 return true;
@@ -2426,21 +2485,21 @@
             var field = part[0];
             var operand = part[1];
             var value = part[2];
-            if (field.contains('.')) {
+            if (field.includes('.')) {
                 // In the case where the leaf concerns a m2o then having a
                 // value in the evaluation context is deemed suffisant
                 return Boolean(context[field.split('.')[0]]);
             }
             var context_field = context[field];
-            if (!~['=', '!='].indexOf(operand) &&
+            if (!['=', '!='].includes(operand) &&
                 ((context_field === null) ||
                     (context_field === undefined) ||
                     (value === null) ||
                     (value === undefined)) &&
-                !(~['in', 'not in'].indexOf(operand) &&
+                !(['in', 'not in'].includes(operand) &&
                     ((context_field === null) ||
                         (context_field === undefined)) &&
-                    ((value instanceof Array) && ~value.indexOf(null)))) {
+                    ((value instanceof Array) && value.includes(null)))) {
                 return;
             }
             if (moment.isMoment(context_field) && !value) {
@@ -2467,7 +2526,7 @@
                     (typeof value == 'string') && context_field.length == 2) {
                 context_field = context_field.join(',');
             }
-            if (~['=', '!='].indexOf(operand) &&
+            if (['=', '!='].includes(operand) &&
                     context_field instanceof Array &&
                     typeof value == 'number') {
                 operand = {
@@ -2482,10 +2541,10 @@
             }
         },
         inverse_leaf: function(domain) {
-            if (~['AND', 'OR'].indexOf(domain)) {
+            if (['AND', 'OR'].includes(domain)) {
                 return domain;
             } else if (this.is_leaf(domain)) {
-                if (domain[1].contains('child_of') && !domain[0].contains('.')) {
+                if (domain[1].includes('child_of') && !domain[0].includes('.')) {
                     if (domain.length == 3) {
                         return domain;
                     } else {
@@ -2498,7 +2557,7 @@
             }
         },
         filter_leaf: function(domain, field, model) {
-            if (~['AND', 'OR'].indexOf(domain)) {
+            if (['AND', 'OR'].includes(domain)) {
                 return domain;
             } else if (this.is_leaf(domain)) {
                 if (domain[0].startsWith(field) && (domain.length > 3)) {
@@ -2532,10 +2591,10 @@
             }
         },
         localize_domain: function(domain, field_name, strip_target) {
-            if (~['AND', 'OR', true, false].indexOf(domain)) {
+            if (['AND', 'OR', true, false].includes(domain)) {
                 return domain;
             } else if (this.is_leaf(domain)) {
-                if (domain[1].contains('child_of')) {
+                if (domain[1].includes('child_of')) {
                     if (domain[0].split('.').length > 1) {
                         var target = domain[0].split('.').slice(1).join('.');
                         return [target].concat(domain.slice(1));
@@ -2564,7 +2623,7 @@
                 return [0, domain];
             } else if (this.is_leaf(domain)) {
                 return [1, domain];
-            } else if (~['AND', 'OR'].indexOf(domain)) {
+            } else if (['AND', 'OR'].includes(domain)) {
                 return [0, domain];
             } else {
                 var content = domain.map(this._sort_key.bind(this));
@@ -2600,7 +2659,7 @@
                 return [];
             } else if (this.is_leaf(domain)) {
                 return domain;
-            } else if (~['AND', 'OR'].indexOf(domain)) {
+            } else if (['AND', 'OR'].includes(domain)) {
                 return domain;
             } else {
                 var sorted_elements = domain.map(this.sort.bind(this));
@@ -2616,7 +2675,7 @@
             var value2reference = function(value) {
                 var model = null;
                 var ref_id = null;
-                if ((typeof(value) == 'string') && value.contains(',')) {
+                if ((typeof(value) == 'string') && value.includes(',')) {
                     var split = value.split(',');
                     var result = split.splice(0, 1);
                     result.push(split.join(','));
@@ -2642,7 +2701,7 @@
                 return [model, ref_id];
             };
 
-            if (~['AND', 'OR'].indexOf(domain)) {
+            if (['AND', 'OR'].includes(domain)) {
                 return domain;
             } else if (this.is_leaf(domain)) {
                 if (domain[0] == reference) {
@@ -2690,7 +2749,7 @@
                             }
                             for (model in model_values) {
                                 ref_ids = model_values[model];
-                                if (~ref_ids.indexOf('%')) {
+                                if (ref_ids.includes('%')) {
                                     if (domain[1] == 'in') {
                                         new_domain.push(
                                             [reference + '.id', '!=', null,
@@ -2718,7 +2777,7 @@
             }
         },
         extract_reference_models: function(domain, field_name) {
-            if (~['AND', 'OR'].indexOf(domain)) {
+            if (['AND', 'OR'].includes(domain)) {
                 return [];
             } else if (this.is_leaf(domain)) {
                 var local_part = domain[0].split('.', 1)[0];
@@ -2734,7 +2793,7 @@
                         d, field_name);
                     for (var i=0, len=new_models.length; i < len; i++) {
                         var model = new_models[i];
-                        if (!~models.indexOf(model)) {
+                        if (!models.includes(model)) {
                             models.push(model);
                         }
                     }
@@ -2784,7 +2843,7 @@
         simplify_duplicate: function(domain) {
             var dedup_branches = [];
             var bool_op = null;
-            if (~['AND', 'OR'].indexOf(domain[0])) {
+            if (['AND', 'OR'].includes(domain[0])) {
                 bool_op = domain[0];
                 domain = domain.slice(1);
             }
@@ -2845,7 +2904,7 @@
         },
         merge: function(domain, domoperator) {
             if (jQuery.isEmptyObject(domain) ||
-                    ~['AND', 'OR'].indexOf(domain)) {
+                    ['AND', 'OR'].includes(domain)) {
                 return [];
             }
             var domain_type = domain[0] == 'OR' ? 'OR' : 'AND';
@@ -2915,7 +2974,7 @@
         },
         domain_inversion: function(domain, symbol, context={}) {
             var expression = this.parse(domain);
-            if (!~expression.variables.indexOf(symbol)) {
+            if (!expression.variables.includes(symbol)) {
                 return true;
             }
             return expression.inverse(symbol, context);
@@ -2928,9 +2987,13 @@
             return ((a.isDate == b.isDate) &&
                 (a.isDateTime == b.isDateTime) &&
                 (a.valueOf() == b.valueOf()));
-        } else if ((a instanceof Number) || (b instanceof Number)) {
-            return (Number(a) === Number(b));
         } else {
+            if (a instanceof Number) {
+                a = a.valueOf();
+            }
+            if (b instanceof Number) {
+                b = b.valueOf();
+            }
             return (a === b);
         }
     };
@@ -2938,16 +3001,16 @@
         if (a instanceof Array) {
             if (b instanceof Array) {
                 for (var i = 0, len = a.length; i < len; i++) {
-                    if (~b.indexOf(a[i])) {
+                    if (b.includes(a[i])) {
                         return true;
                     }
                 }
                 return false;
             } else {
-                return Boolean(~a.indexOf(b));
+                return a.includes(b);
             }
         } else {
-            return Boolean(~b.indexOf(a));
+            return b.includes(a);
         }
     };
     Sao.common.DomainInversion.sql_like = function(value, pattern, ignore_case)
@@ -3005,7 +3068,7 @@
             }
         },
         base: function(expression) {
-            if (!expression.contains('.')) {
+            if (!expression.includes('.')) {
                 return expression;
             } else {
                 return expression.split('.')[0];
@@ -3019,7 +3082,7 @@
                 if (part instanceof DomainInversion.And) {
                     var part_inversion = part.inverse(symbol, context);
                     var evaluated = typeof part_inversion == 'boolean';
-                    if (!~part.variables.indexOf(symbol)) {
+                    if (!part.variables.includes(symbol)) {
                         continue;
                     }
                     if (!evaluated) {
@@ -3038,8 +3101,7 @@
                         ((field in context) &&
                             (this.domain_inversion.eval_leaf(
                                 part, context, this.domain_inversion.and) ||
-                                this.domain_inversion.constrained_leaf(
-                                    part, this.domain_inversion.and)))) {
+                                this.domain_inversion.constrained_leaf(part)))) {
                         result.push(true);
                     } else {
                         return false;
@@ -3073,7 +3135,7 @@
                 if (part instanceof DomainInversion.And) {
                     var part_inversion = part.inverse(symbol, context);
                     var evaluated = typeof part_inversion == 'boolean';
-                    if (!~part.variables.indexOf(symbol)) {
+                    if (!part.variables.includes(symbol)) {
                         if (evaluated && part_inversion) {
                             return true;
                         }
@@ -3094,9 +3156,7 @@
                     field = this.base(field);
                     if ((field in context) &&
                         (this.domain_inversion.eval_leaf(
-                            part, context, this.domain_inversion.or)) ||
-                        this.domain_inversion.constrained_leaf(
-                            part, this.domain_inversion.or)) {
+                            part, context, this.domain_inversion.or))) {
                         return true;
                     } else if ((field in context) &&
                             !this.domain_inversion.eval_leaf(part, context,
@@ -3254,7 +3314,7 @@
             if (url !== undefined) {
                 return jQuery.when(url);
             }
-            if (~Sao.common.LOCAL_ICONS.indexOf(icon_name)) {
+            if (Sao.common.LOCAL_ICONS.includes(icon_name)) {
                 return jQuery.get('images/' + icon_name + '.svg', null, null, 'text')
                     .then(icon => {
                         var img_url = this._convert(icon);
@@ -3727,27 +3787,26 @@
                 'class': 'alert alert-info',
                 'role': 'alert',
             });
-            var label = jQuery('<p/>', {
-                'text': Sao.i18n.gettext('Processing'),
-            }).appendTo(this.el);
+            this.label = jQuery('<p/>').appendTo(this.el);
             for (var i = 0; i < 3; i ++) {
-                label.append(jQuery('<span/>', {
+                this.label.append(jQuery('<span/>', {
                     'class': 'dot',
                     'text': '.',
                 }));
             }
-            this.el.hide();
+            this.el.sao_hide();
             jQuery(() => {
                 this.el.appendTo('body');
             });
         },
         show: function(timeout=null) {
+            this.label.text(Sao.i18n.gettext("Processing"));
             if (timeout === null) {
                 timeout = this.timeout;
             }
             return window.setTimeout(() => {
                 this.queries += 1;
-                this.el.show();
+                this.el.sao_show();
             }, timeout);
         },
         hide: function(timeoutID) {
@@ -3757,7 +3816,7 @@
             }
             if (this.queries <= 0) {
                 this.queries = 0;
-                this.el.hide();
+                this.el.sao_hide();
             }
         }
     });
@@ -3811,7 +3870,7 @@
             }).append(jQuery('<ul/>', {
                 'class': 'list-unstyled',
             })).appendTo(this.menu);
-            this.actions.hide();
+            this.actions.sao_hide();
 
             this.source = source;
             this.match_selected = match_selected;
@@ -3867,10 +3926,10 @@
             }
             this.actions.find('li.action').remove();
             if (jQuery.isEmptyObject(actions)) {
-                this.actions.hide();
+                this.actions.sao_hide();
                 return;
             }
-            this.actions.show();
+            this.actions.sao_show();
             actions.forEach(function(action) {
                 var action_id = action[0];
                 var content = action[1];
@@ -4061,7 +4120,7 @@
         if (!element.is(':visible')) {
             return null;
         }
-        if (~['input', 'select', 'textarea'].indexOf(
+        if (['input', 'select', 'textarea'].includes(
             element[0].tagName.toLowerCase()) &&
             !element.prop('readonly')) {
             return element;
@@ -4186,7 +4245,7 @@
         for (var i=0; i < string.length; i++) {
             var c = string.charAt(i).toLowerCase();
             // Skip sao and browser shortcuts
-            if (!~['d', 'e', 'f', 'i', 'n', 't', 'w'].indexOf(c)) {
+            if (!['d', 'e', 'f', 'i', 'n', 't', 'w'].includes(c)) {
                 return c;
             }
         }

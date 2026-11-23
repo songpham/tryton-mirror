@@ -4,6 +4,7 @@
 from sql import Null
 from sql.operators import Equal, NotEqual
 
+from trytond import backend
 from trytond.cache import Cache
 from trytond.const import OPERATORS
 from trytond.i18n import gettext
@@ -57,6 +58,9 @@ class Period(Workflow, ModelSQL, ModelView):
             ('adjustment', 'Adjustment'),
             ], 'Type', required=True,
         states=_STATES)
+    journals = fields.One2Many(
+        'account.journal.period', 'period', "Journals",
+        help="Filled automatically when a first move is created.")
     company = fields.Function(fields.Many2One('company.company', 'Company',),
         'on_change_with_company', searcher='search_company')
     icon = fields.Function(fields.Char("Icon"), 'get_icon')
@@ -226,7 +230,8 @@ class Period(Workflow, ModelSQL, ModelView):
             return
         lang = Lang.get()
 
-        for sub_periods in grouped_slice(periods):
+        for sub_periods in grouped_slice(
+                periods, backend.MAX_QUERY_PARAMS // 3):
             domain = ['OR']
             for period in sub_periods:
                 domain.append([
@@ -437,3 +442,9 @@ class Period(Workflow, ModelSQL, ModelView):
     @property
     def move_sequence_used(self):
         return self.move_sequence or self.fiscalyear.move_sequence
+
+    @classmethod
+    def copy(cls, periods, default=None):
+        default = default.copy() if default is not None else {}
+        default.setdefault('journals')
+        return super().copy(periods, default=default)

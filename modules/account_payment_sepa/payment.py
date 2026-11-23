@@ -4,6 +4,7 @@ import datetime
 import os
 import unicodedata
 import uuid
+from collections import defaultdict
 from io import BytesIO
 from itertools import groupby
 from operator import attrgetter
@@ -26,8 +27,7 @@ from trytond.pool import Pool, PoolMeta
 from trytond.pyson import Eval, If
 from trytond.report import Report
 from trytond.tools import (
-    cached_property, grouped_slice, is_full_text, lstrip_wildcard, reduce_ids,
-    sortable_values)
+    cached_property, is_full_text, lstrip_wildcard, sortable_values)
 from trytond.transaction import Transaction
 
 from .sepa_handler import CAMT054
@@ -85,6 +85,7 @@ class Journal(metaclass=PoolMeta):
             (None, ''),
             ('pain.001.001.03', 'pain.001.001.03'),
             ('pain.001.001.05', 'pain.001.001.05'),
+            ('pain.001.001.09', 'pain.001.001.09'),
             ('pain.001.003.03', 'pain.001.003.03'),
             ], 'Payable Flavor', states={
             'required': Eval('process_method') == 'sepa',
@@ -95,6 +96,7 @@ class Journal(metaclass=PoolMeta):
             (None, ''),
             ('pain.008.001.02', 'pain.008.001.02'),
             ('pain.008.001.04', 'pain.008.001.04'),
+            ('pain.008.001.08', 'pain.008.001.08'),
             ('pain.008.003.02', 'pain.008.003.02'),
             ], 'Receivable Flavor', states={
             'required': Eval('process_method') == 'sepa',
@@ -489,6 +491,63 @@ class Payment(metaclass=PoolMeta):
             ('sepa_info_id', operator, code_value, *extra),
             ]
 
+    @classmethod
+    @ModelView.button
+    @Workflow.transition('draft')
+    def draft(cls, payments):
+        to_remove_mandate = []
+        for payment in payments:
+            if (payment.sepa_mandate
+                    and payment.sepa_mandate.state != 'validated'):
+                to_remove_mandate.append(payment)
+        if to_remove_mandate:
+            cls.write(to_remove_mandate, {'sepa_mandate': None})
+        super().draft(payments)
+
+
+class Payment_Invoice(metaclass=PoolMeta):
+    __name__ = 'account.payment'
+
+    @property
+    def sepa_bank_account_number(self):
+        pool = Pool()
+        Invoice = pool.get('account.invoice')
+        BankAccount = pool.get('bank.account')
+        sepa_number = super().sepa_bank_account_number
+        if (self.kind == 'payable'
+                and not self.sepa_payable_bank_account_number
+                and self.line
+                and isinstance(self.line.move.origin, Invoice)):
+            invoice = self.line.move.origin
+            for mean in invoice.payment_means:
+                if isinstance(mean.instrument, BankAccount):
+                    bank_account = mean.instrument
+                    for number in bank_account.numbers:
+                        if number.type == 'iban':
+                            sepa_number = number
+                            break
+        return sepa_number
+
+    @classmethod
+    def get_sepa_mandates(cls, payments):
+        pool = Pool()
+        Invoice = pool.get('account.invoice')
+        ReceptionDirectDebit = pool.get('party.party.reception_direct_debit')
+        mandates = []
+        for payment, mandate in zip(
+                payments,
+                super().get_sepa_mandates(payments)):
+            if (not payment.sepa_mandate
+                    and payment.line
+                    and isinstance(payment.line.move.origin, Invoice)):
+                invoice = payment.line.move.origin
+                for mean in invoice.payment_means:
+                    if (isinstance(mean.instrument, ReceptionDirectDebit)
+                            and mean.instrument.sepa_mandate):
+                        mandate = mean.instrument.sepa_mandate
+            mandates.append(mandate)
+        return mandates
+
 
 class Mandate(Workflow, ModelSQL, ModelView):
     __name__ = 'account.payment.sepa.mandate'
@@ -523,7 +582,10 @@ class Mandate(Workflow, ModelSQL, ModelView):
             ])
     identification = fields.Char('Identification', size=35,
         states={
-            'readonly': Eval('identification_readonly', True),
+            'readonly': (
+                (Eval('id', -1) >= 0)
+                & Eval('identification')),
+            'editable': ~Eval('identification_readonly', True),
             'required': Eval('state') == 'validated',
             })
     identification_readonly = fields.Function(fields.Boolean(
@@ -741,13 +803,12 @@ class Mandate(Workflow, ModelSQL, ModelView):
         payment = Payment.__table__()
         cursor = Transaction().connection.cursor()
 
-        has_payments = dict.fromkeys([m.id for m in mandates], False)
-        for sub_ids in grouped_slice(mandates):
-            red_sql = reduce_ids(payment.sepa_mandate, sub_ids)
-            cursor.execute(*payment.select(payment.sepa_mandate, Literal(True),
-                    where=red_sql,
-                    group_by=payment.sepa_mandate))
-            has_payments.update(cursor)
+        has_payments = defaultdict(lambda: False)
+        cursor.execute(*payment.select(payment.sepa_mandate, Literal(True),
+                where=fields.SQL_OPERATORS['in'](
+                    payment.sepa_mandate, map(int, mandates)),
+                group_by=payment.sepa_mandate))
+        has_payments.update(cursor)
 
         return has_payments
 
@@ -758,21 +819,20 @@ class Mandate(Workflow, ModelSQL, ModelView):
         payment = Payment.__table__()
         cursor = Transaction().connection.cursor()
 
-        is_first = dict.fromkeys([m.id for m in mandates], True)
-        for sub_ids in grouped_slice(mandates):
-            red_sql = reduce_ids(payment.sepa_mandate, sub_ids)
-            cursor.execute(*payment.select(
-                    payment.sepa_mandate, Literal(False),
-                    where=red_sql
-                    & (payment.sepa_mandate_sequence_type != Null)
-                    & ~(  # Same as property rejected
-                        (payment.state == 'failed')
-                        & ((payment.sepa_return_reason_code != Null)
-                            | (payment.sepa_return_reason_code != ''))
-                        & (payment.sepa_return_reason_information
-                            == '/RTYP/RJCT')),
-                    group_by=payment.sepa_mandate))
-            is_first.update(cursor)
+        is_first = defaultdict(lambda: True)
+        cursor.execute(*payment.select(
+                payment.sepa_mandate, Literal(False),
+                where=fields.SQL_OPERATORS['in'](
+                    payment.sepa_mandate, map(int, mandates))
+                & (payment.sepa_mandate_sequence_type != Null)
+                & ~(  # Same as property rejected
+                    (payment.state == 'failed')
+                    & ((payment.sepa_return_reason_code != Null)
+                        | (payment.sepa_return_reason_code != ''))
+                    & (payment.sepa_return_reason_information
+                        == '/RTYP/RJCT')),
+                group_by=payment.sepa_mandate))
+        is_first.update(cursor)
         return is_first
 
     @classmethod
@@ -812,7 +872,10 @@ class Message(Workflow, ModelSQL, ModelView):
         }
     message = fields.Binary('Message', filename='filename',
         file_id=file_id, store_prefix=store_prefix,
-        states=_states)
+        states={
+            'required': True,
+            'readonly': _states['readonly'],
+            })
     message_file_id = fields.Char("Message File ID", readonly=True)
     filename = fields.Function(fields.Char('Filename'), 'get_filename')
     type = fields.Selection([

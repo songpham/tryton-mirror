@@ -29,7 +29,6 @@ class TableHandler(TableHandlerInterface):
         super()._init(model, history=history)
         self.__columns = None
         self.__indexes = None
-        self._model = model
 
         cursor = Transaction().connection.cursor()
         # Create new table if necessary
@@ -90,7 +89,7 @@ class TableHandler(TableHandlerInterface):
         temp_table = '__temp_%s' % self.table_name
         temp_columns = dict(self._columns)
         self.table_rename(self.table_name, temp_table)
-        self._init(self._model, history=self.history)
+        self._init(self.model, history=self.history)
         columns, old_columns = [], []
         for name, values in temp_columns.items():
             if name in drop_columns:
@@ -122,6 +121,11 @@ class TableHandler(TableHandlerInterface):
                         _escape_identifier(old_name),
                         _escape_identifier(new_name)))
                 self._update_definitions(columns=True)
+                if not self.history:
+                    history_table = self.table_name + '__history'
+                    if self.__class__.table_exist(history_table):
+                        history_h = self.__class__(self.model, True)
+                        history_h.column_rename(old_name, new_name)
             else:
                 logger.warning(
                     'Unable to rename column %s on table %s to %s.',
@@ -186,17 +190,17 @@ class TableHandler(TableHandlerInterface):
     def db_default(self, column_name, value):
         pass
 
-    def add_column(self, column_name, sql_type, default=None, comment=''):
+    def add_column(self, column_name, sql_type, default=None):
         database = Transaction().database
         column_type = database.sql_type(sql_type)
         match = VARCHAR_SIZE_RE.match(sql_type)
         field_size = int(match.group(1)) if match else None
 
-        self._add_raw_column(column_name, column_type, default, field_size,
-            comment)
+        self._add_raw_column(column_name, column_type, default, field_size)
 
-    def _add_raw_column(self, column_name, column_type, default=None,
-            field_size=None, string=''):
+    def _add_raw_column(
+            self, column_name, column_type, default=None, field_size=None):
+        cursor = Transaction().connection.cursor()
         if self.column_exist(column_name):
             base_type = column_type[0].upper()
             if base_type != self._columns[column_name]['typname']:
@@ -228,12 +232,20 @@ class TableHandler(TableHandlerInterface):
                 elif from_size and from_size < field_size:
                     self.alter_size(column_name, column_type[1])
                 else:
-                    logger.warning(
-                        'Unable to migrate column %s on table %s '
-                        'from varchar(%s) to varchar(%s).',
-                        column_name, self.table_name,
-                        from_size if from_size and from_size > 0 else "",
-                        field_size)
+                    cursor.execute(
+                        'SELECT id FROM %s WHERE LENGTH(%s) > %%s LIMIT 1' % (
+                            _escape_identifier(self.table_name),
+                            _escape_identifier(column_name)),
+                        (field_size,))
+                    if not cursor.fetchone():
+                        self.alter_size(column_name, column_type[1])
+                    else:
+                        logger.warning(
+                            'Unable to migrate column %s on table %s '
+                            'from varchar(%s) to varchar(%s).',
+                            column_name, self.table_name,
+                            from_size if from_size and from_size > 0 else "",
+                            field_size)
             return
 
         cursor = Transaction().connection.cursor()

@@ -6,8 +6,8 @@ from itertools import groupby
 from trytond.model import (
     DeactivableMixin, ModelSQL, ModelView, fields, sequence_ordered, tree)
 from trytond.pool import Pool
+from trytond.pyson import Eval
 from trytond.rpc import RPC
-from trytond.tools import grouped_slice
 from trytond.transaction import Transaction, inactive_records
 
 
@@ -113,7 +113,13 @@ class UIMenu(
         'ir.ui.menu-res.group', 'menu', 'group', "Groups",
         filter=[
             ('active', '=', True),
-            ])
+            ],
+        states={
+            'invisible': Eval('administration', False),
+            })
+    administration = fields.Boolean(
+        "Administrator",
+        help="Check to restrict access to only administrators.")
     favorite = fields.Function(fields.Boolean('Favorite'), 'get_favorite')
     favorites = fields.Many2Many(
         'ir.ui.menu.favorite', 'menu', 'user', "Favorites")
@@ -129,6 +135,10 @@ class UIMenu(
     @classmethod
     def default_sequence(cls):
         return 50
+
+    @classmethod
+    def default_administration(cls):
+        return False
 
     @staticmethod
     def list_icons():
@@ -176,12 +186,10 @@ class UIMenu(
 
             menus = list(filter(has_action_access, menus))
 
-            parent_ids = {x.parent.id for x in menus if x.parent}
-            parents = set()
-            for sub_parent_ids in grouped_slice(parent_ids):
-                parents.update(cls.search([
-                            ('id', 'in', list(sub_parent_ids)),
-                            ]))
+            parent_ids = list({x.parent.id for x in menus if x.parent})
+            parents = cls.search([
+                    ('id', 'in', parent_ids),
+                    ])
             # Re-browse to avoid side-cache access
             menus = cls.browse([x.id for x in menus
                     if (x.parent and x.parent in parents) or not x.parent])
@@ -223,14 +231,10 @@ class UIMenu(
     def set_action(cls, menus, name, value):
         pool = Pool()
         ActionKeyword = pool.get('ir.action.keyword')
-        action_keywords = []
-        transaction = Transaction()
-        for i in range(0, len(menus), transaction.database.IN_MAX):
-            sub_menus = menus[i:i + transaction.database.IN_MAX]
-            action_keywords += ActionKeyword.search([
-                ('keyword', '=', 'tree_open'),
-                ('model', 'in', [str(menu) for menu in sub_menus]),
-                ])
+        action_keywords = ActionKeyword.search([
+            ('keyword', '=', 'tree_open'),
+            ('model', 'in', [str(menu) for menu in menus]),
+            ])
         if action_keywords:
             with Transaction().set_context(_timestamp=False):
                 ActionKeyword.delete(action_keywords)
@@ -244,16 +248,14 @@ class UIMenu(
             return
         Action = pool.get(action_type)
         action = Action(int(action_id))
-        to_create = []
-        for menu in menus:
-            with Transaction().set_context(_timestamp=False):
-                to_create.append({
+        with Transaction().set_context(_timestamp=False), \
+                ActionKeyword.bulk_create() as create:
+            for menu in menus:
+                create.push({
                         'keyword': 'tree_open',
                         'model': str(menu),
                         'action': action.action.id,
                         })
-        if to_create:
-            ActionKeyword.create(to_create)
 
     @classmethod
     def get_favorite(cls, menus, name):

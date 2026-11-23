@@ -1,6 +1,7 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
 import datetime
+import json
 import unittest
 from email.message import EmailMessage
 from unittest.mock import Mock, patch
@@ -10,21 +11,18 @@ try:
 except ImportError:
     mrml = None
 
+from trytond.convert import import_xml
 from trytond.model.exceptions import AccessError
 from trytond.pool import Pool
 from trytond.report.report import Report, get_email
-from trytond.tests.test_tryton import (
-    TestCase, activate_module, with_transaction)
+from trytond.tests.test_tryton import DBTestCase, with_transaction
+from trytond.tools import file_open
 from trytond.transaction import Transaction
 
 
-class ReportTestCase(TestCase):
+class ReportTestCase(DBTestCase):
     'Test Report'
-
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        activate_module('tests')
+    module = 'tests'
 
     @with_transaction()
     def test_format_datetime(self):
@@ -44,6 +42,9 @@ class ReportTestCase(TestCase):
     @with_transaction()
     def test_execute(self):
         "Execute report"
+        with file_open('report.xml', subdir='tests') as xml:
+            import_xml(xml)
+
         pool = Pool()
         Report = pool.get('test.test_report', type='report')
 
@@ -54,11 +55,18 @@ class ReportTestCase(TestCase):
     @with_transaction()
     def test_execute_without_access(self):
         "Execute report without model access"
+        with file_open('report.xml', subdir='tests') as xml:
+            import_xml(xml)
+
         pool = Pool()
         ActionReport = pool.get('ir.action.report')
+        User = pool.get('res.user')
         Group = pool.get('res.group')
         Report = pool.get('test.test_report', type='report')
+        transaction = Transaction()
 
+        user = User(login='foo')
+        user.save()
         group = Group(name="Test")
         group.save()
         action_report, = ActionReport.search([
@@ -68,35 +76,76 @@ class ReportTestCase(TestCase):
         action_report.save()
 
         with self.assertRaises(AccessError):
-            Report.execute([], {'model': 'test.access'})
+            with (transaction.set_user(user.id),
+                    transaction.set_context(_check_access=True)):
+                Report.execute(
+                    [],
+                    {'model': 'test.access', 'action_id': action_report.id})
 
     @with_transaction()
     def test_execute_without_model_access(self):
         "Execute report without model access"
+        with file_open('report.xml', subdir='tests') as xml:
+            import_xml(xml)
+
         pool = Pool()
         Report = pool.get('test.test_report', type='report')
         ModelAccess = pool.get('ir.model.access')
+        User = pool.get('res.user')
+        transaction = Transaction()
+
+        user = User(login='foo')
+        user.save()
         ModelAccess.create([{
                     'model': 'test.access',
                     'perm_write': False,
                     }])
 
         with self.assertRaises(AccessError):
-            Report.execute([], {'model': 'test.access'})
+            with (transaction.set_user(user.id),
+                    transaction.set_context(_check_access=True)):
+                Report.execute([], {'model': 'test.access'})
 
     @with_transaction()
     def test_execute_without_read_access(self):
         "Execute report without read access"
+        with file_open('report.xml', subdir='tests') as xml:
+            import_xml(xml)
+
         pool = Pool()
+        User = pool.get('res.user')
         Report = pool.get('test.test_report', type='report')
+        Model = pool.get('test.access')
+        RuleGroup = pool.get('ir.rule.group')
+        transaction = Transaction()
+
+        record, = Model.create([{'field1': 'foo'}])
+        rule_group, = RuleGroup.create([{
+                    'name': "Field different from foo",
+                    'model': Model.__name__,
+                    'global_p': True,
+                    'perm_read': True,
+                    'rules': [('create', [{
+                                    'domain': json.dumps(
+                                        [('field1', '!=', 'foo')]),
+                                    }])],
+                    }])
+
+        user = User(login='foo')
+        user.save()
 
         with self.assertRaises(AccessError):
-            Report.execute([1], {'model': 'test.access'})
+            with (transaction.set_user(user.id),
+                    transaction.set_context(_check_access=True)):
+                Report.execute([record.id], {'model': 'test.access'})
 
     @unittest.skipUnless(mrml, "required mrml")
     @with_transaction()
     def test_convert_mjml_to_html(self):
         "Test convert MJML to HTML"
+        with file_open('report.xml', subdir='tests') as xml:
+            import_xml(xml)
+
         pool = Pool()
         Report = pool.get('test.test_report_mjml', type='report')
 

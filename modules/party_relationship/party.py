@@ -196,7 +196,8 @@ class RelationAll(Relation, ModelView):
         Relation = pool.get('party.relation')
         vlist = cls._before_create(vlist)
         relations = Relation.create(vlist)
-        return cls.browse(cls._after_create([r.id * 2 for r in relations]))
+        return cls.browse(cls._after_create(
+                [r.id * 2 for r in relations], vlist))
 
     @classmethod
     def write(cls, *args):
@@ -208,9 +209,6 @@ class RelationAll(Relation, ModelView):
             cls._before_write(*args))
 
         relations = cls.browse(ids)
-        # Clean local cache of reverse
-        for relation in relations:
-            relation._local_cache.pop(relation.reverse_id, None)
         # Clean cursor cache of reverse
         for cache in Transaction().cache.values():
             if cls.__name__ in cache:

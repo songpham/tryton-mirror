@@ -54,6 +54,15 @@ contain a ``[tryton]`` section with the following keys:
    They will be loaded in the given order when the module is activated or
    updated.
 
+``include_dirs``
+   This is a list of directories containing additional :file:`tryton.cfg`
+   files, organised by line.
+   These files follow the same structure, excluding ``version``, ``depends``
+   and ``extras_depend``.
+
+``test_include_dirs``
+   It's the same as ``include_dirs``, but only applies when running tests.
+
 It may contain some ``[register]`` or ``[register <module> <module>]`` sections
 with the keys ``model``, ``wizard`` and ``report`` defining the ``type_`` and
 qualified name of class relative to the module as a one per line list to pass
@@ -119,11 +128,6 @@ The following snippet gives a first idea of what an XML file looks:
           <record model="res.group" id="group_party_admin">
               <field name="name">Party Administration</field>
           </record>
-          <record model="res.user-res.group"
-              id="user_admin_group_party_admin">
-              <field name="user" ref="res.user_admin"/>
-              <field name="group" ref="group_party_admin"/>
-          </record>
 
           <menuitem
               name="Party Management"
@@ -175,6 +179,9 @@ Here is the list of valid tags:
    database.
    The ``id`` attribute can be used to refer to the record later in any XML
    file.
+   The ``search`` attribute may be set as a domain which is used to search for
+   existing record instead of creating a new one when the ``id`` is not yet
+   known.
 
 ``field``
    Set the value of the field with the name defined by the attribute ``name``.
@@ -208,6 +215,10 @@ Here is the list of valid tags:
 
    ``pyson``
       Convert the evaluated value into :ref:`PYSON <ref-pyson>` string.
+
+    ``path``
+      Prepend to the value the directory name of the path of the configuration
+      file importing the XML file.
 
    ``depends``
       Set value only if all modules in the comma separated module list value

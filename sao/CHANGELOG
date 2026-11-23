@@ -1,3 +1,22 @@
+
+Version 8.2.0 - 2026-10-05
+--------------------------
+* Bug fixes (see mercurial logs for details)
+* Support icon for login services
+* Edit the selected One2Many rows sequentially
+* Support filename extension for Binary field
+* Use record name as fallback for filename of Binary field
+* Support filters attribute for binary and image widgets
+* Use search window to delete/remove records from xxx2Many widgets
+
+Version 8.0.0 - 2026-04-20
+--------------------------
+* Bug fixes (see mercurial logs for details)
+* Use relative path for server requests
+* Use cookie to store session
+* Move the logout entry and add a help entry to the notification menu
+* Add visual hint on widget of modified field
+* Remove bower dependency
 * Allow tabs to be reordered
 
 Version 7.8.0 - 2025-12-15

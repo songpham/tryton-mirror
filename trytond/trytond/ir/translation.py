@@ -12,17 +12,19 @@ from relatorio.reporting import MIMETemplateLoader
 from relatorio.templates.opendocument import get_zip_file
 from sql import Column, Literal, Null
 from sql.aggregate import Max
-from sql.conditionals import Case
-from sql.functions import Position, Substring
+from sql.conditionals import Case, Coalesce
+from sql.functions import CharLength, Position, Substring
+from sql.operators import Concat
 
 import trytond.config as config
+from trytond import backend
 from trytond.cache import Cache
 from trytond.exceptions import UserError
 from trytond.i18n import gettext
 from trytond.model import Index, ModelSQL, ModelView, fields
 from trytond.pool import Pool
 from trytond.pyson import Eval, PYSONEncoder
-from trytond.tools import cursor_dict, file_open, grouped_slice
+from trytond.tools import file_open
 from trytond.tools.string_ import LazyString, StringPartitioned
 from trytond.transaction import (
     Transaction, inactive_records, without_check_access)
@@ -67,11 +69,21 @@ class Translation(
         fields.fmany2one(
             'overriding_module_ref', 'overriding_module', 'ir.module,name',
             "Overriding Module", readonly=True),
+        fields.fmany2one(
+            'model_ref', 'model', 'ir.model,name', "Model", readonly=True),
+        fields.fmany2one(
+            'field_ref', 'field,model', 'ir.model.field,name,model', "Field",
+            readonly=True),
         ModelSQL, ModelView):
     __name__ = "ir.translation"
 
-    name = fields.Char('Field Name', required=True)
-    res_id = fields.Integer('Resource ID', required=True)
+    name = fields.Char("Name", required=True)
+    res_id = fields.Integer(
+        "Resource ID",
+        domain=['OR',
+            ('res_id', '=', None),
+            ('res_id', '>=', 0),
+            ])
     lang = fields.Selection('get_language', string='Language')
     type = fields.Selection(TRANSLATION_TYPE, string='Type',
        required=True)
@@ -96,8 +108,10 @@ class Translation(
 
     module = fields.Char('Module', readonly=True)
     fuzzy = fields.Boolean('Fuzzy')
-    model = fields.Function(fields.Char('Model'), 'get_model',
-            searcher='search_model')
+    model = fields.Function(
+        fields.Char("Model"), 'get_model', searcher='search_model')
+    field = fields.Function(
+        fields.Char("Field"), 'get_field', searcher='search_field')
     overriding_module = fields.Char('Overriding Module', readonly=True)
     _translation_cache = Cache('ir.translation', context=False)
     _translation_report_cache = Cache(
@@ -112,9 +126,11 @@ class Translation(
 
         cls._sql_indexes.update({
                 Index(
-                    table, (Index.Unaccent(table.src), Index.Similarity())),
+                    table, (Index.Unaccent(Coalesce(table.src, '')),
+                        Index.Similarity())),
                 Index(
-                    table, (Index.Unaccent(table.value), Index.Similarity())),
+                    table, (Index.Unaccent(Coalesce(table.value, '')),
+                        Index.Similarity())),
                 Index(
                     table,
                     (table.type, Index.Equality(cardinality='low')),
@@ -122,7 +138,8 @@ class Translation(
                     (table.lang, Index.Equality(cardinality='low')),
                     (table.res_id, Index.Range()),
                     (table.fuzzy, Index.Equality(cardinality='low')),
-                    (Index.Unaccent(table.value), Index.Similarity())),
+                    (Index.Unaccent(Coalesce(table.value, '')),
+                        Index.Similarity())),
                 Index(
                     table,
                     (table.type, Index.Equality(cardinality='low')),
@@ -136,6 +153,20 @@ class Translation(
                     (table.lang, Index.Equality(cardinality='low')),
                     (table.type, Index.Equality(cardinality='low'))),
                 })
+
+    @classmethod
+    def __register__(cls, module_name):
+        table_h = cls.__table_handler__(module_name)
+        cursor = Transaction().connection.cursor()
+        translation = cls.__table__()
+
+        # Migration from 8.0: remove required
+        table_h.not_null_action('res_id', 'remove')
+        cursor.execute(*translation.update(
+                [translation.res_id], [Null],
+                where=(translation.res_id < 0)))
+
+        super().__register__(module_name)
 
     @classmethod
     def register_model(cls, model, module_name):
@@ -168,7 +199,7 @@ class Translation(
                             'value', 'module', 'fuzzy', 'res_id')],
                     [[
                             name, INTERNAL_LANG, 'model', src,
-                            '', module_name, False, -1]]))
+                            '', module_name, False, Null]]))
         else:
             cursor.execute(*ir_translation.update(
                     [ir_translation.src],
@@ -177,7 +208,7 @@ class Translation(
 
     @classmethod
     def register_fields(cls, model, module_name):
-        cursor = Transaction().connection.cursor()
+        connection = Transaction().connection
         ir_translation = cls.__table__()
 
         # Prefetch field translations
@@ -187,6 +218,7 @@ class Translation(
             selection=defaultdict(dict))
         if model._fields:
             names = ['%s,%s' % (model.__name__, f) for f in model._fields]
+            cursor = connection.cursor(row_factory=backend.dict_row)
             cursor.execute(*ir_translation.select(ir_translation.id,
                     ir_translation.name, ir_translation.src,
                     ir_translation.type,
@@ -194,13 +226,14 @@ class Translation(
                         & ir_translation.type.in_(
                             ('field', 'help', 'selection'))
                         & ir_translation.name.in_(names))))
-            for trans in cursor_dict(cursor):
+            for trans in cursor:
                 sources = translations[trans['type']][trans['name']]
                 sources[trans['src']] = trans
 
         columns = [ir_translation.name, ir_translation.lang,
             ir_translation.type, ir_translation.src, ir_translation.value,
             ir_translation.module, ir_translation.fuzzy, ir_translation.res_id]
+        cursor = connection.cursor()
 
         def insert(field, type, name, string):
             inserted = False
@@ -216,7 +249,7 @@ class Translation(
                     *ir_translation.insert(columns,
                         [[
                                 name, INTERNAL_LANG, type, val,
-                                '', module_name, False, -1]]))
+                                '', module_name, False, Null]]))
                 inserted = True
 
         for field_name, field in model._fields.items():
@@ -233,16 +266,19 @@ class Translation(
 
     @classmethod
     def register_wizard(cls, wizard, module_name):
-        cursor = Transaction().connection.cursor()
+        connection = Transaction().connection
         ir_translation = cls.__table__()
 
         # Prefetch button translations
+        cursor = connection.cursor(row_factory=backend.dict_row)
         cursor.execute(*ir_translation.select(
                 ir_translation.id, ir_translation.name, ir_translation.src,
                 where=((ir_translation.lang == INTERNAL_LANG)
                     & (ir_translation.type == 'wizard_button')
                     & (ir_translation.name.like(wizard.__name__ + ',%')))))
-        trans_buttons = {t['name']: t for t in cursor_dict(cursor)}
+        trans_buttons = {t['name']: t for t in cursor}
+
+        cursor = connection.cursor()
 
         def update_insert_button(state_name, button):
             if not button.string:
@@ -259,7 +295,7 @@ class Translation(
                                 trans_name, INTERNAL_LANG,
                                 'wizard_button', button.string,
                                 '', module_name,
-                                False, -1]]))
+                                False, Null]]))
             elif trans_buttons[trans_name] != button.string:
                 cursor.execute(*ir_translation.update(
                         [ir_translation.src],
@@ -277,12 +313,82 @@ class Translation(
     def default_fuzzy():
         return False
 
-    @staticmethod
-    def default_res_id():
-        return -1
-
     def get_model(self, name):
         return self.name.split(',')[0]
+
+    @classmethod
+    def search_model(cls, name, clause):
+        table = cls.__table__()
+        _, operator, value = clause
+        Operator = fields.SQL_OPERATORS[operator]
+        return [('id', 'in', table.select(table.id,
+                    where=Operator(Substring(table.name, 1,
+                            Case((
+                                    Position(',', table.name) > 0,
+                                    Position(',', table.name) - 1),
+                                else_=CharLength(table.name))), value)))]
+
+    @classmethod
+    def domain_model_ref(cls, clause, tables):
+        pool = Pool()
+        IrModel = pool.get('ir.model')
+        table, _ = tables[None]
+        if 'model_ref' not in tables:
+            ir_model = IrModel.__table__()
+            tables['model_ref'] = {
+                None: (ir_model, ir_model.name == Substring(table.name, 1,
+                        Case((
+                                Position(',', table.name) > 0,
+                                Position(',', table.name) - 1),
+                            else_=CharLength(table.name)))),
+                }
+        nested = clause[0][len('model_ref') + 1:]
+        if not nested:
+            if isinstance(clause[2], str):
+                nested = 'rec_name'
+            else:
+                nested = 'id'
+        domain = [(nested, *clause[1:])]
+        tables, clause = IrModel.search_domain(
+            domain, tables=tables['model_ref'])
+        return clause
+
+    def get_field(self, name):
+        return self.name.split(',', 1)[1] if ',' in self.name else None
+
+    @classmethod
+    def search_field(cls, name, clause):
+        table = cls.__table__()
+        _, operator, value = clause
+        Operator = fields.SQL_OPERATORS[operator]
+        return [('id', 'in', table.select(table.id,
+                    where=Operator(Substring(table.name,
+                            Case((
+                                    Position(',', table.name) > 0,
+                                    Position(',', table.name) - 1),
+                                else_=CharLength(table.name))), value)))]
+
+    @classmethod
+    def domain_field_ref(cls, clause, tables):
+        pool = Pool()
+        Field = pool.get('ir.model.field')
+        table, _ = tables[None]
+        if 'field_ref' not in tables:
+            field = Field.__table__()
+            tables['field_ref'] = {
+                None: (field, (table.name == Concat(Concat(
+                            field.model, ','), field.name))),
+                }
+        nested = clause[0][len('model_ref') + 1:]
+        if not nested:
+            if isinstance(clause[2], str):
+                nested = 'rec_name'
+            else:
+                nested = 'id'
+        domain = [(nested, *clause[1:])]
+        tables, clause = Field.search_domain(
+            domain, tables=tables['field_ref'])
+        return clause
 
     @classmethod
     def search_rec_name(cls, name, clause):
@@ -296,18 +402,6 @@ class Translation(
             ('value',) + clause[1:],
             (cls._rec_name,) + clause[1:],
             ]
-
-    @classmethod
-    def search_model(cls, name, clause):
-        table = cls.__table__()
-        _, operator, value = clause
-        Operator = fields.SQL_OPERATORS[operator]
-        return [('id', 'in', table.select(table.id,
-                    where=Operator(Substring(table.name, 1,
-                            Case((
-                                    Position(',', table.name) > 0,
-                                    Position(',', table.name) - 1),
-                                else_=0)), value)))]
 
     @classmethod
     def get_language(cls):
@@ -423,16 +517,15 @@ class Translation(
                 fuzzy_clause = []
             else:
                 fuzzy_clause = [('fuzzy', '=', False)]
-            for sub_to_fetch in grouped_slice(to_fetch):
-                for translation in cls.search([
-                            ('lang', '=', lang),
-                            ('type', '=', ttype),
-                            ('name', '=', name),
-                            ('value', '!=', ''),
-                            ('value', '!=', None),
-                            ('res_id', 'in', list(sub_to_fetch)),
-                            ] + fuzzy_clause):
-                    translations[translation.res_id] = translation.value
+            for translation in cls.search([
+                        ('lang', '=', lang),
+                        ('type', '=', ttype),
+                        ('name', '=', name),
+                        ('value', '!=', ''),
+                        ('value', '!=', None),
+                        ('res_id', 'in', to_fetch),
+                        ] + fuzzy_clause):
+                translations[translation.res_id] = translation.value
             # Don't store fuzzy translation in cache
             if not fuzzy_translation:
                 for res_id in to_fetch:
@@ -449,15 +542,6 @@ class Translation(
         ModelFields = pool.get('ir.model.field')
         Model = pool.get('ir.model')
         Config = pool.get('ir.configuration')
-        transaction = Transaction()
-        in_max = transaction.database.IN_MAX
-
-        if len(ids) > in_max:
-            for i in range(0, len(ids), in_max):
-                sub_ids = ids[i:i + in_max]
-                sub_values = values[i:i + in_max]
-                cls.set_ids(name, ttype, lang, sub_ids, sub_values)
-            return
 
         model_name, field_name = name.split(',')
         if model_name in ('ir.model.field', 'ir.model'):
@@ -484,35 +568,34 @@ class Translation(
                         ('lang', '=', lang),
                         ('type', '=', ttype),
                         ('name', 'in', [get_name(r) for r in records]),
-                        ('res_id', '=', -1),
+                        ('res_id', '=', Null),
                         ]):
                 name2translations[translation.name].append(translation)
 
-            to_save, to_delete = [], []
-            for record, value in zip(records, values):
-                translations = name2translations[get_name(record)]
-                if lang == INTERNAL_LANG:
-                    src = value
-                else:
-                    src = getattr(record, field_name)
-                if not translations:
+            with cls.bulk_save() as save, \
+                    cls.bulk_delete() as delete:
+                for record, value in zip(records, values):
+                    translations = name2translations[get_name(record)]
+                    if lang == INTERNAL_LANG:
+                        src = value
+                    else:
+                        src = getattr(record, field_name)
+                    if not translations:
+                        if not src and not value:
+                            continue
+                        translation = cls()
+                        translation.name = get_name(record)
+                        translation.lang = lang
+                        translation.type = ttype
+                        translations.append(translation)
                     if not src and not value:
-                        continue
-                    translation = cls()
-                    translation.name = get_name(record)
-                    translation.lang = lang
-                    translation.type = ttype
-                    translations.append(translation)
-                if not src and not value:
-                    to_delete.extend(translations)
-                else:
-                    for translation in translations:
-                        translation.src = src
-                        translation.value = value
-                        translation.fuzzy = False
-                        to_save.append(translation)
-            cls.save(to_save)
-            cls.delete(to_delete)
+                        delete.extend(translations)
+                    else:
+                        for translation in translations:
+                            translation.src = src
+                            translation.value = value
+                            translation.fuzzy = False
+                            save.push(translation)
             return
 
         Model = pool.get(model_name)
@@ -539,53 +622,50 @@ class Translation(
                         ]):
                 other_translations[translation.res_id].append(translation)
 
-        to_save, to_delete = [], []
-        for record, value in zip(records, values):
-            translations = id2translations[record.id]
-            if lang == Config.get_language():
-                src = value
-            else:
-                src = getattr(record, field_name)
-            if not translations:
-                if not src and not value:
-                    continue
-                translation = cls()
-                translation.name = name
-                translation.lang = lang
-                translation.type = ttype
-                translation.res_id = record.id
-                translations.append(translation)
-            else:
-                other_langs = other_translations[record.id]
-                if not src and not value:
-                    to_delete.extend(other_langs)
+        with cls.bulk_save() as save, \
+                cls.bulk_delete() as delete:
+            for record, value in zip(records, values):
+                translations = id2translations[record.id]
+                if lang == Config.get_language():
+                    src = value
                 else:
-                    for other_lang in other_langs:
-                        other_lang.src = src
-                        other_lang.fuzzy = True
-                        to_save.append(other_lang)
-            if not src and not value:
-                to_delete.extend(translations)
-            else:
-                for translation in translations:
-                    translation.value = value
-                    translation.src = src
-                    translation.fuzzy = False
-                    to_save.append(translation)
-        cls.save(to_save)
-        cls.delete(to_delete)
+                    src = getattr(record, field_name)
+                if not translations:
+                    if not src and not value:
+                        continue
+                    translation = cls()
+                    translation.name = name
+                    translation.lang = lang
+                    translation.type = ttype
+                    translation.res_id = record.id
+                    translations.append(translation)
+                else:
+                    other_langs = other_translations[record.id]
+                    if not src and not value:
+                        delete.extend(other_langs)
+                    else:
+                        for other_lang in other_langs:
+                            other_lang.src = src
+                            other_lang.fuzzy = True
+                            save.push(other_lang)
+                if not src and not value:
+                    delete.extend(translations)
+                else:
+                    for translation in translations:
+                        translation.value = value
+                        translation.src = src
+                        translation.fuzzy = False
+                        save.push(translation)
 
     @classmethod
     @without_check_access
     def delete_ids(cls, model, ttype, ids):
         "Delete translation for each id"
-        translations = []
-        for sub_ids in grouped_slice(ids):
-            translations += cls.search([
-                    ('type', '=', ttype),
-                    ('name', 'like', model + ',%'),
-                    ('res_id', 'in', list(sub_ids)),
-                    ])
+        translations = cls.search([
+                ('type', '=', ttype),
+                ('name', 'like', model + ',%'),
+                ('res_id', 'in', ids),
+                ])
         cls.delete(translations)
 
     @classmethod
@@ -606,12 +686,6 @@ class Translation(
         parent_args = []
         parent_langs = []
         clauses = []
-        transaction = Transaction()
-        if len(args) > transaction.database.IN_MAX:
-            for sub_args in grouped_slice(args):
-                res.update(cls.get_sources(list(sub_args)))
-            return res
-
         to_cache = []
         for name, ttype, lang, source in args:
             name = str(name)
@@ -636,7 +710,7 @@ class Translation(
                     ('value', '!=', ''),
                     ('value', '!=', None),
                     ('fuzzy', '=', False),
-                    ('res_id', '=', -1),
+                    ('res_id', '=', Null),
                     ]
                 if source is not None:
                     clause.append(('src', '=', source))
@@ -650,9 +724,10 @@ class Translation(
                 res[(name, ttype, lang, source)] = parent_src[
                     (name, ttype, parent_lang, source)]
 
-        in_max = transaction.database.IN_MAX // 7
-        for sub_clause in grouped_slice(clauses, in_max):
-            for translation in cls.search(['OR'] + list(sub_clause)):
+        while clauses:
+            clauses_slice = clauses[:100]
+            clauses = clauses[100:]
+            for translation in cls.search(['OR'] + clauses_slice):
                 key = (translation.name, translation.type,
                     translation.lang, translation.src)
                 if key not in args:
@@ -680,7 +755,7 @@ class Translation(
                         ('value', '!=', ''),
                         ('value', '!=', None),
                         ('fuzzy', '=', False),
-                        ('res_id', '=', -1),
+                        ('res_id', '=', Null),
                         ], order=[('module', 'DESC')])
                 for translation in translations:
                     cache.setdefault(
@@ -794,6 +869,21 @@ class Translation(
             )
         return translation, res_id
 
+    def update_from_translation(self, translation, **values):
+        """Updates the values from translation and values.
+        Returns if it was modified"""
+        modified = False
+        for key in ['value', 'value_1', 'value_2', 'value_3']:
+            value = getattr(translation, key)
+            if getattr(self, key, None) != value:
+                setattr(self, key, value)
+                modified = True
+        for key, value in values.items():
+            if getattr(self, key, None) != value:
+                setattr(self, key, value)
+                modified = True
+        return modified
+
     @classmethod
     def translation_import(cls, lang, module, po_path):
         pool = Pool()
@@ -840,7 +930,7 @@ class Translation(
                         ])
                 res_id = model_data.db_id
             else:
-                res_id = -1
+                res_id = None
             with Transaction().set_context(module=res_id_module):
                 domain = [
                     ('name', '=', new_translation.name),
@@ -855,14 +945,7 @@ class Translation(
                     domain.append(('src_plural', '=',
                             new_translation.src_plural))
                 translation, = cls.search(domain)
-                if ((translation.value != new_translation.value)
-                        or (translation.value_1 != new_translation.value_1)
-                        or (translation.value_2 != new_translation.value_2)
-                        or (translation.value_3 != new_translation.value_3)):
-                    translation.value = new_translation.value
-                    translation.value_1 = new_translation.value_1
-                    translation.value_2 = new_translation.value_2
-                    translation.value_3 = new_translation.value_3
+                if translation.update_from_translation(new_translation):
                     translation.overriding_module = module
                     translation.fuzzy = new_translation.fuzzy
                     return translation
@@ -890,22 +973,25 @@ class Translation(
                     noupdate = False
 
                     if '.' in res_id:
-                        to_save.append(override_translation(res_id,
-                                translation))
+                        if overrided_translation := override_translation(
+                                res_id, translation):
+                            to_save.append(overrided_translation)
                         continue
 
                     model = translation.name.split(',')[0]
                     if (model in fs_id2prop
                             and res_id in fs_id2prop[model]):
                         res_id, noupdate = fs_id2prop[model][res_id]
+                    elif res_id:
+                        continue
 
                     if res_id:
                         try:
                             res_id = int(res_id)
                         except ValueError:
-                            res_id = None
-                    if not res_id:
-                        res_id = -1
+                            continue
+                    else:
+                        res_id = None
 
                     translation.res_id = res_id
                     key = translation.unique_key
@@ -922,26 +1008,24 @@ class Translation(
                         to_save.append(translation)
                     else:
                         for translation_id in ids:
-                            old_translation = id2translation[translation_id]
-                            if not noupdate:
-                                old_translation.value = translation.value
-                                old_translation.value_1 = translation.value_1
-                                old_translation.value_2 = translation.value_2
-                                old_translation.value_3 = translation.value_3
-                                old_translation.fuzzy = translation.fuzzy
-                                to_save.append(old_translation)
+                            old_trans = id2translation[translation_id]
+                            if (not noupdate
+                                    and old_trans.update_from_translation(
+                                        translation, fuzzy=translation.fuzzy)):
+                                to_save.append(old_trans)
                             else:
-                                translations.add(old_translation)
-        cls.save([_f for _f in to_save if _f])
+                                translations.add(old_trans)
+        cls.save(to_save)
         translations |= set(to_save)
 
         if translations:
-            all_translations = set(cls.search([
-                        ('module', '=', module),
-                        ('lang', '=', lang),
-                        ]))
-            translations_to_delete = all_translations - translations
-            cls.delete(list(translations_to_delete))
+            with cls.bulk_delete(auto=False) as delete:
+                all_translations = set(cls.search([
+                            ('module', '=', module),
+                            ('lang', '=', lang),
+                            ]))
+                translations_to_delete = all_translations - translations
+                delete.extend(translations_to_delete)
         return len(translations)
 
     @classmethod
@@ -991,7 +1075,7 @@ class Translation(
                 'name': translation.name,
                 }
             res_id = translation.res_id
-            if res_id >= 0:
+            if res_id:
                 model, _ = translation.name.split(',')
                 if model in db_id2fs_id:
                     res_id = db_id2fs_id[model].get(res_id)
@@ -1023,6 +1107,35 @@ class Translation(
             return str(pofile).encode('utf-8')
         else:
             return
+
+    @classmethod
+    def sync_local(cls, languages=None):
+        pool = Pool()
+        Lang = pool.get('ir.lang')
+        TranslationSet = pool.get('ir.translation.set', type='wizard')
+        TranslationClean = pool.get('ir.translation.clean', type='wizard')
+        TranslationUpdate = pool.get('ir.translation.update', type='wizard')
+
+        if languages is None:
+            languages = Lang.search([('translatable', '=', True)])
+
+        with Transaction().set_context(localonly=True):
+            session_id, _, _ = TranslationSet.create()
+            TranslationSet.execute(session_id, {}, 'set_')
+            TranslationSet.delete(session_id)
+
+            session_id, _, _ = TranslationClean.create()
+            TranslationClean.execute(session_id, {}, 'clean')
+            TranslationClean.delete(session_id)
+
+            for language in languages:
+                session_id, _, _ = TranslationUpdate.create()
+                TranslationUpdate.execute(session_id, {
+                        'start': {
+                            'language': language.id,
+                            },
+                        }, 'update')
+                TranslationUpdate.delete(session_id)
 
 
 class TranslationSetStart(ModelView):
@@ -1061,6 +1174,11 @@ class TranslationSet(Wizard):
                     txt = node.nodeValue.strip()
                     if txt:
                         yield txt
+            if (node.nodeType == node.ELEMENT_NODE
+                    and node.tagName == 'text:a'
+                    and node.getAttribute('xlink:href').startswith(
+                        'relatorio://')):
+                return
 
             for child in [x for x in node.childNodes]:
                 for string in extract(child):
@@ -1116,13 +1234,18 @@ class TranslationSet(Wizard):
         if self.model == Report:
             reports = self.records
         elif not self.model or self.model.__name__ == 'ir.ui.menu':
-            reports = Report.search([('translatable', '=', True)])
+            domain = [('translatable', '=', True)]
+            if Transaction().context.get('localonly', False):
+                domain.append(('module', '=', None))
+            reports = Report.search(domain)
         else:
             return
 
-        cursor = Transaction().connection.cursor()
+        connection = Transaction().connection
         translation = Translation.__table__()
         report_strings = defaultdict(set)
+        cursor = connection.cursor()
+        cursor_select = connection.cursor(row_factory=backend.dict_row)
         for report in reports:
             content = None
             if report.report:
@@ -1135,7 +1258,7 @@ class TranslationSet(Wizard):
                 if not content:
                     continue
 
-                cursor.execute(*translation.select(
+                cursor_select.execute(*translation.select(
                         translation.id, translation.name,
                         translation.src, translation.src_plural,
                         where=(translation.lang == INTERNAL_LANG)
@@ -1144,7 +1267,7 @@ class TranslationSet(Wizard):
                         & (translation.module == module)))
                 trans_reports = {
                     (t['src'], t['src_plural']): t
-                    for t in cursor_dict(cursor)}
+                    for t in cursor_select}
 
                 strings = report_strings[report.report_name, report.module]
                 func_name = 'extract_report_%s' % report.template_extension
@@ -1169,7 +1292,7 @@ class TranslationSet(Wizard):
                                     string[1], '',
                                     '', '',
                                     '', module,
-                                    False, -1]]))
+                                    False, Null]]))
         for (report_name, module), strings in report_strings.items():
             query = translation.delete(
                 where=(translation.name == report_name)
@@ -1213,16 +1336,18 @@ class TranslationSet(Wizard):
         else:
             return
 
-        cursor = Transaction().connection.cursor()
+        connection = Transaction().connection
         translation = Translation.__table__()
+        cursor = connection.cursor()
+        cursor_select = connection.cursor(row_factory=backend.dict_row)
         for view in views:
-            cursor.execute(*translation.select(
+            cursor_select.execute(*translation.select(
                     translation.id, translation.name, translation.src,
                     where=(translation.lang == INTERNAL_LANG)
                     & (translation.type == 'view')
                     & (translation.name == view.model)
                     & (translation.module == view.module)))
-            trans_views = {t['src']: t for t in cursor_dict(cursor)}
+            trans_views = {t['src']: t for t in cursor_select}
 
             xml = (view.arch or '').strip()
             if not xml:
@@ -1261,7 +1386,7 @@ class TranslationSet(Wizard):
                                 None, '',
                                 '', '',
                                 '', view.module,
-                                False, -1]]))
+                                False, Null]]))
             if strings:
                 cursor.execute(*translation.delete(
                         where=(translation.name == view.model)
@@ -1272,36 +1397,21 @@ class TranslationSet(Wizard):
     def transition_set_(self):
         pool = Pool()
         Config = pool.get('ir.configuration')
-        default_lang = Config.get_language()
-        if default_lang != INTERNAL_LANG:
-            raise DefaultLanguageError(gettext(
-                    'ir.msg_translation_set_default_lang'))
+        if not Transaction().context.get('localonly', False):
+            default_lang = Config.get_language()
+            if default_lang != INTERNAL_LANG:
+                raise DefaultLanguageError(gettext(
+                        'ir.msg_translation_set_default_lang'))
+            self.set_view()
         self.set_report()
-        self.set_view()
         return 'succeed'
-
-
-class TranslationCleanStart(ModelView):
-    __name__ = 'ir.translation.clean.start'
-
-
-class TranslationCleanSucceed(ModelView):
-    __name__ = 'ir.translation.clean.succeed'
 
 
 class TranslationClean(Wizard):
     __name__ = 'ir.translation.clean'
+    start_state = 'clean'
 
-    start = StateView('ir.translation.clean.start',
-        'ir.translation_clean_start_view_form', [
-            Button('Cancel', 'end', 'tryton-cancel'),
-            Button('Clean', 'clean', 'tryton-ok', default=True),
-            ])
     clean = StateTransition()
-    succeed = StateView('ir.translation.clean.succeed',
-        'ir.translation_clean_succeed_view_form', [
-            Button('OK', 'end', 'tryton-ok', default=True),
-            ])
 
     @staticmethod
     def _clean_field(translation):
@@ -1331,7 +1441,7 @@ class TranslationClean(Wizard):
             Model = pool.get(model_name)
         except KeyError:
             return True
-        if translation.res_id >= 0:
+        if translation.res_id:
             if field_name not in Model._fields:
                 return True
             field = Model._fields[field_name]
@@ -1436,7 +1546,10 @@ class TranslationClean(Wizard):
         to_delete = []
         records = defaultdict(lambda: defaultdict(set))
         keys = set()
-        translations = Translation.search([])
+        domain = []
+        if Transaction().context.get('localonly', False):
+            domain.append(('module', '=', None))
+        translations = Translation.search(domain)
         for translation in translations:
             if getattr(self, '_clean_%s' % translation.type)(translation):
                 to_delete.append(translation.id)
@@ -1447,18 +1560,17 @@ class TranslationClean(Wizard):
                     to_delete.append(translation.id)
                 else:
                     keys.add(key)
-                if translation.type == 'model' and translation.res_id >= 0:
+                if translation.type == 'model' and translation.res_id:
                     model_name, _ = translation.name.split(',', 1)
                     records[model_name][translation.res_id].add(translation.id)
 
         with inactive_records():
             for model_name, translations in records.items():
                 Model = pool.get(model_name)
-                for sub_ids in grouped_slice(translations.keys()):
-                    sub_ids = list(sub_ids)
-                    records = Model.search([('id', 'in', sub_ids)])
-                    for record_id in set(sub_ids) - set(map(int, records)):
-                        to_delete.extend(translations[record_id])
+                ids = translations.keys()
+                records = Model.search([('id', 'in', ids)])
+                for record_id in set(ids) - set(map(int, records)):
+                    to_delete.extend(translations[record_id])
 
         # skip translation handled in ir.model.data
         models_data = ModelData.search([
@@ -1470,7 +1582,7 @@ class TranslationClean(Wizard):
                 to_delete.remove(mdata.db_id)
 
         Translation.delete(Translation.browse(to_delete))
-        return 'succeed'
+        return 'end'
 
 
 class TranslationUpdateStart(ModelView):
@@ -1517,8 +1629,9 @@ class TranslationUpdate(Wizard):
         Translation = pool.get('ir.translation')
         Report = pool.get('ir.action.report')
         View = pool.get('ir.ui.view')
-        cursor = Transaction().connection.cursor()
-        cursor_update = Transaction().connection.cursor()
+        connection = Transaction().connection
+        cursor = connection.cursor(row_factory=backend.dict_row)
+        cursor_update = connection.cursor()
         translation = Translation.__table__()
         lang = self.start.language.code
         parent_lang = get_parent(lang)
@@ -1533,6 +1646,10 @@ class TranslationUpdate(Wizard):
                 & translation.name.in_([v.model for v in views]))
         else:
             source_clause = Literal(True)
+        if Transaction().context.get('localonly', False):
+            local_clause = translation.module == Null
+        else:
+            local_clause = Literal(True)
         default_lang = Config.get_language()
 
         columns = [
@@ -1546,36 +1663,29 @@ class TranslationUpdate(Wizard):
         cursor.execute(*(translation.select(*columns,
                     where=(translation.lang == default_lang)
                     & source_clause
+                    & local_clause
                     & translation.type.in_(self._source_types))
                 - translation.select(*columns,
                     where=(translation.lang == lang)
                     & source_clause
+                    & local_clause
                     & translation.type.in_(self._source_types))))
-        to_create = []
-        for row in cursor_dict(cursor):
-            to_create.append({
-                    'name': row['name'],
-                    'res_id': row['res_id'],
-                    'lang': lang,
-                    'type': row['type'],
-                    'src': row['src'],
-                    'src_plural': row['src_plural'],
-                    'module': row['module'],
-                    })
-        if to_create:
-            Translation.create(to_create)
+        with Translation.bulk_create() as create:
+            create.extend(cursor)
 
         if parent_lang:
             columns.append(translation.value)
             cursor.execute(*(translation.select(*columns,
                         where=(translation.lang == parent_lang)
                         & source_clause
+                        & local_clause
                         & translation.type.in_(self._source_types))
                     & translation.select(*columns,
                         where=(translation.lang == lang)
                         & source_clause
+                        & local_clause
                         & translation.type.in_(self._source_types))))
-            for row in cursor_dict(cursor):
+            for row in cursor:
                 cursor_update.execute(*translation.update(
                         [translation.value],
                         [''],
@@ -1590,36 +1700,34 @@ class TranslationUpdate(Wizard):
         if self.model in {Report, View}:
             return
 
-        columns = [translation.name.as_('name'),
-            translation.res_id.as_('res_id'), translation.type.as_('type'),
+        columns = [
+            translation.name.as_('name'),
+            translation.res_id.as_('res_id'),
+            Literal(lang).as_('lang'),
+            translation.type.as_('type'),
             translation.module.as_('module')]
         cursor.execute(*(translation.select(*columns,
                     where=(translation.lang == default_lang)
+                    & local_clause
                     & translation.type.in_(self._ressource_types))
                 - translation.select(*columns,
                     where=(translation.lang == lang)
+                    & local_clause
                     & translation.type.in_(self._ressource_types))))
-        to_create = []
-        for row in cursor_dict(cursor):
-            to_create.append({
-                'name': row['name'],
-                'res_id': row['res_id'],
-                'lang': lang,
-                'type': row['type'],
-                'module': row['module'],
-                })
-        if to_create:
-            Translation.create(to_create)
+        with Translation.bulk_create() as create:
+            create.extend(cursor)
 
         if parent_lang:
             columns.append(translation.value)
             cursor.execute(*(translation.select(*columns,
                         where=(translation.lang == parent_lang)
+                        & local_clause
                         & translation.type.in_(self._ressource_types))
                     & translation.select(*columns,
                         where=(translation.lang == lang)
+                        & local_clause
                         & translation.type.in_(self._ressource_types))))
-            for row in cursor_dict(cursor):
+            for row in cursor:
                 cursor_update.execute(*translation.update(
                         [translation.value],
                         [''],
@@ -1639,11 +1747,13 @@ class TranslationUpdate(Wizard):
             ]
         cursor.execute(*(translation.select(*columns,
                     where=(translation.lang == default_lang)
+                    & local_clause
                     & translation.type.in_(self._updatable_types))
                 - translation.select(*columns,
                     where=(translation.lang == lang)
+                    & local_clause
                     & translation.type.in_(self._updatable_types))))
-        for row in cursor_dict(cursor):
+        for row in cursor:
             cursor_update.execute(*translation.update(
                     [translation.fuzzy, translation.src,
                         translation.src_plural],
@@ -1651,17 +1761,19 @@ class TranslationUpdate(Wizard):
                     where=(translation.name == row['name'])
                     & (translation.type == row['type'])
                     & (translation.lang == lang)
-                    & (translation.res_id == (row['res_id'] or -1))
+                    & (translation.res_id == row['res_id'])
                     & (translation.module == row['module'])))
 
         cursor.execute(*translation.select(
                 translation.src.as_('src'),
                 Max(translation.value).as_('value'),
                 where=(translation.lang == lang)
+                & local_clause
                 & translation.src.in_(
                     translation.select(translation.src,
                         where=((translation.value == '')
                             | (translation.value == Null))
+                        & local_clause
                         & (translation.lang == lang)
                         & (translation.src != '')
                         & (translation.src != Null)))
@@ -1670,7 +1782,7 @@ class TranslationUpdate(Wizard):
                 & (translation.value != Null),
                 group_by=translation.src))
 
-        for row in cursor_dict(cursor):
+        for row in cursor:
             cursor_update.execute(*translation.update(
                     [translation.fuzzy, translation.value],
                     [True, row['value']],
@@ -1682,7 +1794,8 @@ class TranslationUpdate(Wizard):
                 [translation.fuzzy],
                 [False],
                 where=((translation.value == '') | (translation.value == Null))
-                & (translation.lang == lang)))
+                & (translation.lang == lang)
+                & local_clause))
 
         action['pyson_domain'] = PYSONEncoder().encode([
             ('module', '!=', None),

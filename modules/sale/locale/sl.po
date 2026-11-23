@@ -177,6 +177,11 @@ msgctxt "field:sale.configuration,sale_shipment_method:"
 msgid "Sale Shipment Method"
 msgstr "Način odpreme"
 
+#, fuzzy
+msgctxt "field:sale.configuration,sale_wait_shipment:"
+msgid "Sale Wait Shipment"
+msgstr "Pošiljke"
+
 msgctxt "field:sale.configuration.quotation,sale_quotation_validity:"
 msgid "Sale Quotation Validity"
 msgstr ""
@@ -188,6 +193,11 @@ msgstr "Način obračuna"
 msgctxt "field:sale.configuration.sale_method,sale_shipment_method:"
 msgid "Sale Shipment Method"
 msgstr "Način odpreme"
+
+#, fuzzy
+msgctxt "field:sale.configuration.sale_method,sale_wait_shipment:"
+msgid "Sale Wait Shipment"
+msgstr "Pošiljke"
 
 msgctxt "field:sale.configuration.sequence,company:"
 msgid "Company"
@@ -311,6 +321,16 @@ msgstr "Katerogija EM izdelka"
 
 msgctxt "field:sale.line,quantity:"
 msgid "Quantity"
+msgstr "Količina"
+
+#, fuzzy
+msgctxt "field:sale.line,quantity_to_invoice:"
+msgid "Quantity to Invoice"
+msgstr "Ponovno izdelani računi"
+
+#, fuzzy
+msgctxt "field:sale.line,quantity_to_ship:"
+msgid "Quantity to Ship"
 msgstr "Količina"
 
 msgctxt "field:sale.line,sale:"
@@ -704,6 +724,15 @@ msgctxt "field:sale.sale,tax_amount_cache:"
 msgid "Tax Cache"
 msgstr "Davek predpomnjen"
 
+#, fuzzy
+msgctxt "field:sale.sale,to_invoice:"
+msgid "To Invoice"
+msgstr "Račun"
+
+msgctxt "field:sale.sale,to_ship:"
+msgid "To Ship"
+msgstr ""
+
 msgctxt "field:sale.sale,total_amount:"
 msgid "Total"
 msgstr "Skupaj"
@@ -805,6 +834,14 @@ msgctxt "help:sale.configuration,sale_process_after:"
 msgid ""
 "The grace period during which confirmed sale can still be reset to draft.\n"
 "Applied if a worker queue is activated."
+msgstr ""
+
+msgctxt "help:sale.configuration,sale_wait_shipment:"
+msgid "Create customer shipments in a waiting state"
+msgstr ""
+
+msgctxt "help:sale.configuration.sale_method,sale_wait_shipment:"
+msgid "Create customer shipments in a waiting state"
 msgstr ""
 
 #, fuzzy
@@ -1670,12 +1707,12 @@ msgid "Manual"
 msgstr "Ročno"
 
 msgctxt "selection:sale.sale,invoice_method:"
-msgid "On Order Processed"
-msgstr "Po obdelavi naloga"
+msgid "On Fulfillment"
+msgstr ""
 
 msgctxt "selection:sale.sale,invoice_method:"
-msgid "On Shipment Sent"
-msgstr "Po izvršeni odpremi"
+msgid "On Order Processed"
+msgstr "Po obdelavi naloga"
 
 msgctxt "selection:sale.sale,invoice_state:"
 msgid "Awaiting Payment"

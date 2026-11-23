@@ -1,3 +1,18 @@
+
+Version 8.2.0 - 2026-10-05
+--------------------------
+* Bug fixes (see mercurial logs for details)
+* Check the validity of the European tax identifiers when posting invoice
+* Add invoice relate from period and fiscal year
+
+Version 8.0.0 - 2026-04-20
+--------------------------
+* Bug fixes (see mercurial logs for details)
+* Check the invoice amounts against the source amounts
+* Add support for Python 3.14
+* Remove support for Python 3.9
+* Add payment means to invoices
+* Add an origin invoices field to the invoice
 * Remove default invoice type
 
 Version 7.8.0 - 2025-12-15

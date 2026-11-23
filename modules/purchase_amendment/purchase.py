@@ -42,7 +42,8 @@ class Amendment(Workflow, ModelSQL, ModelView):
             ('state', 'in', ['processing', 'done']),
             ],
         states={
-            'readonly': (Eval('state') != 'draft') | Eval('lines', [0]),
+            'readonly': Eval('state') != 'draft',
+            'editable': ~Eval('lines', [0]),
             })
     date = fields.Date(
         "Date", required=True,
@@ -156,7 +157,7 @@ class Amendment(Workflow, ModelSQL, ModelView):
     @classmethod
     def _stock_moves(cls, line):
         for move in line.moves:
-            if move.state in {'staging', 'draft'}:
+            if move.state in {'staging', 'draft'} and not move.shipment:
                 yield move
 
 
@@ -195,6 +196,7 @@ class AmendmentLine(ModelSQL, ModelView):
     payment_term = fields.Many2One(
         'account.invoice.payment_term', "Payment Term", ondelete='RESTRICT',
         states={
+            'readonly': Eval('state') != 'draft',
             'invisible': Eval('action') != 'payment_term',
             })
 
@@ -247,9 +249,8 @@ class AmendmentLine(ModelSQL, ModelView):
             ('default_uom_category', '=', Eval('product_uom_category', -1)),
             ],
         states={
-            'readonly': (
-                (Eval('state') != 'draft')
-                | ~Eval('product_uom_category', None)),
+            'readonly': Eval('state') != 'draft',
+            'editable': Bool(Eval('product_uom_category', None)),
             'invisible': Eval('action') != 'line',
             })
     product_supplier = fields.Many2One(
@@ -375,7 +376,7 @@ class AmendmentLine(ModelSQL, ModelView):
             self.product = self.product_supplier = self.description = None
             self.quantity = self.unit = self.unit_price = None
 
-    @fields.depends('party', 'invoice_party')
+    @fields.depends('party', 'invoice_party', 'invoice_address')
     def on_change_party(self):
         if not self.invoice_party:
             self.invoice_address = None

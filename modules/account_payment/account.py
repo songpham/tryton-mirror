@@ -19,7 +19,6 @@ from trytond.modules.company.model import CompanyValueMixin
 from trytond.modules.currency.fields import Monetary
 from trytond.pool import Pool, PoolMeta
 from trytond.pyson import Bool, Eval, Id, If
-from trytond.tools import grouped_slice, reduce_ids
 from trytond.transaction import Transaction, check_access, without_check_access
 from trytond.wizard import (
     Button, StateAction, StateTransition, StateView, Wizard)
@@ -192,11 +191,9 @@ class MoveLine(metaclass=PoolMeta):
                 where=table.account.in_(accounts)))
 
         if lines:
-            for sub_lines in grouped_slice(lines):
-                query.where = (
-                    table.account.in_(accounts)
-                    & reduce_ids(table.id, map(int, sub_lines)))
-                cursor.execute(*query)
+            query.where &= fields.SQL_OPERATORS['in'](
+                table.id, map(int, lines))
+            cursor.execute(*query)
         else:
             cursor.execute(*query)
 
@@ -238,6 +235,7 @@ class MoveLine(metaclass=PoolMeta):
         else:
             default = default.copy()
         default.setdefault('payments', None)
+        default.setdefault('payment_amount_cache')
         return super().copy(lines, default=default)
 
     @classmethod
@@ -269,11 +267,8 @@ class MoveLine(metaclass=PoolMeta):
     @classmethod
     def _pay_direct_debit_domain(cls, date):
         return [
-            ['OR',
-                ('account.type.receivable', '=', True),
-                ('account.type.payable', '=', True),
-                ],
-            ('party', '!=', None),
+            ('account.type.receivable', '=', True),
+            ('party.reception_direct_debits', '!=', None),
             ('reconciliation', '=', None),
             ('payment_amount', '!=', 0),
             ('move_state', '=', 'posted'),
@@ -353,7 +348,14 @@ class CreateDirectDebit(Wizard):
     def do_create_(self, action):
         pool = Pool()
         Line = pool.get('account.move.line')
-        payments = Line.pay_direct_debit(date=self.start.date)
+        User = pool.get('res.user')
+        transaction = Transaction()
+
+        companies = {c.id for c in self.start.companies}
+        companies &= set(User.get_companies())
+
+        with transaction.set_context(_companies=companies):
+            payments = Line.pay_direct_debit(date=self.start.date)
         action['domains'] = []
         return action, {
             'res_id': [p.id for p in payments],
@@ -366,10 +368,20 @@ class CreateDirectDebitStart(ModelView):
     date = fields.Date(
         "Date", required=True,
         help="Create direct debit for lines due up to this date.")
+    companies = fields.Many2Many(
+        'company.company', None, None, "Companies", required=True,
+        domain=[
+            ('id', 'in', Eval('context', {}).get('companies', [])),
+            ],
+        help="Limit to lines from these companies.")
 
     @classmethod
     def default_date(cls):
         return Pool().get('ir.date').today()
+
+    @classmethod
+    def default_companies(cls):
+        return Transaction().context.get('companies')
 
 
 class PayLineStart(ModelView):
@@ -762,6 +774,11 @@ class Invoice(metaclass=PoolMeta):
     __name__ = 'account.invoice'
 
     payment_direct_debit = fields.Boolean("Direct Debit",
+        domain=[
+            If(Eval('type') != 'in',
+                ('payment_direct_debit', '=', False),
+                ()),
+            ],
         states={
             'invisible': Eval('type') != 'in',
             'readonly': Eval('state') != 'draft',
@@ -772,11 +789,13 @@ class Invoice(metaclass=PoolMeta):
     def default_payment_direct_debit(cls):
         return False
 
-    @fields.depends('party')
+    @fields.depends('party', 'type')
     def on_change_party(self):
         super().on_change_party()
-        if self.party:
+        if self.type == 'in' and self.party:
             self.payment_direct_debit = self.party.payment_direct_debit
+        else:
+            self.payment_direct_debit = False
 
     def _get_move_line(self, date, amount):
         line = super()._get_move_line(date, amount)
@@ -818,7 +837,66 @@ class Invoice(metaclass=PoolMeta):
                                     payment.currency, amount_line_paid,
                                     invoice.currency)
                         amounts[invoice.id] -= payment_amount
+                        if name == 'amount_to_pay_today':
+                            amounts[invoice.id] = max(
+                                0, amounts[invoice.id])
         return amounts
+
+    @classmethod
+    def set_payment_means(cls, invoices):
+        pool = Pool()
+        PaymentMean = pool.get('account.invoice.payment.mean')
+        Reception = pool.get('party.party.reception_direct_debit')
+        payment_means = []
+        for invoice in invoices:
+            if invoice.type == 'out' and not invoice.payment_means:
+                pattern = Reception.get_pattern_for_invoice(invoice)
+                for reception in invoice.party.reception_direct_debits:
+                    if reception.match(pattern):
+                        payment_mean = PaymentMean.from_reception_direct_debit(
+                            reception)
+                        payment_mean.invoice = invoice
+                        payment_means.append(payment_mean)
+        PaymentMean.save(payment_means)
+        super().set_payment_means(invoices)
+
+
+class InvoicePaymentMean(metaclass=PoolMeta):
+    __name__ = 'account.invoice.payment.mean'
+
+    @classmethod
+    def __setup__(cls):
+        super().__setup__()
+        cls.instrument.domain['party.party.reception_direct_debit'] = [
+            ('party', 'in', Eval('payers', [])),
+            ('company', '=', Eval('company', -1)),
+            ]
+
+    @classmethod
+    def _get_instruments(cls):
+        yield from super()._get_instruments()
+        yield 'party.party.reception_direct_debit'
+
+    @classmethod
+    def from_reception_direct_debit(cls, reception):
+        return cls(instrument=reception)
+
+    def get_rec_name(self, name):
+        name = super().get_rec_name(name)
+        if self.instrument.__name__ == 'party.party.reception_direct_debit':
+            name = gettext(
+                'account_payment.msg_invoice_payment_mean_direct_debit')
+        return name
+
+    def is_valid_with_payment(self, payment):
+        pool = Pool()
+        ReceptionDirectDebit = pool.get('party.party.reception_direct_debit')
+        valid = None
+        if isinstance(self.instrument, ReceptionDirectDebit):
+            valid = self.instrument.journal == payment.journal
+        elif payment.journal.process_method == 'manual':
+            valid = True
+        return valid
 
 
 class Statement(metaclass=PoolMeta):

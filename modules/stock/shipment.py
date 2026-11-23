@@ -66,7 +66,7 @@ class ShipmentMixin:
         super().__setup__()
         t = cls.__table__()
         cls._sql_indexes.update({
-                Index(t, (t.reference, Index.Similarity())),
+                Index(t, (Coalesce(t.reference, ''), Index.Similarity())),
                 })
         cls._order = [
             ('effective_date', 'ASC NULLS LAST'),
@@ -233,13 +233,13 @@ class ShipmentAssignMixin(ShipmentMixin):
         Move.write(moves, {
                 'quantity': 0,
                 })
-        to_assign = [
-            s for s in shipments
-            if all(
-                m.state not in {'staging', 'draft'}
-                for m in s.assign_moves if m.assignation_required)]
-        if to_assign:
-            cls.assign(to_assign)
+        with cls.bulk_func('assign', auto=False) as assign:
+            for shipment in shipments:
+                if all(
+                        m.state not in {'staging', 'draft'}
+                        for m in shipment.assign_moves
+                        if m.assignation_required):
+                    assign.push(shipment)
 
     @classmethod
     def _get_assign_domain(cls):
@@ -359,9 +359,10 @@ class ShipmentIn(
         help="The company the shipment is associated with.")
     supplier = fields.Many2One('party.party', 'Supplier',
         states={
-            'readonly': (((Eval('state') != 'draft')
-                    | Eval('incoming_moves', [0]))
-                & Eval('supplier')),
+            'readonly': Eval('state') != 'draft',
+            'editable': ~(
+                Eval('incoming_moves', [0])
+                & Eval('supplier', None)),
             }, required=True,
         context={
             'company': Eval('company', -1),
@@ -381,8 +382,10 @@ class ShipmentIn(
     warehouse = fields.Many2One('stock.location', "Warehouse",
         required=True, domain=[('type', '=', 'warehouse')],
         states={
-            'readonly': (Eval('state').in_(['cancelled', 'done'])
-                | Eval('incoming_moves', [0]) | Eval('inventory_moves', [0])),
+            'readonly': Eval('state').in_(['cancelled', 'done']),
+            'editable': ~(
+                Eval('incoming_moves', [0])
+                | Eval('inventory_moves', [0])),
             },
         help="Where the stock is received.")
     warehouse_input = fields.Many2One(
@@ -473,7 +476,6 @@ class ShipmentIn(
         'get_inventory_moves', setter='set_inventory_moves')
     moves = fields.One2Many(
         'stock.move', 'shipment', "Moves",
-        domain=[('company', '=', Eval('company', -1))],
         states={
             'readonly': True,
             })
@@ -511,7 +513,14 @@ class ShipmentIn(
                 ))
         cls._buttons.update({
                 'cancel': {
-                    'invisible': Eval('state').in_(['cancelled', 'done']),
+                    'invisible': (
+                        (Eval('state') == 'cancelled')
+                        | ((Eval('state') == 'done')
+                            & ~Id('stock',
+                                'group_stock_cancellation').in_(
+                                Eval('context', {}).get('groups', []))
+                            & ~Eval('context', {}).get(
+                                'administrator', False))),
                     'depends': ['state'],
                     },
                 'draft': {
@@ -527,6 +536,10 @@ class ShipmentIn(
                     'depends': ['state'],
                     },
                 })
+        cls.moves.domain = ['OR',
+            cls.incoming_moves.domain,
+            cls.inventory_moves.domain,
+            ]
 
     @classmethod
     def __register__(cls, module_name):
@@ -754,16 +767,21 @@ class ShipmentIn(
     @set_employee('received_by')
     def receive(cls, shipments):
         Move = Pool().get('stock.move')
-        Move.do([m for s in shipments for m in s.incoming_moves])
-        Move.delete([m for s in shipments for m in s.inventory_moves
-            if m.state in ('draft', 'cancelled')])
+        with Move.bulk_func('do', auto=False) as do:
+            for shipment in shipments:
+                do.extend(shipment.incoming_moves)
+        with Move.bulk_delete(auto=False) as delete:
+            for shipment in shipments:
+                for move in shipment.inventory_moves:
+                    if move.state in {'draft', 'cancelled'}:
+                        delete.push(move)
         cls.create_inventory_moves(shipments)
         # Set received state to allow done transition
         cls.write(shipments, {'state': 'received'})
-        to_do = [s for s in shipments
-            if s.warehouse_storage == s.warehouse_input]
-        if to_do:
-            cls.do(to_do)
+        with cls.bulk_func('do', auto=False) as do:
+            for shipment in shipments:
+                if shipment.warehouse_storage == shipment.warehouse_input:
+                    do.push(shipment)
 
     @classmethod
     @ModelView.button
@@ -812,10 +830,12 @@ class ShipmentInReturn(
         help="The company the shipment is associated with.")
     supplier = fields.Many2One('party.party', 'Supplier',
         states={
-            'readonly': (((Eval('state') != 'draft')
-                    | Eval('moves', [0]))
-                    & Eval('supplier', 0)),
-            }, required=True,
+            'readonly': Eval('state') != 'draft',
+            'editable': ~(
+                Eval('moves', [0])
+                & Eval('supplier', None)),
+            },
+        required=True,
         context={
             'company': Eval('company', -1),
             'party_contact_mechanism_usage': 'delivery',
@@ -837,14 +857,20 @@ class ShipmentInReturn(
             ],
         help="Where the stock is sent to.")
     from_location = fields.Many2One('stock.location', "From Location",
-        required=True, states={
-            'readonly': (Eval('state') != 'draft') | Eval('moves', [0]),
-            }, domain=[('type', 'in', ['storage', 'view'])],
+        required=True,
+        states={
+            'readonly': Eval('state') != 'draft',
+            'editable': ~Eval('moves', [0]),
+            },
+        domain=[('type', 'in', ['storage', 'view'])],
         help="Where the stock is moved from.")
     to_location = fields.Many2One('stock.location', "To Location",
-        required=True, states={
-            'readonly': (Eval('state') != 'draft') | Eval('moves', [0]),
-            }, domain=[('type', '=', 'supplier')],
+        required=True,
+        states={
+            'readonly': Eval('state') != 'draft',
+            'editable': ~Eval('moves', [0]),
+            },
+        domain=[('type', '=', 'supplier')],
         help="Where the stock is moved to.")
     warehouse = fields.Function(
         fields.Many2One('stock.location', "Warehouse"),
@@ -914,7 +940,14 @@ class ShipmentInReturn(
                 ))
         cls._buttons.update({
                 'cancel': {
-                    'invisible': Eval('state').in_(['cancelled', 'done']),
+                    'invisible': (
+                        (Eval('state') == 'cancelled')
+                        | ((Eval('state') == 'done')
+                            & ~Id('stock',
+                                'group_stock_cancellation').in_(
+                                Eval('context', {}).get('groups', []))
+                            & ~Eval('context', {}).get(
+                                'administrator', False))),
                     'depends': ['state'],
                     },
                 'draft': {
@@ -1101,16 +1134,14 @@ class ShipmentInReturn(
         if success:
             cls.assign(shipments)
         else:
-            to_assign = []
-            for shipment in shipments:
-                if any(
-                        m.state in {'staging', 'draft'}
-                        for m in shipment.assign_moves
-                        if m.assignation_required):
-                    continue
-                to_assign.append(shipment)
-            if to_assign:
-                cls.assign(to_assign)
+            with cls.bulk_func('assign', auto=False) as assign:
+                for shipment in shipments:
+                    if any(
+                            m.state in {'staging', 'draft'}
+                            for m in shipment.assign_moves
+                            if m.assignation_required):
+                        continue
+                    assign.push(shipment)
 
     @classmethod
     def _get_reschedule_domain(cls, date):
@@ -1145,8 +1176,8 @@ class ShipmentOut(
         help="The company the shipment is associated with.")
     customer = fields.Many2One('party.party', 'Customer', required=True,
         states={
-            'readonly': ((Eval('state') != 'draft')
-                | Eval('outgoing_moves', [0])),
+            'readonly': Eval('state') != 'draft',
+            'editable': ~Eval('outgoing_moves', [0]),
             },
         context={
             'company': Eval('company', -1),
@@ -1173,9 +1204,12 @@ class ShipmentOut(
         help="Where the stock is sent to.")
     warehouse = fields.Many2One('stock.location', "Warehouse", required=True,
         states={
-            'readonly': ((Eval('state') != 'draft')
-                | Eval('outgoing_moves', [0]) | Eval('inventory_moves', [0])),
-            }, domain=[('type', '=', 'warehouse')],
+            'readonly': Eval('state') != 'draft',
+            'editable': ~(
+                Eval('outgoing_moves', [0])
+                | Eval('inventory_moves', [0])),
+            },
+        domain=[('type', '=', 'warehouse')],
         help="Where the stock is sent from.")
     warehouse_storage = fields.Many2One(
         'stock.location', "Warehouse Storage", required=True,
@@ -1255,7 +1289,6 @@ class ShipmentOut(
         'get_inventory_moves', setter='set_inventory_moves')
     moves = fields.One2Many(
         'stock.move', 'shipment', "Moves",
-        domain=[('company', '=', Eval('company', -1))],
         states={
             'readonly': True,
             })
@@ -1314,7 +1347,14 @@ class ShipmentOut(
                 ))
         cls._buttons.update({
                 'cancel': {
-                    'invisible': Eval('state').in_(['cancelled', 'done']),
+                    'invisible': (
+                        (Eval('state') == 'cancelled')
+                        | ((Eval('state') == 'done')
+                            & ~Id('stock',
+                                'group_stock_cancellation').in_(
+                                Eval('context', {}).get('groups', []))
+                            & ~Eval('context', {}).get(
+                                'administrator', False))),
                     'depends': ['state'],
                     },
                 'draft': {
@@ -1372,6 +1412,10 @@ class ShipmentOut(
                 'assign_try': {},
                 'assign_force': {},
                 })
+        cls.moves.domain = ['OR',
+            cls.outgoing_moves.domain,
+            cls.inventory_moves.domain,
+            ]
 
     @classmethod
     def __register__(cls, module_name):
@@ -1499,25 +1543,25 @@ class ShipmentOut(
         else:
             assert all(m.shipment in shipments for m in moves)
         Move.draft(moves)
-        Move.delete([m for s in shipments for m in s.inventory_moves
-                if m.state in ('draft', 'cancelled')])
+        with Move.bulk_delete(auto=False) as delete:
+            for shipment in shipments:
+                for move in shipment.inventory_moves:
+                    if move.state in {'draft', 'cancelled'}:
+                        delete.push(move)
         Move.draft([
                 m for s in shipments for m in s.outgoing_moves
                 if m.state != 'staging'])
 
-        to_create = []
-        for shipment in shipments:
-            if shipment.warehouse_storage == shipment.warehouse_output:
-                # Do not create inventory moves
-                continue
-            for move in shipment.outgoing_moves:
-                if move.state in ('cancelled', 'done'):
+        with Move.bulk_save(auto=False) as save:
+            for shipment in shipments:
+                if shipment.warehouse_storage == shipment.warehouse_output:
+                    # Do not create inventory moves
                     continue
-                inventory_move = shipment._get_inventory_move(move)
-                if inventory_move:
-                    to_create.append(inventory_move)
-        if to_create:
-            Move.save(to_create)
+                for move in shipment.outgoing_moves:
+                    if move.state in {'cancelled', 'done'}:
+                        continue
+                    if inventory_move := shipment._get_inventory_move(move):
+                        save.push(inventory_move)
         cls.set_number(shipments)
 
     def _get_inventory_move(self, move):
@@ -1583,21 +1627,21 @@ class ShipmentOut(
     def pack(cls, shipments):
         pool = Pool()
         Move = pool.get('stock.move')
-        outgoing_moves, to_delete = [], []
-        for shipment in shipments:
-            for move in shipment.inventory_moves:
-                if move.state not in {'done', 'cancelled'}:
-                    raise AccessError(
-                        gettext('stock.msg_shipment_pack_inventory_done',
-                            shipment=shipment.rec_name))
-            if shipment.warehouse_storage != shipment.warehouse_output:
-                shipment.check_quantity()
-            for move in shipment.outgoing_moves:
-                if move.quantity:
-                    outgoing_moves.append(move)
-                else:
-                    to_delete.append(move)
-        Move.delete(to_delete)
+        with Move.bulk_delete() as delete:
+            outgoing_moves = []
+            for shipment in shipments:
+                for move in shipment.inventory_moves:
+                    if move.state not in {'done', 'cancelled'}:
+                        raise AccessError(
+                            gettext('stock.msg_shipment_pack_inventory_done',
+                                shipment=shipment.rec_name))
+                if shipment.warehouse_storage != shipment.warehouse_output:
+                    shipment.check_quantity()
+                for move in shipment.outgoing_moves:
+                    if move.quantity:
+                        outgoing_moves.append(move)
+                    else:
+                        delete.push(move)
         Move.assign(outgoing_moves)
 
     @property
@@ -1805,16 +1849,14 @@ class ShipmentOut(
         if Move.assign_try(to_assign):
             cls.assign(shipments)
         else:
-            to_assign = []
-            for shipment in shipments:
-                if any(
-                        m.state in {'staging', 'draft'}
-                        for m in shipment.assign_moves
-                        if m.assignation_required):
-                    continue
-                to_assign.append(shipment)
-            if to_assign:
-                cls.assign(to_assign)
+            with cls.bulk_func('assign', auto=False) as assign:
+                for shipment in shipments:
+                    if any(
+                            m.state in {'staging', 'draft'}
+                            for m in shipment.assign_moves
+                            if m.assignation_required):
+                        continue
+                    assign.push(shipment)
 
     @classmethod
     def _get_reschedule_domain(cls, date):
@@ -1849,8 +1891,8 @@ class ShipmentOutReturn(
         help="The company the shipment is associated with.")
     customer = fields.Many2One('party.party', 'Customer', required=True,
         states={
-            'readonly': ((Eval('state') != 'draft')
-                | Eval('incoming_moves', [0])),
+            'readonly': Eval('state') != 'draft',
+            'editable': ~Eval('incoming_moves', [0]),
             },
         context={
             'company': Eval('company', -1),
@@ -1869,9 +1911,12 @@ class ShipmentOutReturn(
         help="The address the customer can be contacted at.")
     warehouse = fields.Many2One('stock.location', "Warehouse", required=True,
         states={
-            'readonly': ((Eval('state') != 'draft')
-                | Eval('incoming_moves', [0]) | Eval('inventory_moves', [0])),
-            }, domain=[('type', '=', 'warehouse')],
+            'readonly': Eval('state') != 'draft',
+            'editable': ~(
+                Eval('incoming_moves', [0])
+                | Eval('inventory_moves', [0])),
+            },
+        domain=[('type', '=', 'warehouse')],
         help="Where the stock is returned.")
     warehouse_storage = fields.Many2One(
         'stock.location', "Warehouse Storage", required=True,
@@ -1948,7 +1993,6 @@ class ShipmentOutReturn(
         'get_inventory_moves', setter='set_inventory_moves')
     moves = fields.One2Many(
         'stock.move', 'shipment', "Moves",
-        domain=[('company', '=', Eval('company', -1))],
         states={
             'readonly': True,
             })
@@ -1984,7 +2028,14 @@ class ShipmentOutReturn(
                 ))
         cls._buttons.update({
                 'cancel': {
-                    'invisible': Eval('state').in_(['cancelled', 'done']),
+                    'invisible': (
+                        (Eval('state') == 'cancelled')
+                        | ((Eval('state') == 'done')
+                            & ~Id('stock',
+                                'group_stock_cancellation').in_(
+                                Eval('context', {}).get('groups', []))
+                            & ~Eval('context', {}).get(
+                                'administrator', False))),
                     'depends': ['state'],
                     },
                 'draft': {
@@ -2000,6 +2051,10 @@ class ShipmentOutReturn(
                     'depends': ['state'],
                     },
                 })
+        cls.moves.domain = ['OR',
+            cls.incoming_moves.domain,
+            cls.inventory_moves.domain,
+            ]
 
     @classmethod
     def __register__(cls, module_name):
@@ -2174,15 +2229,19 @@ class ShipmentOutReturn(
     @Workflow.transition('received')
     @set_employee('received_by')
     def receive(cls, shipments):
-        Move = Pool().get('stock.move')
-        Move.do([m for s in shipments for m in s.incoming_moves])
+        pool = Pool()
+        Move = pool.get('stock.move')
+
+        with Move.bulk_func('do', auto=False) as do:
+            for shipment in shipments:
+                do.extend(shipment.incoming_moves)
         cls.create_inventory_moves(shipments)
         # Set received state to allow done transition
         cls.write(shipments, {'state': 'received'})
-        to_do = [s for s in shipments
-            if s.warehouse_storage == s.warehouse_input]
-        if to_do:
-            cls.do(to_do)
+        with cls.bulk_func('do', auto=False) as do:
+            for shipment in shipments:
+                if shipment.warehouse_storage == shipment.warehouse_input:
+                    do.push(shipment)
 
     @classmethod
     @ModelView.button
@@ -2300,18 +2359,20 @@ class ShipmentInternal(
         help="The company the shipment is associated with.")
     from_location = fields.Many2One('stock.location', "From Location",
         required=True, states={
-            'readonly': (~Eval('state').in_(['request', 'draft'])
-                | Eval('moves', [0])),
+            'readonly': ~Eval('state').in_(['request', 'draft']),
+            'editable': ~Eval('moves', [0]),
             },
         domain=[
             ('type', 'in', ['view', 'storage', 'lost_found']),
             ],
         help="Where the stock is moved from.")
     to_location = fields.Many2One('stock.location', "To Location",
-        required=True, states={
-            'readonly': (~Eval('state').in_(['request', 'draft'])
-                    | Eval('moves', [0])),
-            }, domain=[
+        required=True,
+        states={
+            'readonly': ~Eval('state').in_(['request', 'draft']),
+            'editable': ~Eval('moves', [0]),
+            },
+        domain=[
             ('type', 'in', ['view', 'storage', 'lost_found']),
             ],
         help="Where the stock is moved to.")
@@ -2489,8 +2550,14 @@ class ShipmentInternal(
                 ))
         cls._buttons.update({
                 'cancel': {
-                    'invisible': Eval('state').in_(
-                        ['cancelled', 'shipped', 'done']),
+                    'invisible': (
+                        (Eval('state') == 'cancelled')
+                        | (Eval('state').in_(['shipped', 'done'])
+                            & ~Id('stock',
+                                'group_stock_cancellation').in_(
+                                Eval('context', {}).get('groups', []))
+                            & ~Eval('context', {}).get(
+                                'administrator', False))),
                     'depends': ['state'],
                     },
                 'draft': {
@@ -2920,16 +2987,14 @@ class ShipmentInternal(
         if Move.assign_try(to_assign):
             cls.assign(shipments)
         else:
-            to_assign = []
-            for shipment in shipments:
-                if any(
-                        m.state in {'staging', 'draft'}
-                        for m in shipment.assign_moves
-                        if m.assignation_required):
-                    continue
-                to_assign.append(shipment)
-            if to_assign:
-                cls.assign(to_assign)
+            with cls.bulk_func('assign', auto=False) as assign:
+                for shipment in shipments:
+                    if any(
+                            m.state in {'staging', 'draft'}
+                            for m in shipment.assign_moves
+                            if m.assignation_required):
+                        continue
+                    assign.push(shipment)
 
     @property
     def _move_planned_date(self):
@@ -3011,9 +3076,11 @@ class Assign(Wizard):
             Button("Ignore", 'ignore', 'tryton-forward'),
             Button("Force", 'force', 'tryton-forward',
                 states={
-                    'invisible': ~Id('stock',
-                        'group_stock_force_assignment').in_(
-                        Eval('context', {}).get('groups', [])),
+                    'invisible': (
+                        ~Id('stock',
+                            'group_stock_force_assignment').in_(
+                            Eval('context', {}).get('groups', []))
+                        & ~Eval('context', {}).get('administrator', False)),
                 }),
             ])
     cancel = StateTransition()
@@ -3077,7 +3144,7 @@ class DeliveryNote(ShipmentReport):
 
     @classmethod
     def execute(cls, ids, data):
-        with Transaction().set_context(address_with_party=False):
+        with Transaction().set_context(address_with_party=True):
             return super().execute(ids, data)
 
     @classmethod

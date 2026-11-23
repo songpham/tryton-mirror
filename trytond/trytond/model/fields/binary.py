@@ -2,14 +2,17 @@
 # this repository contains the full copyright notices and license terms.
 
 import logging
+from collections import defaultdict
 
-from sql import Column, Null
+from sql import Column, Literal, Null
+from sql.functions import CurrentTimestamp
 
 from trytond.filestore import filestore
-from trytond.tools import cached_property, grouped_slice, reduce_ids
+from trytond.pool import Pool
+from trytond.tools import cached_property
 from trytond.transaction import Transaction
 
-from .field import Field
+from .field import SQL_OPERATORS, Field
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +34,9 @@ class Binary(Field):
     def __init__(self, string='', help='', required=False, readonly=False,
             domain=None, states=None, on_change=None,
             on_change_with=None, depends=None, context=None, loading='lazy',
-            filename=None, file_id=None, store_prefix=None):
+            filename=None, filename_ext=None, file_id=None, store_prefix=None):
         self.filename = filename
+        self.filename_ext = filename_ext
         self.file_id = file_id
         self.store_prefix = store_prefix
         super().__init__(string=string, help=help,
@@ -60,14 +64,13 @@ class Binary(Field):
         if values is None:
             values = {}
         transaction = Transaction()
-        res = {}
         converter = self.cast
         default = None
         format_ = Transaction().context.get(
             '%s.%s' % (model.__name__, name), '')
         if format_ == 'size':
             converter = len
-            default = 0
+        result = defaultdict(type(default))
 
         if self.file_id:
             table = model.__table__()
@@ -83,32 +86,57 @@ class Binary(Field):
                 def store_func(id, prefix):
                     return self.cast(filestore.get(id, prefix=prefix))
 
-            for sub_ids in grouped_slice(ids):
-                cursor.execute(*table.select(
-                        table.id, Column(table, self.file_id),
-                        where=reduce_ids(table.id, sub_ids)
-                        & (Column(table, self.file_id) != Null)
-                        & (Column(table, self.file_id) != '')))
-                for record_id, file_id in cursor:
-                    try:
-                        res[record_id] = store_func(file_id, prefix)
-                    except (IOError, OSError):
-                        logger.exception(
-                            "failed to retrieve %r from filestore at %r",
-                            file_id, prefix)
+            cursor.execute(*table.select(
+                    table.id, Column(table, self.file_id),
+                    where=SQL_OPERATORS['in'](table.id, ids)
+                    & (Column(table, self.file_id) != Null)
+                    & (Column(table, self.file_id) != '')))
+            for record_id, file_id in cursor:
+                try:
+                    result[record_id] = store_func(file_id, prefix)
+                except (IOError, OSError):
+                    logger.exception(
+                        "failed to retrieve %r from filestore at %r",
+                        file_id, prefix)
 
         for i in values:
-            if i['id'] in res:
+            if i['id'] in result:
                 continue
             value = i[name]
-            if value:
+            if value is not None:
                 value = converter(value)
             else:
                 value = default
-            res[i['id']] = value
-        for i in ids:
-            res.setdefault(i, default)
-        return res
+            result[i['id']] = value
+        return result
+
+    def queue_for_removal(self, Model, name, ids):
+        pool = Pool()
+        Queue = pool.get('ir.filestore.queue')
+        queue = Queue.__table__()
+
+        assert name == self.name
+
+        if not self.file_id:
+            return
+
+        transaction = Transaction()
+        table = Model.__table__()
+        cursor = transaction.connection.cursor()
+
+        prefix = self.store_prefix
+        fileid_col = Column(table, self.file_id)
+        cursor.execute(*queue.insert(
+                [queue.create_date, queue.create_uid,
+                    queue.file_id, queue.model,
+                    queue.prefix, queue.field],
+                table.select(
+                    CurrentTimestamp(), Literal(transaction.user),
+                    fileid_col, Literal(Model.__name__),
+                    Literal(prefix), Literal(name),
+                    where=(SQL_OPERATORS['in'](table.id, ids)
+                        & (fileid_col != Null)))
+                ))
 
     def set(self, Model, name, ids, value, *args):
         transaction = Transaction()
@@ -121,18 +149,23 @@ class Binary(Field):
 
         args = iter((ids, value) + args)
         for ids, value in zip(args, args):
+            self.queue_for_removal(Model, name, ids)
             if self.file_id:
+                if value is not None:
+                    file_name = filestore.set(value, prefix)
+                else:
+                    file_name = None
                 columns = [Column(table, self.file_id), Column(table, name)]
-                values = [
-                    filestore.set(value, prefix) if value else None, None]
+                values = [file_name, None]
             else:
                 columns = [Column(table, name)]
                 values = [self.sql_format(value)]
             cursor.execute(*table.update(columns, values,
-                    where=reduce_ids(table.id, ids)))
+                    where=SQL_OPERATORS['in'](table.id, ids)))
 
     def definition(self, model, language):
         definition = super().definition(model, language)
         definition['searchable'] = False
         definition['filename'] = self.filename
+        definition['filename_ext'] = self.filename_ext
         return definition

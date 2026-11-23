@@ -1,7 +1,6 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
 import heapq
-import json
 import logging
 import re
 from collections import defaultdict
@@ -13,6 +12,7 @@ from sql.conditionals import Case
 from sql.operators import Equal
 
 import trytond.config as config
+from trytond import backend
 from trytond.cache import Cache
 from trytond.i18n import gettext
 from trytond.model import (
@@ -20,11 +20,10 @@ from trytond.model import (
     ModelSQL, ModelView, Unique, Workflow, fields)
 from trytond.model.exceptions import AccessError, ValidationError
 from trytond.pool import Pool
-from trytond.protocols.jsonrpc import JSONDecoder, JSONEncoder
 from trytond.pyson import Bool, Eval, PYSONDecoder
 from trytond.report import Report
 from trytond.rpc import RPC
-from trytond.tools import cursor_dict, grouped_slice, is_instance_method
+from trytond.tools import is_instance_method
 from trytond.tools.string_ import StringMatcher
 from trytond.transaction import Transaction, without_check_access
 from trytond.wizard import (
@@ -167,15 +166,18 @@ class Model(
             and model._on_change_notify_depends}
 
     @classmethod
-    def get_name_items(cls, classes=None):
+    def get_name_items(cls, classes=None, *other_classes):
         "Return a list of couple mapping models to names"
         pool = Pool()
-        key = 'items', str(classes)
+        key = 'items', str(classes), str(other_classes)
         items = cls._get_names_cache.get(key)
         if items is None:
             models = cls.search([])
             items = ((m.name, m.string) for m in models)
+            all_classes = list(other_classes)
             if classes:
+                all_classes.append(classes)
+            if all_classes:
                 def pool_get(model):
                     # During update existing model may not yet be in the pool
                     try:
@@ -184,17 +186,17 @@ class Model(
                         return object
                 items = (
                     (m, n) for m, n in items
-                    if issubclass(pool_get(m), classes))
+                    if all(issubclass(pool_get(m), k) for k in all_classes))
             items = cls._get_names_cache.set(key, list(items))
         return list(items)
 
     @classmethod
-    def get_names(cls, classes=None):
+    def get_names(cls, classes=None, *other_classes):
         "Return a dictionary mapping models to names"
-        key = 'dict', str(classes)
+        key = 'dict', str(classes), str(other_classes)
         dict_ = cls._get_names_cache.get(key)
         if dict_ is None:
-            dict_ = dict(cls.get_name_items())
+            dict_ = dict(cls.get_name_items(classes=classes, *other_classes))
             dict_ = cls._get_names_cache.set(key, dict_)
         return dict_
 
@@ -354,11 +356,13 @@ class ModelField(
         pool = Pool()
         Model = pool.get('ir.model')
 
-        cursor = Transaction().connection.cursor()
+        connection = Transaction().connection
+        cursor_select = connection.cursor(row_factory=backend.dict_row)
+        cursor = connection.cursor()
 
         ir_model_field = cls.__table__()
 
-        cursor.execute(*ir_model_field
+        cursor_select.execute(*ir_model_field
             .select(
                 ir_model_field.id.as_('id'),
                 ir_model_field.name.as_('name'),
@@ -369,7 +373,7 @@ class ModelField(
                 ir_model_field.help.as_('help'),
                 ir_model_field.access.as_('access'),
                 where=ir_model_field.model == model.__name__))
-        model_fields = {f['name']: f for f in cursor_dict(cursor)}
+        model_fields = {f['name']: f for f in cursor_select}
 
         for field_name, field in model._fields.items():
             if hasattr(field, 'get_target'):
@@ -444,23 +448,6 @@ class ModelField(
                     logger.error(
                         "could not delete field: %s.%s", model, field,
                         exc_info=True)
-
-    def get_rec_name(self, name):
-        if self.string:
-            return '%s (%s)' % (self.string, self.name)
-        else:
-            return self.name
-
-    @classmethod
-    def search_rec_name(cls, name, clause):
-        if clause[1].startswith('!') or clause[1].startswith('not '):
-            bool_op = 'AND'
-        else:
-            bool_op = 'OR'
-        return [bool_op,
-            ('string',) + tuple(clause[1:]),
-            ('name',) + tuple(clause[1:]),
-            ]
 
     @classmethod
     def get_name(cls, model, field):
@@ -607,20 +594,18 @@ class ModelAccess(
     @classmethod
     def get_access(cls, models):
         'Return access for models'
-        # root user above constraint
-        if Transaction().user == 0:
-            return defaultdict(lambda: defaultdict(lambda: True))
-
         pool = Pool()
         User = pool.get('res.user')
         cursor = Transaction().connection.cursor()
         model_access = cls.__table__()
 
+        is_administrator = User.is_administrator()
         groups = User.get_groups()
 
         access = {}
         for model in models:
-            maccess = cls._get_access_cache.get((groups, model), default=-1)
+            maccess = cls._get_access_cache.get(
+                (is_administrator, groups, model), default=-1)
             if maccess == -1:
                 break
             access[model] = maccess
@@ -659,38 +644,42 @@ class ModelAccess(
                 access[model] = default_singleton
             else:
                 access[model] = default
-        cursor.execute(*model_access.select(
-                model_access.model,
-                Max(Case(
-                        (model_access.perm_read == Literal(True), 1),
-                        else_=0)),
-                Max(Case(
-                        (model_access.perm_write == Literal(True), 1),
-                        else_=0)),
-                Max(Case(
-                        (model_access.perm_create == Literal(True), 1),
-                        else_=0)),
-                Max(Case(
-                        (model_access.perm_delete == Literal(True), 1),
-                        else_=0)),
-                where=model_access.model.in_(all_models)
-                & (model_access.active == Literal(True))
-                & (model_access.group.in_(groups or [-1])
-                    | (model_access.group == Null)),
-                group_by=model_access.model))
-        raw_access = {
-            m: {'read': r, 'write': w, 'create': c, 'delete': d}
-            for m, r, w, c, d in cursor}
 
-        for model in models:
-            access[model] = {
-                perm: max(
-                    (raw_access[m][perm] for m in model2models[model]
-                        if m in raw_access),
-                    default=access[model][perm])
-                for perm in ['read', 'write', 'create', 'delete']}
+        if not is_administrator:
+            cursor.execute(*model_access.select(
+                    model_access.model,
+                    Max(Case(
+                            (model_access.perm_read == Literal(True), 1),
+                            else_=0)),
+                    Max(Case(
+                            (model_access.perm_write == Literal(True), 1),
+                            else_=0)),
+                    Max(Case(
+                            (model_access.perm_create == Literal(True), 1),
+                            else_=0)),
+                    Max(Case(
+                            (model_access.perm_delete == Literal(True), 1),
+                            else_=0)),
+                    where=model_access.model.in_(all_models)
+                    & (model_access.active == Literal(True))
+                    & (model_access.group.in_(groups or [-1])
+                        | (model_access.group == Null)),
+                    group_by=model_access.model))
+            raw_access = {
+                m: {'read': r, 'write': w, 'create': c, 'delete': d}
+                for m, r, w, c, d in cursor}
+
+            for model in models:
+                access[model] = {
+                    perm: max(
+                        (raw_access[m][perm] for m in model2models[model]
+                            if m in raw_access),
+                        default=access[model][perm])
+                    for perm in ['read', 'write', 'create', 'delete']}
+
         for model, maccess in access.items():
-            cls._get_access_cache.set((groups, model), maccess)
+            cls._get_access_cache.set(
+                (is_administrator, groups, model), maccess)
         return access
 
     @classmethod
@@ -700,9 +689,8 @@ class ModelAccess(
         Model = pool.get(model_name)
         assert mode in ['read', 'write', 'create', 'delete'], \
             'Invalid access mode for security'
-        transaction = Transaction()
-        if (transaction.user == 0
-                or (raise_exception and not transaction.check_access)):
+
+        if not Transaction().check_access:
             return True
 
         User = pool.get('res.user')
@@ -847,20 +835,16 @@ class ModelFieldAccess(
     @classmethod
     def get_access(cls, models):
         'Return fields access for models'
-        # root user above constraint
-        if Transaction().user == 0:
-            return defaultdict(lambda: defaultdict(
-                    lambda: defaultdict(lambda: True)))
-
         pool = Pool()
         User = pool.get('res.user')
         field_access = cls.__table__()
-
+        is_administrator = User.is_administrator()
         groups = User.get_groups()
 
         accesses = {}
         for model in models:
-            maccesses = cls._get_access_cache.get((groups, model))
+            maccesses = cls._get_access_cache.get(
+                (is_administrator, groups, model))
             if maccesses is None:
                 break
             accesses[model] = maccesses
@@ -869,36 +853,38 @@ class ModelFieldAccess(
 
         default = {}
         accesses = dict((m, default) for m in models)
-        cursor = Transaction().connection.cursor()
-        cursor.execute(*field_access.select(
-                field_access.model,
-                field_access.field,
-                Max(Case(
-                        (field_access.perm_read == Literal(True), 1),
-                        else_=0)),
-                Max(Case(
-                        (field_access.perm_write == Literal(True), 1),
-                        else_=0)),
-                Max(Case(
-                        (field_access.perm_create == Literal(True), 1),
-                        else_=0)),
-                Max(Case(
-                        (field_access.perm_delete == Literal(True), 1),
-                        else_=0)),
-                where=field_access.model.in_(models)
-                & (field_access.active == Literal(True))
-                & (field_access.group.in_(groups or [-1])
-                    | (field_access.group == Null)),
-                group_by=[field_access.model, field_access.field]))
-        for m, f, r, w, c, d in cursor:
-            accesses[m][f] = {'read': r, 'write': w, 'create': c, 'delete': d}
+        if not is_administrator:
+            cursor = Transaction().connection.cursor()
+            cursor.execute(*field_access.select(
+                    field_access.model,
+                    field_access.field,
+                    Max(Case(
+                            (field_access.perm_read == Literal(True), 1),
+                            else_=0)),
+                    Max(Case(
+                            (field_access.perm_write == Literal(True), 1),
+                            else_=0)),
+                    Max(Case(
+                            (field_access.perm_create == Literal(True), 1),
+                            else_=0)),
+                    Max(Case(
+                            (field_access.perm_delete == Literal(True), 1),
+                            else_=0)),
+                    where=field_access.model.in_(models)
+                    & (field_access.active == Literal(True))
+                    & (field_access.group.in_(groups or [-1])
+                        | (field_access.group == Null)),
+                    group_by=[field_access.model, field_access.field]))
+            for m, f, r, w, c, d in cursor:
+                accesses[m][f] = {
+                    'read': r, 'write': w, 'create': c, 'delete': d}
         for model, maccesses in accesses.items():
-            cls._get_access_cache.set((groups, model), maccesses)
+            cls._get_access_cache.set(
+                (is_administrator, groups, model), maccesses)
         return accesses
 
     @classmethod
-    def check(cls, model_name, fields, mode='read', raise_exception=True,
-            access=False):
+    def check(cls, model_name, fields, mode='read', raise_exception=True):
         '''
         Check access for fields on model_name.
         '''
@@ -906,11 +892,8 @@ class ModelFieldAccess(
         Model = pool.get(model_name)
         assert mode in ('read', 'write', 'create', 'delete'), \
             'Invalid access mode'
-        transaction = Transaction()
-        if (transaction.user == 0
-                or (raise_exception and not transaction.check_access)):
-            if access:
-                return dict((x, True) for x in fields)
+
+        if not Transaction().check_access:
             return True
 
         User = pool.get('res.user')
@@ -918,8 +901,6 @@ class ModelFieldAccess(
 
         accesses = dict((f, a[mode])
             for f, a in cls.get_access([model_name])[model_name].items())
-        if access:
-            return accesses
         for field in fields:
             if not accesses.get(field, True):
                 if raise_exception:
@@ -1232,14 +1213,14 @@ class ModelButtonClick(DeactivableMixin, ModelSQL, ModelView):
                     } for r in records])
 
         clicks = defaultdict(list)
-        for records in grouped_slice(records):
-            records = cls.search([
-                    ('button', '=', button.id),
-                    ('record_id', 'in', [r.id for r in records]),
-                    ], order=[('record_id', 'ASC')])
-            clicks.update(
-                (k, list(v)) for k, v in groupby(
-                    records, key=lambda c: c.record_id))
+        records = cls.search([
+                ('button', '=', button.id),
+                ('record_id', 'in', records),
+                ],
+            order=[('record_id', 'ASC')])
+        clicks.update(
+            (k, list(v)) for k, v in groupby(
+                records, key=lambda c: c.record_id))
         return clicks
 
     @classmethod
@@ -1247,13 +1228,11 @@ class ModelButtonClick(DeactivableMixin, ModelSQL, ModelView):
     def reset(cls, model, names, records):
         assert all(r.__class__.__name__ == model for r in records)
 
-        clicks = []
-        for records in grouped_slice(records):
-            clicks.extend(cls.search([
-                        ('button.model.name', '=', model),
-                        ('button.name', 'in', names),
-                        ('record_id', 'in', [r.id for r in records]),
-                        ]))
+        clicks = cls.search([
+                ('button.model.name', '=', model),
+                ('button.name', 'in', names),
+                ('record_id', 'in', records),
+                ])
         cls.write(clicks, {
                 'active': False,
                 })
@@ -1377,33 +1356,32 @@ class ModelData(
     def can_modify(cls, records, values):
         for Model, records in groupby(
                 records, key=lambda r: r.__class__):
-            for sub_records in grouped_slice(records):
-                id2record = {r.id: r for r in sub_records}
-                domain = [
-                    ('model', '=', Model.__name__),
-                    ('db_id', 'in', list(id2record.keys())),
-                    ('noupdate', '=', False),
-                    ]
-                if values is not None:
-                    domain.append(('field_names', '!=', None))
-                data = cls.search(domain, order=[])
-                for data in data:
-                    record = id2record[data.db_id]
-                    if values is None:
-                        raise AccessError(
-                            gettext(
-                                'ir.msg_delete_xml_record',
-                                **Model.__names__(record=record)),
-                            gettext('ir.msg_base_config_record'))
-                    else:
-                        for field in values:
-                            if field in data.field_names:
-                                raise AccessError(
-                                    gettext(
-                                        'ir.msg_write_xml_record',
-                                        **cls.__names__(
-                                            field=field, record=record)),
-                                    gettext('ir.msg_base_config_record'))
+            id2record = {r.id: r for r in records}
+            domain = [
+                ('model', '=', Model.__name__),
+                ('db_id', 'in', list(id2record.keys())),
+                ('noupdate', '=', False),
+                ]
+            if values is not None:
+                domain.append(('field_names', '!=', None))
+            data = cls.search(domain, order=[])
+            for data in data:
+                record = id2record[data.db_id]
+                if values is None:
+                    raise AccessError(
+                        gettext(
+                            'ir.msg_delete_xml_record',
+                            **Model.__names__(record=record)),
+                        gettext('ir.msg_base_config_record'))
+                else:
+                    for field in values:
+                        if field in data.field_names:
+                            raise AccessError(
+                                gettext(
+                                    'ir.msg_write_xml_record',
+                                    **cls.__names__(
+                                        field=field, record=record)),
+                                gettext('ir.msg_base_config_record'))
 
     @classmethod
     @without_check_access
@@ -1411,13 +1389,12 @@ class ModelData(
         data = []
         for name, records in groupby(
                 records, key=lambda r: r.__class__.__name__):
-            for sub_records in grouped_slice(records):
-                ids = [r.id for r in sub_records]
-                data += cls.search([
-                        ('model', '=', name),
-                        ('db_id', 'in', ids),
-                        ('noupdate', '=', True),
-                        ], order=[])
+            data += cls.search([
+                    ('model', '=', name),
+                    ('db_id', 'in', records),
+                    ('noupdate', '=', True),
+                    ],
+                order=[])
         cls.write(data, {'db_id': None})
 
     @classmethod
@@ -1441,16 +1418,6 @@ class ModelData(
             raise KeyError(f"Reference to '{module}.{fs_id}' not found")
 
         return cls._get_id_cache.set(key, data.db_id)
-
-    @classmethod
-    def dump_values(cls, values):
-        return json.dumps(
-            sorted(values.items()), cls=JSONEncoder, separators=(',', ':'),
-            sort_keys=True)
-
-    @classmethod
-    def load_values(cls, values):
-        return dict(json.loads(values, object_hook=JSONDecoder()))
 
 
 class Log(ResourceAccessMixin, ModelSQL, ModelView):

@@ -132,14 +132,14 @@
             // Remove previously removed or deleted records
             var record_removed = [];
             for (const record of this.record_removed) {
-                if (!~ids.indexOf(record.id)) {
+                if (!ids.includes(record.id)) {
                     record_removed.push(record);
                 }
             }
             this.record_removed = record_removed;
             var record_deleted = [];
             for (const record of this.record_deleted) {
-                if (!~ids.indexOf(record.id)) {
+                if (!ids.includes(record.id)) {
                     record_deleted.push(record);
                 }
             }
@@ -175,7 +175,7 @@
             if (record.group != this) {
                 record.group = this;
             }
-            if (this.indexOf(record) < 0) {
+            if (!this.includes(record)) {
                 this.splice(position, 0, record);
             }
             for (var record_rm of this.record_removed) {
@@ -211,19 +211,19 @@
             record, remove, force_remove=false, modified=true) {
             if (record.id >= 0) {
                 if (remove) {
-                    if (~this.record_deleted.indexOf(record)) {
+                    if (this.record_deleted.includes(record)) {
                         this.record_deleted.splice(
                                 this.record_deleted.indexOf(record), 1);
                     }
-                    if (!~this.record_removed.indexOf(record)) {
+                    if (!this.record_removed.includes(record)) {
                         this.record_removed.push(record);
                     }
                 } else {
-                    if (~this.record_removed.indexOf(record)) {
+                    if (this.record_removed.includes(record)) {
                         this.record_removed.splice(
                                 this.record_removed.indexOf(record), 1);
                     }
-                    if (!~this.record_deleted.indexOf(record)) {
+                    if (!this.record_deleted.includes(record)) {
                         this.record_deleted.push(record);
                     }
                 }
@@ -291,14 +291,16 @@
                 return record.id;
             });
             return root_group.on_write_ids(record_ids).then(reload_ids => {
-                for (const record of records) {
-                    record.destroy();
-                }
-                reload_ids = reload_ids.filter(e => !~record_ids.indexOf(e));
+                reload_ids = reload_ids.filter(e => !record_ids.includes(e));
                 return this.model.execute('delete', [record_ids], context)
-                .then(() => {
-                    root_group.reload(reload_ids);
-                });
+                    .then(() => {
+                        for (const record of records) {
+                            record.destroy();
+                        }
+                        if (reload_ids.length) {
+                            root_group.reload(reload_ids);
+                        }
+                    });
             });
         };
         Object.defineProperty(array, 'root_group', {
@@ -331,7 +333,7 @@
                 ids = [ids];
             }
             return this.on_write_ids(ids).then(to_reload => {
-                to_reload = to_reload.filter(e => !~ids.indexOf(e));
+                to_reload = to_reload.filter(e => !ids.includes(e));
                 this.root_group.reload(to_reload);
             });
         };
@@ -379,17 +381,19 @@
             if (new_.length && added.length) {
                 this.model.execute('default_get', [added, this.context])
                     .then(values => {
-                        for (const record of new_) {
-                            record.set_default(values, true, false);
+                        if (!jQuery.isEmptyObject(values)) {
+                            for (const record of new_) {
+                                record.set_default(values, true, false);
+                            }
+                            this.record_modified();
                         }
-                        this.record_modified();
                     });
             }
         };
         array.destroy = function() {
             if (this.parent) {
                 var i = this.parent.group.children.indexOf(this);
-                if (~i) {
+                if (i >= 0) {
                     this.parent.group.children.splice(i, 1);
                 }
             }
@@ -454,7 +458,7 @@
             var inversion = new Sao.common.DomainInversion();
             var head = domain[0];
             var tail = domain.slice(1);
-            if (~['AND', 'OR'].indexOf(head)) {
+            if (['AND', 'OR'].includes(head)) {
                 // pass
             } else if (inversion.is_leaf(head)) {
                 var field = head[0];
@@ -718,9 +722,9 @@
             const selection_fields = ['selection', 'multiselection'];
             for (const fname of fnames) {
                 var fdescription = this.model.fields[fname].description;
-                if (~rec_named_fields.indexOf(fdescription.type))
+                if (rec_named_fields.includes(fdescription.type))
                     fnames_to_fetch.push(fname + '.rec_name');
-                else if (~selection_fields.indexOf(fdescription.type) &&
+                else if (selection_fields.includes(fdescription.type) &&
                     ((fdescription.loading || 'lazy') == 'eager')) {
                     fnames_to_fetch.push(fname + ':string');
                 } else if (
@@ -733,7 +737,7 @@
                     }
                 }
             }
-            if (!~fnames.indexOf('rec_name')) {
+            if (!fnames.includes('rec_name')) {
                 fnames_to_fetch.push('rec_name');
             }
             fnames_to_fetch.push('_timestamp');
@@ -773,7 +777,7 @@
                     filter = filter_group;
                 }
                 var idx = group.indexOf(this);
-                if (~idx) {
+                if (idx >= 0) {
                     var length = group.length;
                     var n = 1;
                     while ((Object.keys(id2record).length < limit) &&
@@ -799,7 +803,7 @@
 
             for (fname in this.model.fields) {
                 if ((this.model.fields[fname].description.type == 'binary') &&
-                        ~fnames_to_fetch.indexOf(fname, fnames_to_fetch)) {
+                    fnames_to_fetch.includes(fname)) {
                     context[this.model.name + '.' + fname] = 'size';
                 }
             }
@@ -990,7 +994,7 @@
                                 this.group.parent.id;
                         }
                     }
-                    return this.set_default(values);
+                    return this.set_default(values).then(() => values);
                 });
             }
             return jQuery.when();
@@ -1060,7 +1064,7 @@
         get_on_change_value: function(skip) {
             var value = {};
             for (var key in this.model.fields) {
-                if (skip && ~skip.indexOf(key)) {
+                if (skip && skip.includes(key)) {
                     continue;
                 }
                 if ((this.id >= 0) &&
@@ -1146,7 +1150,7 @@
                     continue;
                 }
                 for (var i = 0; i < field_names.length; i++) {
-                    if (~on_change_with.indexOf(field_names[i])) {
+                    if (on_change_with.includes(field_names[i])) {
                         break;
                     }
                 }
@@ -1258,7 +1262,7 @@
             for (var fname in this.model.fields) {
                 var field = this.model.fields[fname];
                 var autocomplete = field.description.autocomplete || [];
-                if (!~autocomplete.indexOf(fieldname)) {
+                if (!autocomplete.includes(fieldname)) {
                     continue;
                 }
                 this.do_autocomplete(fname);
@@ -1325,17 +1329,19 @@
                 return values[0].rec_name;
             });
         },
-        validate: function(fields, softvalidation, pre_validate) {
+        validate: function(field_names, softvalidation, pre_validate) {
             var result = true;
             for (var fname in this.model.fields) {
                 var field = this.model.fields[fname];
-                if (fields && !~fields.indexOf(fname)) {
+                if (field_names && !field_names.includes(fname)) {
                     continue;
                 }
                 if (!this.get_loaded([fname])) {
                     continue;
                 }
-                if (field.description.readonly) {
+                if (field.description.readonly &&
+                    !((field instanceof Sao.field.One2Many) ||
+                        (field instanceof Sao.field.Many2Many))) {
                     continue;
                 }
                 if ([this.group.exclude_field, this.group.parent_name].includes(fname)) {
@@ -1437,10 +1443,10 @@
             return group;
         },
         get deleted() {
-            return Boolean(~this.group.record_deleted.indexOf(this));
+            return this.group.record_deleted.includes(this);
         },
         get removed() {
-            return Boolean(~this.group.record_removed.indexOf(this));
+            return this.group.record_removed.includes(this);
         },
         get readonly() {
             return (this.deleted ||
@@ -1699,6 +1705,10 @@
                     this.get_state_attrs(record)[state] =
                         this.description[state];
                 }
+                if ((state == 'readonly') &&
+                    !(Object.hasOwn(state_changes, 'editable') ? state_changes.editable : true)) {
+                    this.get_state_attrs(record).readonly = true;
+                }
             }
             if (record.group.readonly ||
                 this.get_state_attrs(record).domain_readonly ||
@@ -1783,7 +1793,7 @@
                     }
                     var domain_readonly = original_domain[0] == 'AND';
                     let setdefault;
-                    if (leftpart.contains('.')) {
+                    if (leftpart.includes('.')) {
                         let localpart = leftpart.split('.').slice(1).join('.');
                         setdefault = localpart == 'id';
                     } else {
@@ -2275,8 +2285,8 @@
                 let field_names = new Set();
                 for (const fieldname of value_fields) {
                     if (!(fieldname in group.model.fields) &&
-                            (!~fieldname.indexOf('.')) &&
-                            (!~fieldname.indexOf(':')) &&
+                            (!fieldname.includes('.')) &&
+                            (!fieldname.includes(':')) &&
                             (!fieldname.startsWith('_'))) {
                         field_names.add(fieldname);
                     }
@@ -2320,7 +2330,7 @@
             if (mode == 'list ids') {
                 var records_to_remove = [];
                 for (const old_record of group) {
-                    if (!~value.indexOf(old_record.id)) {
+                    if (!value.includes(old_record.id)) {
                         records_to_remove.push(old_record);
                     }
                 }
@@ -2384,8 +2394,8 @@
             var to_create = [];
             var to_write = [];
             for (const record2 of group) {
-                if (~record_removed.indexOf(record2) ||
-                        ~record_deleted.indexOf(record2)) {
+                if (record_removed.includes(record2) ||
+                        record_deleted.includes(record2)) {
                     continue;
                 }
                 var values;
@@ -2481,7 +2491,7 @@
                             for (const f of Object.keys(v)) {
                                 if (!(f in fields) &&
                                     (f != 'id') &&
-                                    (!~f.indexOf('.'))) {
+                                    (!f.includes('.'))) {
                                         new_field_names[f] = true;
                                     }
                             }
@@ -2571,10 +2581,7 @@
                         if (record2) {
                             let to_update = Object.fromEntries(
                                 Object.entries(vals).filter(
-                                    ([k, v]) => {
-                                        !Object.prototype.hasOwnProperty.call(
-                                            vals_to_set, k)
-                                    }
+                                    ([k, v]) => !Object.hasOwn(vals_to_set, k)
                                 ));
                             record2.set_on_change(to_update);
                         }
@@ -2619,8 +2626,8 @@
             var record_removed = group.record_removed;
             var record_deleted = group.record_deleted;
             for (const record2 of group) {
-                if (~record_removed.indexOf(record2) ||
-                        ~record_deleted.indexOf(record2))
+                if (record_removed.includes(record2) ||
+                        record_deleted.includes(record2))
                     continue;
                 result.push(record2.id);
             }
@@ -2864,7 +2871,7 @@
             return previous != value;
         },
         get_size: function(record) {
-            var data = record._values[this.name] || 0;
+            var data = record._values[this.name];
             if ((data instanceof Uint8Array) ||
                 (typeof(data) == 'string')) {
                 return data.length;

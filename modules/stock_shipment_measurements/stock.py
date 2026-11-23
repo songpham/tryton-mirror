@@ -13,7 +13,6 @@ from trytond.model import Index, ModelSQL, ModelView, Workflow, fields
 from trytond.modules.company.model import CompanyValueMixin
 from trytond.pool import Pool, PoolMeta
 from trytond.pyson import Bool, Eval, Id
-from trytond.tools import grouped_slice, reduce_ids
 from trytond.transaction import Transaction
 
 
@@ -84,6 +83,14 @@ class Move(metaclass=PoolMeta):
         "Internal Volume", readonly=True,
         help="The volume of the moved product in liter.")
 
+    @classmethod
+    def default_internal_weight(cls):
+        return None
+
+    @classmethod
+    def default_internal_volume(cls):
+        return None
+
     @fields.depends(
         'quantity', 'unit', 'product',
         methods=['on_change_with_internal_quantity'])
@@ -147,6 +154,13 @@ class Move(metaclass=PoolMeta):
             if getattr(self, 'internal_volume', None) != internal_volume:
                 values['internal_volume'] = internal_volume
         return values
+
+    @classmethod
+    def copy(cls, moves, default=None):
+        default = default.copy() if default is not None else {}
+        default.setdefault('internal_weight', cls.default_internal_weight())
+        default.setdefault('internal_volume', cls.default_internal_volume())
+        return super().copy(moves, default=default)
 
     @classmethod
     @ModelView.button
@@ -231,6 +245,14 @@ class MeasurementsMixin(object):
             cls.set_measurements()
 
     @classmethod
+    def default_internal_weight(cls):
+        return None
+
+    @classmethod
+    def default_internal_volume(cls):
+        return None
+
+    @classmethod
     def _measurements_states(cls):
         return []
 
@@ -282,13 +304,9 @@ class MeasurementsMixin(object):
                 where=table.state.in_(states)))
 
         if shipments is not None:
-            where = query.where
-            for sub_shipments in grouped_slice(shipments):
-                query.where = (
-                    where & reduce_ids(table.id, map(int, sub_shipments)))
-                cursor.execute(*query)
-        else:
-            cursor.execute(*query)
+            query.where &= fields.SQL_OPERATORS['in'](
+                table.id, map(int, shipments))
+        cursor.execute(*query)
 
         if shipments:
             cls.write(shipments, {})
@@ -326,17 +344,15 @@ class MeasurementsMixin(object):
 
         weights, volumes = {}, {}
         states = cls._measurements_states()
-        for sub_shipments in grouped_slice(
-                (s for s in shipments
+        query.where = fields.SQL_OPERATORS['in'](
+            table.id, map(int, (s for s in shipments
                     if s.state not in states
                     or s.internal_weight is None
-                    or s.internal_volume is None)):
-            query.where = reduce_ids(
-                table.id, [s.id for s in sub_shipments])
-            cursor.execute(*query)
-            for id_, weight, volume in cursor:
-                weights[id_] = weight
-                volumes[id_] = volume
+                    or s.internal_volume is None)))
+        cursor.execute(*query)
+        for id_, weight, volume in cursor:
+            weights[id_] = weight
+            volumes[id_] = volume
 
         for shipment in shipments:
             if 'weight' in names:
@@ -439,6 +455,13 @@ class MeasurementsMixin(object):
     @classmethod
     def _measurements_location_condition(cls, table, move, location):
         raise NotImplementedError
+
+    @classmethod
+    def copy(cls, records, default=None):
+        default = default.copy() if default is not None else {}
+        default.setdefault('internal_weight', cls.default_internal_weight())
+        default.setdefault('internal_volume', cls.default_internal_volume())
+        return super().copy(records, default=default)
 
 
 def set_measurements(func):

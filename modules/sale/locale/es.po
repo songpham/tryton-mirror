@@ -154,6 +154,10 @@ msgctxt "field:sale.configuration,sale_shipment_method:"
 msgid "Sale Shipment Method"
 msgstr "Método de envío"
 
+msgctxt "field:sale.configuration,sale_wait_shipment:"
+msgid "Sale Wait Shipment"
+msgstr "Crear albarán en Espera"
+
 msgctxt "field:sale.configuration.quotation,sale_quotation_validity:"
 msgid "Sale Quotation Validity"
 msgstr "Validez del presupuesto de venta"
@@ -165,6 +169,10 @@ msgstr "Método de facturación"
 msgctxt "field:sale.configuration.sale_method,sale_shipment_method:"
 msgid "Sale Shipment Method"
 msgstr "Método de envío"
+
+msgctxt "field:sale.configuration.sale_method,sale_wait_shipment:"
+msgid "Sale Wait Shipment"
+msgstr "Crear albarán en Espera"
 
 msgctxt "field:sale.configuration.sequence,company:"
 msgid "Company"
@@ -273,6 +281,14 @@ msgstr "Categoría de UdM del producto"
 msgctxt "field:sale.line,quantity:"
 msgid "Quantity"
 msgstr "Cantidad"
+
+msgctxt "field:sale.line,quantity_to_invoice:"
+msgid "Quantity to Invoice"
+msgstr "Cantidad a facturar"
+
+msgctxt "field:sale.line,quantity_to_ship:"
+msgid "Quantity to Ship"
+msgstr "Cantidad a enviar"
 
 msgctxt "field:sale.line,sale:"
 msgid "Sale"
@@ -638,6 +654,14 @@ msgctxt "field:sale.sale,tax_amount_cache:"
 msgid "Tax Cache"
 msgstr "Impuestos precalculado"
 
+msgctxt "field:sale.sale,to_invoice:"
+msgid "To Invoice"
+msgstr "A facturar"
+
+msgctxt "field:sale.sale,to_ship:"
+msgid "To Ship"
+msgstr "A enviar"
+
 msgctxt "field:sale.sale,total_amount:"
 msgid "Total"
 msgstr "Total"
@@ -753,6 +777,14 @@ msgid ""
 msgstr ""
 "El periodo durante el cual una venta confirmada se puede volver a estado borrador.\n"
 "Solo aplica si la cola de trabajos está activada."
+
+msgctxt "help:sale.configuration,sale_wait_shipment:"
+msgid "Create customer shipments in a waiting state"
+msgstr "Crear los albaranes de cliente en estado en espera"
+
+msgctxt "help:sale.configuration.sale_method,sale_wait_shipment:"
+msgid "Create customer shipments in a waiting state"
+msgstr "Crear los albaranes de cliente en estado en espera"
 
 msgctxt "help:sale.handle.invoice.exception.ask,ignore_invoices:"
 msgid "The selected cancelled invoices will be ignored."
@@ -1558,12 +1590,12 @@ msgid "Manual"
 msgstr "Manual"
 
 msgctxt "selection:sale.sale,invoice_method:"
-msgid "On Order Processed"
-msgstr "Al procesar el pedido"
+msgid "On Fulfillment"
+msgstr "Según el envío"
 
 msgctxt "selection:sale.sale,invoice_method:"
-msgid "On Shipment Sent"
-msgstr "Al enviar"
+msgid "On Order Processed"
+msgstr "Al procesar el pedido"
 
 msgctxt "selection:sale.sale,invoice_state:"
 msgid "Awaiting Payment"

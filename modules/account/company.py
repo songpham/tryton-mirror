@@ -12,7 +12,7 @@ from trytond.model import fields
 from trytond.model.exceptions import AccessError
 from trytond.modules.currency.fields import Monetary
 from trytond.pool import Pool, PoolMeta
-from trytond.tools import grouped_slice, reduce_ids, sqlite_apply_types
+from trytond.tools import sqlite_apply_types
 from trytond.transaction import Transaction
 
 
@@ -65,25 +65,24 @@ class Company(metaclass=PoolMeta):
             else:
                 code = name
                 today_where = Literal(True)
-            for sub_companies in grouped_slice(companies):
-                sub_ids = [p.id for p in sub_companies]
-                company_where = reduce_ids(account.company, sub_ids)
-                query = (line
-                    .join(account,
-                        condition=account.id == line.account)
-                    .join(account_type,
-                        condition=account.type == account_type.id)
-                    .select(account.company.as_('id'), amount.as_(name),
-                        where=(getattr(account_type, code)
-                            & (line.reconciliation == Null)
-                            & company_where
-                            & today_where),
-                        group_by=account.company))
-                if backend.name == 'sqlite':
-                    sqlite_apply_types(query, [None, 'NUMERIC'])
-                cursor.execute(*query)
-                for company_id, value in cursor:
-                    amounts[name][company_id] = value.quantize(exp[company_id])
+            company_where = fields.SQL_OPERATORS['in'](
+                account.company, map(int, companies))
+            query = (line
+                .join(account,
+                    condition=account.id == line.account)
+                .join(account_type,
+                    condition=account.type == account_type.id)
+                .select(account.company.as_('id'), amount.as_(name),
+                    where=(getattr(account_type, code)
+                        & (line.reconciliation == Null)
+                        & company_where
+                        & today_where),
+                    group_by=account.company))
+            if backend.name == 'sqlite':
+                sqlite_apply_types(query, [None, 'NUMERIC'])
+            cursor.execute(*query)
+            for company_id, value in cursor:
+                amounts[name][company_id] = value.quantize(exp[company_id])
         return amounts
 
     @classmethod
@@ -117,10 +116,13 @@ class Company(metaclass=PoolMeta):
         # Need to cast numeric for sqlite
         cast_ = MoveLine.debit.sql_cast
         amount = cast_(Sum(Coalesce(line.debit, 0) - Coalesce(line.credit, 0)))
-        if operator in {'in', 'not in'}:
-            value = [cast_(Literal(Decimal(v or 0))) for v in value]
-        else:
-            value = cast_(Literal(Decimal(value or 0)))
+
+        if backend.name == 'sqlite':
+            if operator in {'in', 'not in'}:
+                value = [cast_(Literal(Decimal(v or 0))) for v in value]
+            else:
+                value = cast_(Literal(Decimal(value or 0)))
+
         query = (line
             .join(account, condition=account.id == line.account)
             .join(account_type, condition=account.type == account_type.id)

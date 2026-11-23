@@ -5,12 +5,14 @@ import datetime as dt
 from functools import wraps
 from random import Random
 
+from sql.conditionals import Coalesce
 from sql.functions import CharLength
 
 from trytond.i18n import gettext, lazy_gettext
 from trytond.model import (
-    ChatMixin, DeactivableMixin, DictSchemaMixin, MatchMixin, ModelSingleton,
-    ModelSQL, ModelStorage, ModelView, Unique, Workflow, dualmethod, fields)
+    ChatMixin, DeactivableMixin, DictSchemaMixin, Index, MatchMixin,
+    ModelSingleton, ModelSQL, ModelStorage, ModelView, Unique, Workflow,
+    dualmethod, fields)
 from trytond.model.exceptions import AccessError, ButtonActionException
 from trytond.modules.company.model import (
     CompanyMultiValueMixin, CompanyValueMixin, employee_field, reset_employee,
@@ -350,6 +352,7 @@ class Inspection(Workflow, ModelSQL, ModelView, ChatMixin):
         }
 
     number = fields.Char("Number", required=True, readonly=True)
+    reference = fields.Char("Reference")
     company = fields.Many2One(
         'company.company', "Company", required=True, states=_states)
     origin = fields.Reference(
@@ -406,7 +409,12 @@ class Inspection(Workflow, ModelSQL, ModelView, ChatMixin):
     @classmethod
     def __setup__(cls):
         cls.number.search_unaccented = False
+        cls.reference.search_unaccented = False
         super().__setup__()
+        t = cls.__table__()
+        cls._sql_indexes.update({
+                Index(t, (Coalesce(t.reference, ''), Index.Similarity())),
+                })
         cls._transitions |= {
             ('pending', 'passed'),
             ('pending', 'failed'),
@@ -511,6 +519,24 @@ class Inspection(Workflow, ModelSQL, ModelView, ChatMixin):
 
         return attributes
 
+    def get_rec_name(self, name):
+        items = [self.number]
+        if self.reference:
+            items.append('[%s]' % self.reference)
+        return ' '.join(items)
+
+    @classmethod
+    def search_rec_name(cls, name, clause):
+        _, operator, value = clause
+        if operator.startswith('!') or operator.startswith('not'):
+            bool_op = 'AND'
+        else:
+            bool_op = 'OR'
+        return [bool_op,
+            ('number', operator, value),
+            ('reference', operator, value),
+            ]
+
     @classmethod
     @ModelView.button
     @Workflow.transition('pending')
@@ -529,14 +555,13 @@ class Inspection(Workflow, ModelSQL, ModelView, ChatMixin):
         cls.write([i for i in inspections if not i.processed_at], {
                 'processed_at': dt.datetime.now(),
                 })
-        to_pass, to_fail = [], []
-        for inspection in inspections:
-            if inspection.check():
-                to_pass.append(inspection)
-            else:
-                to_fail.append(inspection)
-        cls.pass_(to_pass)
-        cls.fail(to_fail)
+        with cls.bulk_func('pass_') as pass_, \
+                cls.bulk_func('fail') as fail:
+            for inspection in inspections:
+                if inspection.check():
+                    pass_.push(inspection)
+                else:
+                    fail.push(inspection)
 
     @classmethod
     @ModelView.button

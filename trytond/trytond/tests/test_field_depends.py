@@ -3,17 +3,12 @@
 
 from trytond.model import ModelView, fields
 from trytond.pyson import Eval, If
-from trytond.tests.test_tryton import (
-    TestCase, activate_module, with_transaction)
+from trytond.tests.test_tryton import DBTestCase, with_transaction
 
 
-class FieldDependsTestCase(TestCase):
+class FieldDependsTestCase(DBTestCase):
     'Test Field Depends'
-
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        activate_module('tests')
+    module = 'tests'
 
     def test_empty_depends(self):
         'Test depends are set if empty'
@@ -273,8 +268,12 @@ class FieldDependsTestCase(TestCase):
             test = fields.Char("Test")
             foo = fields.Function(fields.Char("Foo"), 'on_change_with_foo')
             bar = fields.Char("Bar")
+            baz = fields.Function(fields.Char("Baz"))
 
-            @fields.depends('foo')
+            @fields.depends(
+                'foo',  # with a getter
+                'baz',  # without getter
+                )
             def on_change_test(self):
                 pass
 
@@ -282,7 +281,12 @@ class FieldDependsTestCase(TestCase):
             def on_change_with_foo(self, name=None):
                 pass
 
+            @classmethod
+            def column_baz(cls, tables):
+                t, _ = tables[None]
+                return t.bar
+
         Model.__setup__()
         Model.__post_setup__()
 
-        self.assertEqual(Model.test.on_change, {'foo', 'bar'})
+        self.assertEqual(Model.test.on_change, {'foo', 'bar', 'baz'})

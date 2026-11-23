@@ -82,6 +82,11 @@ msgctxt "field:res.user,actions:"
 msgid "Actions"
 msgstr "Ukrepi"
 
+#, fuzzy
+msgctxt "field:res.user,administrator:"
+msgid "Administrator"
+msgstr "Skrbnik"
+
 msgctxt "field:res.user,applications:"
 msgid "Applications"
 msgstr "Aplikacije"
@@ -236,6 +241,10 @@ msgctxt "help:res.user,actions:"
 msgid "Actions that will be run at login."
 msgstr "Ukrepi, ki se zaženejo ob prijavi."
 
+msgctxt "help:res.user,administrator:"
+msgid "When checked the user has the access rights of all groups."
+msgstr ""
+
 msgctxt "help:res.user,notifications:"
 msgid "Notifications to subscribe to."
 msgstr ""
@@ -265,6 +274,15 @@ msgstr "Ponastavi gesla"
 msgctxt "model:ir.message,text:msg_email_invalid"
 msgid "The email address \"%(email)s\" for \"%(user)s\" is not valid."
 msgstr "E-poštni naslov \"%(email)s\" uporabnika \"%(user)s\" ni veljaven."
+
+#, python-format
+msgctxt "model:ir.message,text:msg_notification_silenced"
+msgid "%(number)s notification silenced."
+msgid_plural "%(number)s notifications silenced."
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
 
 msgctxt "model:ir.message,text:msg_password_email"
 msgid "The password cannot be the same as user's email address."
@@ -305,6 +323,10 @@ msgstr "Geslo za %(login)s"
 msgctxt "model:ir.model.button,help:user_reset_password_button"
 msgid "Send by email a new temporary password to the user"
 msgstr "Pošlji uporabniku novo začasno geslo preko elektronske pošte"
+
+msgctxt "model:ir.model.button,string:notification_mark_read_button"
+msgid "Mark as Read"
+msgstr ""
 
 msgctxt "model:ir.model.button,string:user_application_cancel_button"
 msgid "Cancel"
@@ -437,6 +459,10 @@ msgctxt "report:res.user.email_reset_password:"
 msgid "The password will expire in [1:%(datetime)s]."
 msgstr "Geslo poteče v [1:%(datetime)s]."
 
+msgctxt "selection:res.user.application,application:"
+msgid "REST API"
+msgstr ""
+
 msgctxt "selection:res.user.application,state:"
 msgid "Cancelled"
 msgstr "Preklicano"
@@ -472,10 +498,6 @@ msgstr "Dovoljenja za dostop"
 msgctxt "view:res.user:"
 msgid "Actions"
 msgstr "Ukrepi"
-
-msgctxt "view:res.user:"
-msgid "Group Membership"
-msgstr "Članstvo v skupinah"
 
 msgctxt "view:res.user:"
 msgid "Preferences"

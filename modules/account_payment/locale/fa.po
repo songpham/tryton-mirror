@@ -66,6 +66,11 @@ msgid "Payments"
 msgstr "پرداخت ها"
 
 #, fuzzy
+msgctxt "field:account.move.line.create_direct_debit.start,companies:"
+msgid "Companies"
+msgstr "شرکت"
+
+#, fuzzy
 msgctxt "field:account.move.line.create_direct_debit.start,date:"
 msgid "Date"
 msgstr "تاریخ"
@@ -304,6 +309,10 @@ msgctxt "help:account.move.line,payment_direct_debit:"
 msgid "Check if the line will be paid by direct debit."
 msgstr "تیک بزنید اگر خط با پرداخت مستقیم پرداخت می شود."
 
+msgctxt "help:account.move.line.create_direct_debit.start,companies:"
+msgid "Limit to lines from these companies."
+msgstr ""
+
 msgctxt "help:account.move.line.create_direct_debit.start,date:"
 msgid "Create direct debit for lines due up to this date."
 msgstr ""
@@ -434,9 +443,10 @@ msgctxt "model:ir.action,name:act_payment_group_form"
 msgid "Payment Groups"
 msgstr "گروه های پرداخت"
 
+#, fuzzy
 msgctxt "model:ir.action,name:act_payment_journal_form"
-msgid "Payment Journals"
-msgstr "روزنامه های پرداخت"
+msgid "Journals"
+msgstr "روزنامه ها"
 
 msgctxt "model:ir.action,name:act_process_payments"
 msgid "Process Payments"
@@ -555,6 +565,11 @@ msgstr ""
 "شما نمیتوانید نهاد/سازمان : \"%(party)s\" را حذف کنید در حالی که آنها در "
 "انتظار پرداخت با شرکت: \"%(company)s\" هستند."
 
+#, fuzzy
+msgctxt "model:ir.message,text:msg_invoice_payment_mean_direct_debit"
+msgid "Direct debit"
+msgstr "پرداخت مستقیم"
+
 #, python-format
 msgctxt "model:ir.message,text:msg_move_cancel_payments"
 msgid ""
@@ -596,11 +611,25 @@ msgid ""
 msgstr ""
 
 #, python-format
+msgctxt "model:ir.message,text:msg_pay_line_overpay"
+msgid ""
+"The payment of %(payment_amount)s for lines \"%(names)s\" exceeds the amount"
+" for %(party)s, which is %(amount)s."
+msgstr ""
+
+#, python-format
 msgctxt "model:ir.message,text:msg_payment_delete_draft"
 msgid "To delete payment \"%(payment)s\" you must reset it to draft state."
 msgstr ""
 "برای حذف پرداخت:\"%(payment)s\" شما باید حالت آنرا به پیش نویس تنظیم مجدد "
 "کنید."
+
+#, python-format
+msgctxt "model:ir.message,text:msg_payment_means"
+msgid ""
+"The journal \"%(journal)s\" of payment \"%(payment)s\" is not valid with the"
+" payment means of invoice \"%(invoice)s\"."
+msgstr ""
 
 #, fuzzy, python-format
 msgctxt "model:ir.message,text:msg_payment_overpay"
@@ -731,9 +760,10 @@ msgctxt "model:ir.ui.menu,name:menu_payment_group_form"
 msgid "Payment Groups"
 msgstr "گروه های پرداخت"
 
+#, fuzzy
 msgctxt "model:ir.ui.menu,name:menu_payment_journal_form"
-msgid "Payment Journals"
-msgstr "روزنامه های پرداخت"
+msgid "Journals"
+msgstr "روزنامه ها"
 
 msgctxt "model:ir.ui.menu,name:menu_payments"
 msgid "Payments"

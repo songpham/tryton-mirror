@@ -71,15 +71,15 @@ class Wizard(InfoBar):
                 self.destroy()
                 return
             self.session_id, self.start_state, self.end_state = result
-            self.state = self.start_state
-            self.process()
+            self.process(self.start_state)
         RPCExecute('wizard', action, 'create', callback=callback)
 
-    def process(self):
+    def process(self, state):
         from tryton.action import Action
         if self.__processing or self.__waiting_response:
             return
         self.__processing = True
+        self.update_buttons()
 
         ctx = self.context.copy()
         if self.screen:
@@ -88,6 +88,7 @@ class Wizard(InfoBar):
                 }
         else:
             data = {}
+        current_state, self.state = self.state, state
 
         def callback(result):
             try:
@@ -98,7 +99,9 @@ class Wizard(InfoBar):
                         or not self.screen):
                     self.state = self.end_state
                     self.end()
+                self.state = current_state
                 self.__processing = False
+                self.update_buttons()
                 return
 
             if 'view' in result:
@@ -106,12 +109,13 @@ class Wizard(InfoBar):
                 view = result['view']
                 self.update(view['fields_view'], view['buttons'])
 
-                self.screen.new(default=False)
+                self.screen.new(default=False, display=False)
                 if 'defaults' in view:
                     self.screen.current_record.set_default(view['defaults'])
                 if 'values' in view:
                     self.screen.current_record.set(view['values'])
                 self.update_buttons()
+                self.screen.display()
                 self.screen.set_cursor()
 
                 self.screen_state = view['state']
@@ -140,6 +144,7 @@ class Wizard(InfoBar):
             else:
                 execute_actions()
             self.__processing = False
+            self.update_buttons()
 
         RPCExecute('wizard', self.action, 'execute', self.session_id, data,
             self.state, context=ctx, callback=callback)
@@ -179,8 +184,7 @@ class Wizard(InfoBar):
                 self.screen.invalid_message(), Gtk.MessageType.ERROR)
             return
         self.info_bar_clear()
-        self.state = state
-        self.process()
+        self.process(state)
 
     def _get_button(self, definition):
         button = Button(definition)
@@ -188,6 +192,8 @@ class Wizard(InfoBar):
         response = len(self.states)
         self.response2button[response] = button
         button.show()
+        button.state_set(
+            self.screen.current_record if self.screen else None)
         return button
 
     def record_modified(self):
@@ -195,14 +201,14 @@ class Wizard(InfoBar):
         self.info_bar_refresh()
 
     def update_buttons(self):
-        record = self.screen.current_record
+        record = self.screen.current_record if self.screen else None
         for button in self.states.values():
             button.state_set(record)
+            if self.__processing:
+                button.set_sensitive(False)
 
     def update(self, view, buttons):
         tooltips = common.Tooltips()
-        for button in buttons:
-            self._get_button(button)
 
         if self.screen:
             self.screen.windows.remove(self)
@@ -249,6 +255,9 @@ class Wizard(InfoBar):
 
         self.widget.pack_start(
             self.create_info_bar(), expand=False, fill=True, padding=0)
+
+        for button in buttons:
+            self._get_button(button)
 
 
 class WizardForm(Wizard, TabContent):

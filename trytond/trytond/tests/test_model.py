@@ -5,18 +5,13 @@ from copy import copy
 
 from trytond.model.model import humanize, record
 from trytond.pool import Pool
-from trytond.tests.test_tryton import (
-    TestCase, activate_module, with_transaction)
+from trytond.tests.test_tryton import DBTestCase, TestCase, with_transaction
 from trytond.transaction import Transaction
 
 
-class ModelTestCase(TestCase):
+class ModelTestCase(DBTestCase):
     'Test Model'
-
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        activate_module('tests')
+    module = 'tests'
 
     @with_transaction()
     def test_repr(self):
@@ -335,16 +330,19 @@ class ModelTestCase(TestCase):
         pool = Pool()
         Model = pool.get('test.model')
         FieldAccess = pool.get('ir.model.field.access')
+        User = pool.get('res.user')
 
+        user = User(login='foo')
+        user.save()
         FieldAccess.create([{
                     'model': Model.__name__,
                     'field': 'name',
                     'perm_write': False,
                     }])
 
-        definition = Model.fields_get(['name'])
-
-        self.assertTrue(definition['name']['readonly'])
+        with Transaction().set_user(user.id):
+            definition = Model.fields_get(['name'])
+            self.assertTrue(definition['name']['readonly'])
 
     @with_transaction()
     def test_copy(self):
@@ -502,15 +500,15 @@ class ModelTestCase(TestCase):
                 self.assertEqual(humanize(name), result)
 
 
-class ModelTranslationTestCase(TestCase):
+class ModelTranslationTestCase(DBTestCase):
     "Test Model translation"
+    module = 'tests'
     default_language = 'en'
     other_language = 'fr'
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        activate_module('tests')
         cls.setup_language()
 
     @classmethod
@@ -545,7 +543,6 @@ class ModelTranslationTestCase(TestCase):
                     'lang': self.other_language,
                     'src': "Name",
                     'name': 'test.model,name',
-                    'res_id': -1,
                     'value': "Nom",
                     'type': 'field',
                     }])

@@ -62,7 +62,7 @@ Parse the UBL invoice::
     >>> with file_open(
     ...         'edocument_ubl/tests/UBL-CreditNote-2.1-Example.xml',
     ...         mode='rb') as fp:
-    ...     invoice_id = EInvoice.parse(fp.read(), config.context)
+    ...     invoice_id = EInvoice.parse(fp.read(), {**config.context, 'company': None})
 
     >>> invoice = Invoice(invoice_id)
 
@@ -79,6 +79,11 @@ Parse the UBL invoice::
     ...     Decimal('-1729.00') if cash_rounding else Decimal('-1728.70'))
     >>> invoice.tax_amount
     Decimal('-292.20')
+    >>> assertEqual(invoice.source_untaxed_amount, Decimal('-1436.50'))
+    >>> assertEqual(invoice.source_tax_amount, Decimal('-292.20'))
+    >>> assertEqual(
+    ...     invoice.source_total_amount,
+    ...     Decimal('-1729.00') if cash_rounding else Decimal('-1728.70'))
     >>> len(invoice.lines)
     7
 

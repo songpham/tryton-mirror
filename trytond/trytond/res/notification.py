@@ -2,12 +2,14 @@
 # this repository contains the full copyright notices and license terms.
 
 import json
+import textwrap
 from collections import defaultdict
+from functools import partial
 
-from sql import Literal
 from sql.aggregate import Count
 
 from trytond.bus import Bus
+from trytond.i18n import ngettext
 from trytond.ir.ui.menu import CLIENT_ICONS
 from trytond.model import Index, ModelSQL, ModelView, fields
 from trytond.pool import Pool
@@ -23,42 +25,47 @@ class Notification(
         ModelSQL, ModelView):
     __name__ = 'res.notification'
 
+    _states = {
+        'readonly': Eval('id', -1) >= 0,
+        }
+
     user = fields.Many2One(
         'res.user', "User", required=True, ondelete='CASCADE',
-        states={
-            'readonly': Eval('id', 0) > 0,
-            })
-    label = fields.Char("Label")
-    description = fields.Char("Description")
-    icon = fields.Selection('list_icons', 'Icon', translate=False)
+        states=_states)
+    label = fields.Char("Label", states=_states)
+    description = fields.Char("Description", states=_states)
+    icon = fields.Selection(
+        'list_icons', "Icon", translate=False, states=_states)
     unread = fields.Boolean("Unread")
     model = fields.Char(
         "Model",
         states={
+            'readonly': _states['readonly'],
             'required': Bool(Eval('records')),
             })
     records = fields.Char(
         "Records",
         states={
+            'readonly': _states['readonly'],
             'required': Bool(Eval('model')),
             })
     action = fields.Many2One(
         'ir.action', "Action", ondelete='CASCADE',
         states={
+            'readonly': _states['readonly'],
             'required': Bool(Eval('action_value')),
             })
-    action_value = fields.Char("Action Value")
+    action_value = fields.Char("Action Value", states=_states)
 
     @classmethod
     def __setup__(cls):
         super().__setup__()
-
+        cls._order = [('id', 'DESC')]
         cls.__rpc__.update({
                 'get': RPC(),
                 'get_count': RPC(),
-                'mark_read': RPC(
-                    readonly=False, instantiate=0, check_access=False),
                 })
+        cls._buttons.update(mark_read={})
 
         table = cls.__table__()
         cls._sql_indexes.update({
@@ -80,33 +87,57 @@ class Notification(
         return super().copy(notifications, default=default)
 
     @classmethod
-    def create(cls, vlist):
-        notifications = super().create(vlist)
-
-        notifications_by_user = defaultdict(list)
-        for notification in notifications:
-            notifications_by_user[notification.user.id].append(
-                notification)
-
-        notification = cls.__table__()
+    def on_modification(cls, mode, notifications, field_names=None):
+        pool = Pool()
+        Lang = pool.get('ir.lang')
+        lang = Lang.get()
         cursor = Transaction().connection.cursor()
-        cursor.execute(*notification.select(
-                notification.user, Count(Literal('*')),
-                where=((notification.user.in_(list(notifications_by_user)))
-                    & notification.unread),
-                group_by=[notification.user]))
-        for user, count in cursor.fetchall():
-            messages = [
-                '\n'.join(filter(None, (n.label, n.description)))
-                for n in notifications_by_user[user]]
-            Bus.publish(
-                f'notification:{user}', {
-                    'type': 'user-notification',
-                    'count': count,
-                    'content': messages,
-                    })
+        table = cls.__table__()
 
-        return notifications
+        super().on_modification(mode, notifications, field_names=field_names)
+
+        if (mode in {'create', 'delete'}
+                or (mode == 'write'
+                    and (not field_names or 'unread' in field_names))):
+            notifications_by_user = defaultdict(list)
+            for notification in notifications:
+                notifications_by_user[notification.user.id].append(
+                    notification)
+
+            query = table.select(
+                table.user, Count(),
+                where=(table.user.in_(list(notifications_by_user))
+                    & table.unread),
+                group_by=[table.user])
+            if mode == 'delete':
+                query.where &= ~table.id.in_([n.id for n in notifications])
+
+            cursor.execute(*query)
+            shorten = partial(textwrap.shorten, width=100, placeholder="...")
+            for user, count in cursor:
+                user_notifications = notifications_by_user.pop(user)
+                messages = [
+                    '\n'.join(
+                        map(shorten, filter(None, (n.label, n.description))))
+                    for n in user_notifications[:4]]
+                if len(user_notifications) > 4:
+                    n = len(user_notifications) - 4
+                    messages.append(ngettext(
+                            'res.msg_notification_silenced', n,
+                            number=lang.format_number(n)))
+                Bus.publish(
+                    f'notification:{user}', {
+                        'type': 'user-notification',
+                        'count': count,
+                        'content': messages,
+                        })
+            for user in notifications_by_user:
+                Bus.publish(
+                    f'notification:{user}', {
+                        'type': 'user-notification',
+                        'count': 0,
+                        'content': [],
+                        })
 
     @classmethod
     def list_icons(cls):
@@ -149,13 +180,12 @@ class Notification(
         notification = cls.__table__()
         cursor = Transaction().connection.cursor()
         cursor.execute(*notification.select(
-                Count(Literal('*')),
+                Count(),
                 where=((notification.user == Transaction().user)
                     & notification.unread)))
         return cursor.fetchone()[0]
 
     @classmethod
+    @ModelView.button
     def mark_read(cls, notifications):
-        current_user = Transaction().user
-        notifications = [n for n in notifications if n.user.id == current_user]
         cls.write(notifications, {'unread': False})

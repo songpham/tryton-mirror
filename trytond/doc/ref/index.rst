@@ -14,6 +14,7 @@ Reference of the ``trytond`` API:
    fields
    wizard
    report
+   routing
    pyson
    transaction
    exceptions
@@ -22,9 +23,11 @@ Reference of the ``trytond`` API:
    tools/index
    pool
    rpc
+   protocols/index
    i18n
    sendmail
    filestore
    cache
    bus
+   convert
    tests

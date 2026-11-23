@@ -8,7 +8,7 @@ from itertools import cycle, groupby
 
 from sql import Literal
 from sql.aggregate import Sum
-from sql.conditionals import Case
+from sql.conditionals import Case, Coalesce
 
 from trytond import backend
 from trytond.i18n import gettext
@@ -19,8 +19,7 @@ from trytond.model.exceptions import AccessError
 from trytond.modules.currency.fields import Monetary
 from trytond.pool import Pool
 from trytond.pyson import Bool, Eval, If, PYSONEncoder
-from trytond.tools import (
-    cursor_dict, is_full_text, lstrip_wildcard, sqlite_apply_types)
+from trytond.tools import is_full_text, lstrip_wildcard, sqlite_apply_types
 from trytond.transaction import Transaction
 from trytond.wizard import Button, StateAction, StateView, Wizard
 
@@ -126,8 +125,7 @@ class TaxCode(
         ContextCompanyMixin, ActivePeriodMixin, tree(), ModelSQL, ModelView):
     __name__ = 'account.tax.code'
     _states = {
-        'readonly': (Bool(Eval('template', -1))
-            & ~Eval('template_override', False)),
+        'editable': ~Eval('template', None) | Eval('template_override', False),
         }
     name = fields.Char('Name', required=True, states=_states)
     code = fields.Char('Code', states=_states)
@@ -164,11 +162,12 @@ class TaxCode(
         super().__setup__()
         t = cls.__table__()
         cls._sql_indexes.add(
-            Index(t, (t.code, Index.Similarity())))
+            Index(t, (Coalesce(t.code, ''), Index.Similarity())))
         for date in [cls.start_date, cls.end_date]:
             date.states = {
-                'readonly': (Bool(Eval('template', -1))
-                    & ~Eval('template_override', False)),
+                'editable': (
+                    ~Eval('template', None)
+                    | Eval('template_override', False)),
                 }
         cls._order.insert(0, ('code', 'ASC'))
 
@@ -275,27 +274,26 @@ class TaxCode(
             cls.write(*values)
 
         # Update parent
-        to_save = []
-        childs = cls.search([
-                ('company', '=', company_id),
-                ('parent', '=', None),
-                ])
-        while childs:
-            for child in childs:
-                if child.template:
-                    if not child.template_override:
-                        if child.template.parent:
-                            parent = template2tax_code.get(
-                                child.template.parent.id)
-                        else:
-                            parent = None
-                        old_parent = (
-                            child.parent.id if child.parent else None)
-                        if parent != old_parent:
-                            child.parent = parent
-                            to_save.append(child)
-            childs = sum((c.childs for c in childs), ())
-        cls.save(to_save)
+        with cls.bulk_save() as save:
+            childs = cls.search([
+                    ('company', '=', company_id),
+                    ('parent', '=', None),
+                    ])
+            while childs:
+                for child in childs:
+                    if child.template:
+                        if not child.template_override:
+                            if child.template.parent:
+                                parent = template2tax_code.get(
+                                    child.template.parent.id)
+                            else:
+                                parent = None
+                            old_parent = (
+                                child.parent.id if child.parent else None)
+                            if parent != old_parent:
+                                child.parent = parent
+                                save.push(child)
+                childs = sum((c.childs for c in childs), ())
 
 
 class TaxCodeLineTemplate(ModelSQL, ModelView):
@@ -360,8 +358,7 @@ class TaxCodeLineTemplate(ModelSQL, ModelView):
 class TaxCodeLine(ModelSQL, ModelView):
     __name__ = 'account.tax.code.line'
     _states = {
-        'readonly': (Bool(Eval('template', -1))
-            & ~Eval('template_override', False)),
+        'editable': ~Eval('template', None) | Eval('template_override', False),
         }
 
     code = fields.Many2One('account.tax.code', "Code", required=True)
@@ -747,8 +744,7 @@ class Tax(sequence_ordered(), ModelSQL, ModelView, DeactivableMixin):
            none: tax = none"""
     __name__ = 'account.tax'
     _states = {
-        'readonly': (Bool(Eval('template', -1))
-            & ~Eval('template_override', False)),
+        'editable': ~Eval('template', None) | Eval('template_override', False),
         }
     name = fields.Char('Name', required=True, states=_states)
     description = fields.Char('Description', required=True, translate=True,
@@ -756,7 +752,7 @@ class Tax(sequence_ordered(), ModelSQL, ModelView, DeactivableMixin):
     group = fields.Many2One('account.tax.group', 'Group',
         states={
             'invisible': Bool(Eval('parent')),
-            'readonly': _states['readonly'],
+            'editable': _states['editable'],
             })
     start_date = fields.Date("Start Date", states=_states)
     end_date = fields.Date("End Date", states=_states)
@@ -765,14 +761,14 @@ class Tax(sequence_ordered(), ModelSQL, ModelView, DeactivableMixin):
         states={
             'required': Eval('type') == 'fixed',
             'invisible': Eval('type') != 'fixed',
-            'readonly': _states['readonly'],
+            'editable': _states['editable'],
             }, help='In company\'s currency.')
     rate = fields.Numeric(
         "Rate", digits=(None, 10),
         states={
             'required': Eval('type') == 'percentage',
             'invisible': Eval('type') != 'percentage',
-            'readonly': _states['readonly'],
+            'editable': _states['editable'],
             })
     type = fields.Selection([
         ('percentage', 'Percentage'),
@@ -782,7 +778,7 @@ class Tax(sequence_ordered(), ModelSQL, ModelView, DeactivableMixin):
     update_unit_price = fields.Boolean('Update Unit Price',
         states={
             'invisible': Bool(Eval('parent')),
-            'readonly': _states['readonly'],
+            'editable': _states['editable'],
             },
         help=('If checked then the unit price for further tax computation will'
             ' be modified by this tax.'))
@@ -804,7 +800,7 @@ class Tax(sequence_ordered(), ModelSQL, ModelView, DeactivableMixin):
             ('closed', '!=', True),
             ],
         states={
-            'readonly': _states['readonly'],
+            'editable': _states['editable'],
             'required': Eval('type') != 'none',
             })
     credit_note_account = fields.Many2One('account.account',
@@ -815,7 +811,7 @@ class Tax(sequence_ordered(), ModelSQL, ModelView, DeactivableMixin):
             ('closed', '!=', True),
             ],
         states={
-            'readonly': _states['readonly'],
+            'editable': _states['editable'],
             'required': Eval('type') != 'none',
             })
     legal_notice = fields.Text("Legal Notice", translate=True,
@@ -884,7 +880,7 @@ class Tax(sequence_ordered(), ModelSQL, ModelView, DeactivableMixin):
         Move = pool.get('account.move')
         MoveLine = pool.get('account.move.line')
         TaxLine = pool.get('account.tax.line')
-        cursor = Transaction().connection.cursor()
+        connection = Transaction().connection
 
         move = Move.__table__()
         move_line = MoveLine.__table__()
@@ -943,8 +939,9 @@ class Tax(sequence_ordered(), ModelSQL, ModelView, DeactivableMixin):
         if backend.name == 'sqlite':
             sqlite_apply_types(query, [None] + ['NUMERIC'] * len(names))
 
+        cursor = connection.cursor(row_factory=backend.dict_row)
         cursor.execute(*query)
-        for row in cursor_dict(cursor):
+        for row in cursor:
             for name in names:
                 result[name][row['tax']] = row[name] or 0
         return result
@@ -1020,6 +1017,14 @@ class Tax(sequence_ordered(), ModelSQL, ModelView, DeactivableMixin):
             price_unit += unit_price_variation
         return res
 
+    def _reverse_rate_amount_from_type(self, rate, amount):
+        if self.type == 'percentage':
+            return rate + self.rate, amount
+        elif self.type == 'fixed':
+            return rate, amount + self.amount
+        elif self.type == 'none':
+            return rate, amount
+
     @classmethod
     def _reverse_rate_amount(cls, taxes, date):
         rate, amount = 0, 0
@@ -1029,10 +1034,7 @@ class Tax(sequence_ordered(), ModelSQL, ModelView, DeactivableMixin):
             if not (start_date <= date <= end_date):
                 continue
 
-            if tax.type == 'percentage':
-                rate += tax.rate
-            elif tax.type == 'fixed':
-                amount += tax.amount
+            rate, amount = tax._reverse_rate_amount_from_type(rate, amount)
 
             if tax.childs:
                 child_rate, child_amount = cls._reverse_rate_amount(
@@ -1153,26 +1155,26 @@ class Tax(sequence_ordered(), ModelSQL, ModelView, DeactivableMixin):
             cls.write(*values)
 
         # Update parent
-        to_save = []
-        childs = cls.search([
-                ('company', '=', company_id),
-                ('parent', '=', None),
-                ])
-        while childs:
-            for child in childs:
-                if child.template:
-                    if not child.template_override:
-                        if child.template.parent:
-                            parent = template2tax.get(child.template.parent.id)
-                        else:
-                            parent = None
-                        old_parent = (
-                            child.parent.id if child.parent else None)
-                        if parent != old_parent:
-                            child.parent = parent
-                            to_save.append(child)
-            childs = sum((c.childs for c in childs), ())
-        cls.save(to_save)
+        with cls.bulk_save() as save:
+            childs = cls.search([
+                    ('company', '=', company_id),
+                    ('parent', '=', None),
+                    ])
+            while childs:
+                for child in childs:
+                    if child.template:
+                        if not child.template_override:
+                            if child.template.parent:
+                                parent = template2tax.get(
+                                    child.template.parent.id)
+                            else:
+                                parent = None
+                            old_parent = (
+                                child.parent.id if child.parent else None)
+                            if parent != old_parent:
+                                child.parent = parent
+                                save.push(child)
+                childs = sum((c.childs for c in childs), ())
 
 
 class _TaxLine:
@@ -1496,8 +1498,7 @@ class TaxRuleTemplate(ModelSQL, ModelView):
 class TaxRule(ModelSQL, ModelView):
     __name__ = 'account.tax.rule'
     _states = {
-        'readonly': (Bool(Eval('template', -1))
-            & ~Eval('template_override', False)),
+        'editable': ~Eval('template', None) | Eval('template_override', False),
         }
     name = fields.Char('Name', required=True, states=_states)
     kind = fields.Selection(KINDS, 'Kind', required=True, states=_states)
@@ -1691,8 +1692,7 @@ class TaxRuleLineTemplate(sequence_ordered(), ModelSQL, ModelView):
 class TaxRuleLine(sequence_ordered(), ModelSQL, ModelView, MatchMixin):
     __name__ = 'account.tax.rule.line'
     _states = {
-        'readonly': (Bool(Eval('template', -1))
-            & ~Eval('template_override', False)),
+        'editable': ~Eval('template', None) | Eval('template_override', False),
         }
     rule = fields.Many2One(
         'account.tax.rule', "Rule",

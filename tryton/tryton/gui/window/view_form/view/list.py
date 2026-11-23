@@ -1,5 +1,7 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
+
+import copy
 import csv
 import gettext
 import json
@@ -21,6 +23,7 @@ from tryton.common.popup_menu import populate, popup
 from tryton.config import CONFIG
 from tryton.gui.window import Window
 from tryton.pyson import PYSONDecoder
+from tryton.rpc import clear_cache
 
 from . import View, XMLViewParser
 from .list_gtk.editabletree import EditableTreeView, TreeView
@@ -368,9 +371,11 @@ class TreeXMLViewParser(XMLViewParser):
         self.view.treeview.append_column(column)
 
         if 'optional' in attributes and name != self.exclude_field:
-            self.view.optionals[column.name].append(column)
+            self.view.optionals.append(column)
 
     def _parse_button(self, node, attributes):
+        if self.view.screen.screen_readonly:
+            return
         if int(attributes.get('multiple', 0)):
             button = ButtonMutiple(attributes)
             button.connect('clicked', self.view.button_clicked)
@@ -433,6 +438,17 @@ class TreeXMLViewParser(XMLViewParser):
         column.set_widget(widget)
         column.set_alignment(align)
 
+    def _get_column_occurence(self, column):
+        occurrence = 0
+        for col in self.view.treeview.get_columns():
+            if col.name == column.name:
+                occurrence += 1
+                if col == column:
+                    break
+        else:
+            occurrence += 1
+        return occurrence
+
     def _set_column_width(self, column, attributes):
         default_width = {
             'integer': 80,
@@ -453,12 +469,18 @@ class TreeXMLViewParser(XMLViewParser):
             computed_width = 80
 
         screen = self.view.screen
-        width = screen.tree_column_width[screen.model_name].get(column.name)
-        if not width:
-            if 'width' in attributes:
-                computed_width = width = int(attributes['width'])
-            else:
-                width = computed_width
+        index = self._get_column_occurence(column) - 1
+        widths = screen.tree_column_width[screen.model_name].get(
+            column.name, [])
+        try:
+            width = widths[index]
+        except IndexError:
+            width = None
+        if width or attributes.get('width'):
+            if not width:
+                width = int(attributes['width'])
+        else:
+            width = computed_width
         column.width = width
         column.computed_width = computed_width
         if width > 0:
@@ -479,7 +501,7 @@ class ViewTree(View):
 
     def __init__(self, view_id, screen, xml, children_field):
         self.children_field = children_field
-        self.optionals = defaultdict(list)
+        self.optionals = []
         self.sum_widgets = []
         self.sum_box = Gtk.HBox()
         self.hbuttonbox = Gtk.HButtonBox()
@@ -570,20 +592,19 @@ class ViewTree(View):
             self.treeview.append_column(column)
 
     def optional_menu(self, column):
-        def toggle(menuitem, columns):
+        def toggle(menuitem, column):
             visible = menuitem.get_active()
-            for column in columns:
-                column.set_visible(visible)
+            column.set_visible(visible)
             self.save_optional()
 
         widget = column.get_widget()
         menu = Gtk.Menu()
-        for name, columns in self.optionals.items():
-            visible = any(c.get_visible() for c in columns)
-            title = ' / '.join({c.get_title() for c in columns})
+        for column in self.optionals:
+            visible = column.get_visible()
+            title = column.get_title()
             menuitem = Gtk.CheckMenuItem(label=title)
             menuitem.set_active(visible)
-            menuitem.connect('toggled', toggle, columns)
+            menuitem.connect('toggled', toggle, column)
             menu.add(menuitem)
         if self.optionals:
             menu.add(Gtk.SeparatorMenuItem())
@@ -593,9 +614,9 @@ class ViewTree(View):
         popup(menu, widget)
 
     def save_optional(self):
-        fields = {}
-        for name, columns in self.optionals.items():
-            fields[name] = all(not c.get_visible() for c in columns)
+        fields = defaultdict(list)
+        for column in self.optionals:
+            fields[column.name].append(not column.get_visible())
         try:
             RPCExecute(
                 'model', 'ir.ui.view_tree_optional', 'set_optional',
@@ -612,11 +633,13 @@ class ViewTree(View):
                 self.screen.model_name, screen_width)
         except RPCException:
             pass
+        clear_cache(f'model.{self.screen.model_name}.fields_view_get')
         self.screen.tree_column_width.pop(self.screen.model_name, None)
 
         for col in self.treeview.get_columns():
             if col.name:
                 col.set_fixed_width(col.computed_width)
+                col.width = col.computed_width
 
     def get_column_widget(self, column):
         'Return the widget of the column'
@@ -1114,23 +1137,24 @@ class ViewTree(View):
     def save_width(self):
         if not CONFIG['client.save_tree_width']:
             return
-        fields = {}
+        fields = defaultdict(list)
         last_col = None
         for col in self.treeview.get_columns():
             if col.get_visible():
                 last_col = col
             if not hasattr(col, 'name') or not hasattr(col, 'width'):
                 continue
-            if (col.get_width() != col.width and col.get_visible()
-                    and not col.get_expand()):
-                fields[col.name] = col.get_width()
+            width = col.get_width()
+            if width == col.width or not col.get_visible() or col.get_expand():
+                width = None
+            fields[col.name].append(width)
         # Don't set width for last visible columns
         # as it depends of the screen size
-        if last_col and last_col.name in fields:
-            del fields[last_col.name]
+        if last_col and fields[last_col.name]:
+            fields[last_col.name][-1] = None
 
         screen_width, _ = get_monitor_size()
-        if fields and any(fields.values()):
+        if any(any(w) for w in fields.values()):
             model_name = self.screen.model_name
             try:
                 RPCExecute('model', 'ir.ui.view_tree_width', 'set_width',
@@ -1264,8 +1288,8 @@ class ViewTree(View):
             domain.append(tab_domain)
         domain = simplify(domain)
         decoder = PYSONDecoder(self.screen.context)
-        tree_column_optional = self.screen.tree_column_optional.get(
-            self.view_id, {})
+        tree_column_optional = copy.deepcopy(
+            self.screen.tree_column_optional.get(self.view_id, {}))
         for column in self.treeview.get_columns():
             name = column.name
             if not name:
@@ -1273,8 +1297,8 @@ class ViewTree(View):
             widget = self.get_column_widget(column)
             widget.set_editable()
             if ('optional' in widget.attrs
-                    and column.name in tree_column_optional):
-                optional = tree_column_optional[column.name]
+                    and tree_column_optional.get(column.name)):
+                optional = tree_column_optional[column.name].pop(0)
             else:
                 optional = bool(int(widget.attrs.get('optional', '0')))
             invisible = decoder.decode(widget.attrs.get('tree_invisible', '0'))

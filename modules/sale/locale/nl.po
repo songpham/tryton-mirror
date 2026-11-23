@@ -154,6 +154,11 @@ msgctxt "field:sale.configuration,sale_shipment_method:"
 msgid "Sale Shipment Method"
 msgstr "Verkoop Verzendmethode"
 
+#, fuzzy
+msgctxt "field:sale.configuration,sale_wait_shipment:"
+msgid "Sale Wait Shipment"
+msgstr "Maak zending"
+
 msgctxt "field:sale.configuration.quotation,sale_quotation_validity:"
 msgid "Sale Quotation Validity"
 msgstr "Verkoop offerte termijn"
@@ -165,6 +170,11 @@ msgstr "Verkoopfactuur methode"
 msgctxt "field:sale.configuration.sale_method,sale_shipment_method:"
 msgid "Sale Shipment Method"
 msgstr "Verkoop Verzendmethode"
+
+#, fuzzy
+msgctxt "field:sale.configuration.sale_method,sale_wait_shipment:"
+msgid "Sale Wait Shipment"
+msgstr "Maak zending"
 
 msgctxt "field:sale.configuration.sequence,company:"
 msgid "Company"
@@ -273,6 +283,14 @@ msgstr "Maateenheid categorie product"
 msgctxt "field:sale.line,quantity:"
 msgid "Quantity"
 msgstr "Hoeveelheid"
+
+msgctxt "field:sale.line,quantity_to_invoice:"
+msgid "Quantity to Invoice"
+msgstr "Aantal te factureren"
+
+msgctxt "field:sale.line,quantity_to_ship:"
+msgid "Quantity to Ship"
+msgstr "Hoeveelheid te verzenden"
 
 msgctxt "field:sale.line,sale:"
 msgid "Sale"
@@ -638,6 +656,14 @@ msgctxt "field:sale.sale,tax_amount_cache:"
 msgid "Tax Cache"
 msgstr "Belastingcache"
 
+msgctxt "field:sale.sale,to_invoice:"
+msgid "To Invoice"
+msgstr "Te factureren"
+
+msgctxt "field:sale.sale,to_ship:"
+msgid "To Ship"
+msgstr "Te verzenden"
+
 msgctxt "field:sale.sale,total_amount:"
 msgid "Total"
 msgstr "Totaal"
@@ -753,6 +779,14 @@ msgid ""
 msgstr ""
 "De respijt periode waarin de bevestigde aankoop nog steeds kan worden gereset naar concept.\n"
 "Alleen toegepast als een wachtrij is geactiveerd."
+
+msgctxt "help:sale.configuration,sale_wait_shipment:"
+msgid "Create customer shipments in a waiting state"
+msgstr ""
+
+msgctxt "help:sale.configuration.sale_method,sale_wait_shipment:"
+msgid "Create customer shipments in a waiting state"
+msgstr ""
 
 msgctxt "help:sale.handle.invoice.exception.ask,ignore_invoices:"
 msgid "The selected cancelled invoices will be ignored."
@@ -1559,12 +1593,12 @@ msgid "Manual"
 msgstr "Handmatig"
 
 msgctxt "selection:sale.sale,invoice_method:"
-msgid "On Order Processed"
-msgstr "Na verwerking order"
+msgid "On Fulfillment"
+msgstr "Bij levering"
 
 msgctxt "selection:sale.sale,invoice_method:"
-msgid "On Shipment Sent"
-msgstr "Na verzending"
+msgid "On Order Processed"
+msgstr "Na verwerking order"
 
 msgctxt "selection:sale.sale,invoice_state:"
 msgid "Awaiting Payment"

@@ -50,10 +50,12 @@ def domain_validate(value):
 
 def states_validate(value):
     assert isinstance(value, dict), 'states must be a dict'
-    assert set(value).issubset({'required', 'readonly', 'invisible'}), (
-        'extra keys "%(keys)s" in states' % {
-            'keys': set(value) - {'required', 'readonly', 'invisible'},
-            })
+    assert set(value).issubset(
+        {'required', 'readonly', 'editable', 'invisible'}), (
+            'extra keys "%(keys)s" in states' % {
+                'keys': set(value) - {
+                    'required', 'readonly', 'editable', 'invisible'},
+                })
     for state in value:
         assert isinstance(value[state], (bool, PYSON)), \
             'values of states must be PYSON'
@@ -206,6 +208,16 @@ def on_change_with_result(fieldname):
     return decorator
 
 
+def column_method(func):
+    @wraps(func)
+    def wrapper(self, tables, Model):
+        method = getattr(Model, f'column_{self.name}', None)
+        if method:
+            return method(tables)
+        return func(self, tables, Model)
+    return wrapper
+
+
 def domain_method(func):
     @wraps(func)
     def wrapper(self, domain, tables, Model):
@@ -238,13 +250,50 @@ SQL_OPERATORS = {
     'not like': partial(operators.NotLike, escape='\\'),
     'ilike': partial(operators.ILike, escape='\\'),
     'not ilike': partial(operators.NotILike, escape='\\'),
-    'in': operators.In,
-    'not in': operators.NotIn,
     '<=': operators.LessEqual,
     '>=': operators.GreaterEqual,
     '<': operators.Less,
     '>': operators.Greater,
     }
+
+if backend.Database.has_array():
+    class _EqualArray(operators.Equal):
+        def __invert__(self):
+            return _NotEqualArray(self.left, operators.All(self.right.operand))
+
+    class _NotEqualArray(operators.NotEqual):
+        def __invert__(self):
+            return _EqualArray(self.left, operators.Any(self.right.operand))
+
+    def in_array(left, right):
+        if isinstance(right, (Query, Expression)):
+            return operators.In(left, right)
+        if not isinstance(right, (list, tuple)):
+            right = list(right)
+        return _EqualArray(left, operators.Any(right))
+
+    def not_in_array(left, right):
+        if isinstance(right, (Query, Expression)):
+            return operators.NotIn(left, right)
+        if not isinstance(right, (list, tuple)):
+            right = list(right)
+        return _NotEqualArray(left, operators.All(right))
+
+    SQL_OPERATORS['in'] = in_array
+    SQL_OPERATORS['not in'] = not_in_array
+else:
+    def in_(left, right):
+        if not isinstance(right, (list, tuple, Query, Expression)):
+            right = list(right)
+        return operators.In(left, right)
+
+    def not_in(left, right):
+        if not isinstance(right, (list, tuple, Query, Expression)):
+            right = list(right)
+        return operators.NotIn(left, right)
+
+    SQL_OPERATORS['in'] = in_
+    SQL_OPERATORS['not in'] = not_in
 
 
 class Field(object):
@@ -366,6 +415,7 @@ class Field(object):
     def edition_depends(self):
         depends = get_eval_fields(self.domain)
         depends |= get_eval_fields(self.states.get('readonly'))
+        depends |= get_eval_fields(self.states.get('editable'))
         depends |= get_eval_fields(self.states.get('required'))
         return self.depends | depends
 
@@ -421,7 +471,9 @@ class Field(object):
     def sql_cast(self, expression):
         return Cast(expression, self.sql_type().base)
 
-    def sql_column(self, table):
+    @column_method
+    def sql_column(self, tables, Model):
+        table, _ = tables[None]
         return Column(table, self.name)
 
     def _domain_column(self, operator, column):
@@ -451,7 +503,7 @@ class Field(object):
         table, _ = tables[None]
         name, operator, value = domain
         Operator = SQL_OPERATORS[operator]
-        column = self.sql_column(table)
+        column = self.sql_column(tables, Model)
         column = self._domain_column(operator, column)
         expression = Operator(column, self._domain_value(operator, value))
         if isinstance(expression, operators.In) and not expression.right:
@@ -464,8 +516,7 @@ class Field(object):
     @order_method
     def convert_order(self, name, tables, Model):
         "Return a SQL expression to order"
-        table, _ = tables[None]
-        return [self.sql_column(table)]
+        return [self.sql_column(tables, Model)]
 
     def set_rpc(self, model):
         for attribute, decorator, result in (
@@ -607,7 +658,7 @@ class FieldTranslate(Field):
                         model_data.fs_id) == getattr(model_field, name))
                 .select(
                     msg_trans.id.as_('id'),
-                    Literal(-1).as_('res_id'),
+                    Literal(Null).as_('res_id'),
                     msg_trans.value.as_('value'),
                     Concat(
                         Concat(model_field.model, ','),
@@ -636,14 +687,14 @@ class FieldTranslate(Field):
         if Model.__name__ == 'ir.model':
             name_ = Concat(Concat(table.name, ','), name)
             type_ = 'model'
-            res_id = -1
+            res_id = None
         elif Model.__name__ == 'ir.model.field':
             name_ = Concat(Concat(table.model, ','), table.name)
             if name == 'string':
                 type_ = 'field'
             else:
                 type_ = 'help'
-            res_id = -1
+            res_id = None
         else:
             name_ = '%s,%s' % (Model.__name__, name)
             type_ = 'model'
@@ -680,7 +731,7 @@ class FieldTranslate(Field):
         table, _ = tables[None]
         name, operator, value = domain
         model, join, column = self._get_translation_column(Model, name)
-        column = Coalesce(NullIf(column, ''), self.sql_column(model))
+        column = Coalesce(NullIf(column, ''), Column(model, self.name))
         column = self._domain_column(operator, column)
         Operator = SQL_OPERATORS[operator]
         assert name == self.name
@@ -731,9 +782,9 @@ class FieldTranslate(Field):
         if not self.translate:
             return super().convert_order(name, tables, Model)
         assert name == self.name
-        table, _ = tables[None]
         column = self._get_translation_order(tables, Model, name)
-        return [Coalesce(NullIf(column, ''), self.sql_column(table))]
+        return [
+            Coalesce(NullIf(column, ''), self.sql_column(tables, Model))]
 
     def definition(self, model, language):
         definition = super().definition(model, language)
@@ -758,8 +809,7 @@ class Translated:
                 language = Transaction().language
             read_size = max(1, min(
                     inst._cache.size_limit,
-                    inst._local_cache.size_limit,
-                    inst._transaction.database.IN_MAX))
+                    inst._local_cache.size_limit))
             index = inst._ids.index(inst.id)
             ids = inst._ids[index:index + read_size]
             translations = Translation.get_ids(

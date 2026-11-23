@@ -14,6 +14,12 @@ Stock
 :doc:`Consignment <stock_consignment:index>`
    Manage consignment stock from supplier or at customer warehouse.
 
+:doc:`Conversion <stock_conversion:index>`
+   Transform one product into another.
+
+:doc:`Ethanol <stock_ethanol:index>`
+   Track ethanol in stock.
+
 :doc:`Forecast <stock_forecast:index>`
    Forecast the stock levels.
 

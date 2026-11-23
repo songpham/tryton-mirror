@@ -13,12 +13,12 @@ Imports::
 
     >>> from proteus import Model
     >>> from trytond.modules.account.tests.tools import create_chart, create_fiscalyear
-    >>> from trytond.modules.company.tests.tools import create_company, get_company
+    >>> from trytond.modules.company.tests.tools import create_company
     >>> from trytond.tests.tools import activate_modules
 
     >>> today = dt.date.today()
 
-    >>> FETCH_SLEEP, MAX_SLEEP = 1, 100
+    >>> FETCH_SLEEP, MAX_SLEEP = 1, 600
 
 Activate modules::
 
@@ -45,7 +45,6 @@ Setup fetch events cron::
     >>> cron_fetch_events, = Cron.find([
     ...     ('method', '=', 'account.payment.stripe.account|fetch_events'),
     ...     ])
-    >>> cron_fetch_events.companies.append(get_company())
 
 Create payment journal::
 
@@ -89,7 +88,7 @@ Create fully disputed payment::
     ...     'stripe_token': token.id,
     ...     'stripe_chargeable': True,
     ...     'stripe_payment_intent_id': None,  # Remove intent from checkout
-    ...     }, config.context)
+    ...     }, {**config.context, '_check_access': False})
 
     >>> process_payment = payment.click('process_wizard')
     >>> payment.state
@@ -108,7 +107,7 @@ Create fully disputed payment::
 
 Simulate charge.dispute.created event::
 
-    >>> StripeAccount.webhook([stripe_account], {
+    >>> StripeAccount.webhook([stripe_account], stripe.Event.construct_from({
     ...         'type': 'charge.dispute.created',
     ...         'data': {
     ...             'object': {
@@ -120,7 +119,7 @@ Simulate charge.dispute.created event::
     ...                 'status': 'needs_response',
     ...                 },
     ...             },
-    ...         }, {})
+    ...         }, stripe_account.secret_key), {})
     [True]
     >>> payment.reload()
     >>> payment.state
@@ -132,7 +131,7 @@ Simulate charge.dispute.created event::
 
 Simulate charge.dispute.closed event::
 
-    >>> StripeAccount.webhook([stripe_account], {
+    >>> StripeAccount.webhook([stripe_account], stripe.Event.construct_from({
     ...         'type': 'charge.dispute.closed',
     ...         'data': {
     ...             'object': {
@@ -144,7 +143,7 @@ Simulate charge.dispute.closed event::
     ...                 'status': 'lost',
     ...                 },
     ...             },
-    ...         }, {})
+    ...         }, stripe_account.secret_key), {})
     [True]
     >>> payment.reload()
     >>> payment.state
@@ -183,7 +182,7 @@ Create partial disputed payment::
     ...     'stripe_token': token.id,
     ...     'stripe_chargeable': True,
     ...     'stripe_payment_intent_id': None,  # Remove intent from checkout
-    ...     }, config.context)
+    ...     }, {**config.context, '_check_access': False})
 
     >>> process_payment = payment.click('process_wizard')
     >>> payment.state
@@ -202,7 +201,7 @@ Create partial disputed payment::
 
 Simulate charge.dispute.closed event::
 
-    >>> StripeAccount.webhook([stripe_account], {
+    >>> StripeAccount.webhook([stripe_account], stripe.Event.construct_from({
     ...         'type': 'charge.dispute.closed',
     ...         'data': {
     ...             'object': {
@@ -214,7 +213,7 @@ Simulate charge.dispute.closed event::
     ...                 'status': 'lost',
     ...                 },
     ...             },
-    ...         }, {})
+    ...         }, stripe_account.secret_key), {})
     [True]
     >>> payment.reload()
     >>> payment.state
@@ -255,7 +254,7 @@ Create won disputed payment::
     ...     'stripe_token': token.id,
     ...     'stripe_chargeable': True,
     ...     'stripe_payment_intent_id': None,  # Remove intent from checkout
-    ...     }, config.context)
+    ...     }, {**config.context, '_check_access': False})
 
     >>> process_payment = payment.click('process_wizard')
     >>> payment.state

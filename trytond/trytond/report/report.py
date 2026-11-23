@@ -8,6 +8,7 @@ import mimetypes
 import operator
 import os
 import pathlib
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -148,28 +149,30 @@ class Report(URLMixin, PoolBase):
         User = pool.get('res.user')
         Group = pool.get('res.group')
         ModelAccess = pool.get('ir.model.access')
+        Rule = pool.get('ir.rule')
 
         if Transaction().user == 0:
             return
 
         with check_access():
-            groups = set(User.get_groups())
-            report_groups = ActionReport.get_groups(cls.__name__, action.id)
-            if report_groups and not groups & report_groups:
-                groups = Group.browse(User.get_groups())
-                raise AccessError(
-                    gettext(
-                        'ir.msg_access_report_error',
-                        report=cls.__name__),
-                    gettext(
-                        'ir.msg_context_groups',
-                        groups=', '.join(g.rec_name for g in groups)))
+            if not User.is_administrator():
+                groups = set(User.get_groups())
+                report_groups = ActionReport.get_groups(
+                    cls.__name__, action.id)
+                if report_groups and not groups & report_groups:
+                    groups = Group.browse(User.get_groups())
+                    raise AccessError(
+                        gettext(
+                            'ir.msg_access_report_error',
+                            report=cls.__name__),
+                        gettext(
+                            'ir.msg_context_groups',
+                            groups=', '.join(g.rec_name for g in groups)))
 
+                if model:
+                    ModelAccess.check(model, 'read')
             if model:
-                Model = pool.get(model)
-                ModelAccess.check(model, 'read')
-                # Check read access
-                Model.read(ids, ['id'])
+                Rule.check(model, ids)
 
     @classmethod
     def header_key(cls, record, data):
@@ -414,7 +417,12 @@ class Report(URLMixin, PoolBase):
         if (input_format in {'html', 'xhtml'}
                 and output_format == 'pdf'):
             if weasyprint := _lazy_import('weasyprint'):
-                return output_format, weasyprint.HTML(string=data).write_pdf()
+                return output_format, weasyprint.HTML(
+                    string=data,
+                    url_fetcher=weasyprint.URLFetcher(
+                        allowed_protocols={'http', 'https'},
+                        ),
+                    ).write_pdf()
 
         if (input_format == 'xml'
                 and output_format == 'html'
@@ -429,7 +437,8 @@ class Report(URLMixin, PoolBase):
         directory = tempfile.mkdtemp(prefix='trytond_')
         input_extension = FORMAT2EXT.get(input_format, input_format)
         output_extension = FORMAT2EXT.get(output_format, output_format)
-        path = pathlib.Path(directory, report.report_name)
+        path = pathlib.Path(
+            directory, report.report_name.replace(os.extsep, '_'))
         input_path = path.with_suffix(os.extsep + input_extension)
         output_path = path.with_suffix(os.extsep + output_extension)
         mode = 'w+' if isinstance(data, str) else 'wb+'
@@ -443,21 +452,21 @@ class Report(URLMixin, PoolBase):
                 '--convert-to "%(output_extension)s" '
                 '--outdir "%(directory)s" '
                 '"%(input_path)s"')
-            cmd %= {
-                'directory': directory,
-                'input_format': input_format,
-                'input_extension': input_extension,
-                'input_path': input_path,
-                'output_format': output_format,
-                'output_extension': output_extension,
-                'output_path': output_path,
-                }
+            args = list(map(lambda s: s % {
+                        'directory': directory,
+                        'input_format': input_format,
+                        'input_extension': input_extension,
+                        'input_path': input_path,
+                        'output_format': output_format,
+                        'output_extension': output_extension,
+                        'output_path': output_path,
+                        }, shlex.split(cmd)))
             for count in range(retry, -1, -1):
                 if count != retry:
                     time.sleep(0.02 * (retry - count))
                 try:
-                    subprocess.check_call(cmd, timeout=timeout, shell=True)
-                except subprocess.CalledProcessError:
+                    subprocess.run(args, timeout=timeout, check=True)
+                except (subprocess.SubprocessError, OSError):
                     if count:
                         continue
                     logger.error(

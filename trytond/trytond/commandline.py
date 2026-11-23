@@ -75,6 +75,7 @@ def get_parser():
     parser.add_argument("-v", "--verbose", action='count',
         dest="verbose", default=0, help="increase verbosity")
     parser.add_argument('--dev', dest='dev', action='store_true',
+        default=bool(int(os.getenv('TRYTOND_DEV', 0))),
         help='enable development mode')
 
     logging_config = os.environ.get('TRYTOND_LOGGING_CONFIG')
@@ -149,12 +150,23 @@ def get_parser_admin():
     parser.add_argument("--activate-dependencies", dest="activatedeps",
         action="store_true",
         help="activate missing dependencies of updated modules")
+    parser.add_argument(
+        "--login", default="admin",
+        help="login of the user (default: admin)")
+    parser.add_argument(
+        "--administrator",
+        action=getattr(argparse, 'BooleanOptionalAction', 'store_true'),
+        help="set the user as administrator")
+    parser.add_argument(
+        "--active", default=True,
+        action=getattr(argparse, 'BooleanOptionalAction', 'store_true'),
+        help="activate the user")
     parser.add_argument("--email", dest="email", type=validate_email,
-        help="set the admin email")
+        help="set the user email")
     parser.add_argument("-p", "--password", dest="password",
-        action='store_true', help="set the admin password")
+        action='store_true', help="set the user password")
     parser.add_argument("--reset-password", dest='reset_password',
-        action='store_true', help="reset the admin password")
+        action='store_true', help="reset the user password")
     parser.add_argument("--test-email", dest='test_email', type=validate_email,
         help="send a test email to the specified address")
     parser.add_argument("-m", "--update-modules-list", action="store_true",
@@ -175,7 +187,7 @@ def get_parser_admin():
         help="export module translations to locale folder")
 
     parser.epilog = ('The first time a database is initialized '
-        'or when the password is set, the admin password is read '
+        'or when the password is set, the user password is read '
         'from file defined by TRYTONPASSFILE environment variable '
         'or interactively asked from the user.\n'
         'The config file can be specified in the TRYTOND_CONFIG '
@@ -219,6 +231,15 @@ def get_parser_stat():
     parser = get_base_parser()
     parser.epilog = "To exit press 'q', to inverse sort order press 'r'."
     return parser
+
+
+def set_autocomplete(parser):
+    try:
+        import argcomplete
+    except ImportError:
+        argcomplete = None
+    if argcomplete:
+        argcomplete.autocomplete(parser)
 
 
 def config_log(options):

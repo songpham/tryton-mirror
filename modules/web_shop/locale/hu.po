@@ -61,6 +61,11 @@ msgctxt "field:sale.sale,web_status_url:"
 msgid "Web Status URL"
 msgstr ""
 
+#, fuzzy
+msgctxt "field:sale.sale,web_url:"
+msgid "Web URL"
+msgstr "Webáruházak"
+
 msgctxt "field:web.shop,attributes:"
 msgid "Attributes"
 msgstr "Jellemző értékek"
@@ -112,6 +117,10 @@ msgstr "Termékek"
 
 msgctxt "field:web.shop,products_removed:"
 msgid "Products Removed"
+msgstr ""
+
+msgctxt "field:web.shop,sale_draft_abandon_delay:"
+msgid "Sale Draft Abandon Delay"
 msgstr ""
 
 msgctxt "field:web.shop,sale_price_list:"
@@ -191,6 +200,10 @@ msgctxt "help:sale.sale,web_status_url:"
 msgid "The URL where the customer can check the order's current status."
 msgstr ""
 
+msgctxt "help:sale.sale,web_url:"
+msgid "The URL of the order on the web shop."
+msgstr ""
+
 msgctxt "help:web.shop,attributes:"
 msgid "The list of attributes to publish."
 msgstr ""
@@ -218,6 +231,12 @@ msgstr ""
 
 msgctxt "help:web.shop,products_removed:"
 msgid "The list of products to unpublish."
+msgstr ""
+
+msgctxt "help:web.shop,sale_draft_abandon_delay:"
+msgid ""
+"The time period after which a sale made via the web shop without modification is cancelled.\n"
+"Leave empty to never cancel any draft sales."
 msgstr ""
 
 msgctxt "help:web.shop,sale_price_list:"
@@ -292,6 +311,10 @@ msgstr "Webáruház"
 msgctxt "model:web.shop-stock.location,string:"
 msgid "Web Shop - Stock Location"
 msgstr "Webáruházak"
+
+msgctxt "selection:ir.cron,method:"
+msgid "Cancel Abandoned Sales from Web Shop"
+msgstr ""
 
 msgctxt "view:product.template:"
 msgid "Edit"

@@ -30,7 +30,7 @@ def getter_context(func):
 
 class Function(Field):
 
-    def __init__(self, field, getter, setter=None, searcher=None,
+    def __init__(self, field, getter=None, setter=None, searcher=None,
             getter_with_context=True, loading='lazy'):
         '''
         :param field: The field of the function.
@@ -41,7 +41,7 @@ class Function(Field):
             ``lazy`` or ``eager``.
         '''
         assert isinstance(field, Field)
-        self._field = field
+        self._field = copy.deepcopy(field)
         self._type = field._type
         self.getter = getter
         self.getter_with_context = getter_with_context
@@ -88,19 +88,27 @@ class Function(Field):
         return self._field.sql_format(value)
 
     def sql_type(self):
+        if not self.getter:
+            return self._field.sql_type()
         return None
 
     @domain_method
     def convert_domain(self, domain, tables, Model):
         if self.searcher:
             return getattr(Model, self.searcher)(self.name, domain)
+        elif not self.getter:
+            return self._field.convert_domain(domain, tables, Model)
         raise NotImplementedError(gettext(
                 'ir.msg_search_function_missing',
                 **Model.__names__(self.name)))
 
     @order_method
     def convert_order(self, name, tables, Model):
-        raise NotImplementedError
+        if not self.getter:
+            return self._field.convert_order(name, tables, Model)
+        raise NotImplementedError(gettext(
+                'ir.msg_order_function_missing',
+                **Model.__names__(self.name)))
 
     @getter_context
     @without_check_access
@@ -110,19 +118,28 @@ class Function(Field):
         If the function has ``names`` in the function definition then
         it will call it with a list of name.
         '''
+        if not self.getter:
+            def get_values(name):
+                return {r['id']: r[name] for r in values}
+            if isinstance(name, list):
+                names = name
+                return {name: get_values(name) for name in names}
+            else:
+                return get_values(name)
+
         method = getattr(Model, self.getter)
         instance_method = is_instance_method(Model, self.getter)
         multiple = self.getter_multiple(method)
 
         records = Model.browse(ids)
-        for record, value in zip(records, values):
-            assert record.id == value['id']
+        for id, value in zip(records.ids, values):
+            assert id == value['id']
             for fname, val in value.items():
                 field = Model._fields.get(fname)
                 if field and field._type not in {
                         'many2one', 'reference',
                         'one2many', 'many2many', 'one2one'}:
-                    record._local_cache[record.id][fname] = val
+                    records._local_cache[id][fname] = val
 
         def call(name):
             if not instance_method:
@@ -223,10 +240,14 @@ class Function(Field):
 
     def searchable(self, model):
         return super().searchable(model) and (
-            bool(self.searcher) or hasattr(model, f'domain_{self.name}'))
+            bool(self.searcher)
+            or hasattr(model, f'domain_{self.name}')
+            or hasattr(model, f'column_{self.name}'))
 
     def sortable(self, model):
-        return super().sortable(model) and hasattr(model, f'order_{self.name}')
+        return super().sortable(model) and (
+            hasattr(model, f'order_{self.name}')
+            or hasattr(model, f'column_{self.name}'))
 
     def getter_multiple(self, method):
         "Returns True if getter function accepts multiple fields"

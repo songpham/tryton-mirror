@@ -10,7 +10,7 @@ Imports::
     >>> import stripe
 
     >>> from proteus import Model
-    >>> from trytond.modules.company.tests.tools import create_company, get_company
+    >>> from trytond.modules.company.tests.tools import create_company
     >>> from trytond.tests.tools import activate_modules, assertEqual
 
     >>> today = dt.date.today()
@@ -19,14 +19,9 @@ Activate modules::
 
     >>> config = activate_modules('account_payment_stripe', create_company)
 
-    >>> Company = Model.get('company.company')
     >>> Cron = Model.get('ir.cron')
     >>> StripeAccount = Model.get('account.payment.stripe.account')
     >>> StripeCustomer = Model.get('account.payment.stripe.customer')
-
-Get company::
-
-    >>> company = get_company()
 
 Create Stripe account::
 
@@ -41,8 +36,6 @@ Setup cron::
     >>> cron_customer_create, = Cron.find([
     ...     ('method', '=', 'account.payment.stripe.customer|stripe_create'),
     ...     ])
-    >>> cron_customer_create.companies.append(Company(company.id))
-    >>> cron_customer_create.save()
 
 Create parties::
 
@@ -68,7 +61,8 @@ Create a customer::
     ...         },
     ...     )
     >>> StripeCustomer.write(
-    ...     [stripe_customer1.id], {'stripe_token': token.id}, config.context)
+    ...     [stripe_customer1.id], {'stripe_token': token.id},
+    ...     {**config.context, '_check_access': False})
 
 Run cron::
 
@@ -93,7 +87,8 @@ Create a second customer with same card::
     ...         },
     ...     )
     >>> StripeCustomer.write(
-    ...     [stripe_customer2.id], {'stripe_token': token.id}, config.context)
+    ...     [stripe_customer2.id], {'stripe_token': token.id},
+    ...     {**config.context, '_check_access': False})
 
 Run cron::
 
